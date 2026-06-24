@@ -71,9 +71,10 @@ README.md            public overview and development notes
 .claude/skills       symlink to .agents/skills for claude compatibility
 bin/                 helper scripts, committed, including fm-fleet-sync.sh for clean default-branch refreshes and gone-branch pruning, and fm-update.sh for fast-forward-only self-updates; read each script's header before first use
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate
-config/identity      this instance's identity: name= and role= lines; LOCAL, gitignored;
+config/identity      this instance's identity: name=, role=, and parent= lines; LOCAL, gitignored;
                      read at bootstrap before captain.md; written by fm-home-seed.sh for
-                     secondmates, set manually for Keel
+                     secondmates, set manually for Keel; sourced by fm-identity-lib.sh to
+                     derive worker labels and supervision-chain context in briefs
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
   captain.md         captain's curated personal preferences and working style - approval posture, communication style, release habits; LOCAL, gitignored; compact rewrite-and-prune counterpart to shared AGENTS.md; canonical harness-portable home, even if harness memory mirrors it as a recall cache
@@ -101,7 +102,7 @@ Each task gets its OWN herdr tab inside the domain/project workspace; that tab a
 
 ## 3. Bootstrap (run at every session start)
 
-Read `config/identity` if present to learn this instance's own name and role (key=value format, e.g. `name=Keel`).
+Read `config/identity` if present to learn this instance's own name, role, and parent in the supervision chain (key=value format, e.g. `name=Keel`, `role=Main firstmate crew supervisor`, `parent=captain`).
 Then self-register in herdr so the pane is addressable by name for the session:
 
   herdr agent rename $(herdr pane current) <name>

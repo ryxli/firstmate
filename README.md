@@ -38,7 +38,7 @@ There is no app to install; the whole orchestrator is an `AGENTS.md` file that a
   Watch any of them work, or type into their window to intervene; the first mate reconciles.
 - **Persistent domain supervisors** - route natural-language scopes through `data/secondmates.md` when a domain deserves its own long-lived supervisor.
   Each secondmate has a separate `FM_HOME`, local state, local projects, and its own session lock, while the main first mate still supervises it like any other direct report.
-- **Guarded by construction** - the first mate is read-only over your projects except for clean local default-branch refreshes, safe pruning of local branches whose remote is gone, and approved `local-only` fast-forward merges; crewmates work in disposable herdr-managed git worktrees.
+- **Guarded by construction** - the first mate is read-only over your projects except for clean local default-branch refreshes, safe pruning of local branches whose remote is gone, and approved `local-only` fast-forward merges; crewmates work in disposable git worktrees (`git worktree add`), each placed as its own named tab in a per-project herdr workspace.
   Ship tasks follow each project's delivery mode, and scout tasks produce local reports without pushing anything.
 
 This is not an agent harness. This is not a skill. This is not a CLI.
@@ -102,12 +102,12 @@ firstmate works from any terminal - outside tmux, crewmates land in a detached `
  └──┬──────────────┬───────────────┬───┘
     │ tmux send-keys / status files │
     ▼              ▼               ▼
- ┌────────┐   ┌────────┐      ┌────────┐
- │fm-task1│   │fm-task2│  ... │fm-taskN│   tmux windows you can watch
- │crewmate│   │crewmate│      │crewmate│   one autonomous agent each
- └───┬────┘   └───┬────┘      └───┬────┘
-     ▼            ▼               ▼
-  herdr workspace or isolated secondmate home
+ ┌──────────────┐   ┌──────────────┐      ┌──────────────┐
+ │ keel/fix-x   │   │ keel/add-y   │  ... │ harbour/z    │   herdr tabs you can watch
+ │ crewmate     │   │ crewmate     │      │ secondmate   │   one autonomous agent each
+ └───┬──────────┘   └───┬──────────┘      └───┬──────────┘
+     ▼                  ▼                      ▼
+  per-project herdr workspace  /  isolated secondmate home
      │
      ├─ ship: project mode ► PR/local merge ► teardown
      │
@@ -120,7 +120,7 @@ firstmate works from any terminal - outside tmux, crewmates land in a detached `
   A pull-based guard (`bin/fm-guard.sh`) warns through supervision tool output if tasks are in flight and that watcher stops running or queued wakes are waiting to be drained.
   A presence-gated sub-supervisor (`bin/fm-supervise-daemon.sh`) extends this for walk-away supervision: the `/afk` skill activates it, after which it self-handles routine wakes in bash and escalates only captain-relevant events as one batched, single-line digest (prefixed with an in-band sentinel marker so firstmate can tell daemon injections apart from real messages).
   Its injection path shares `bin/fm-herdr-lib.sh` with `fm-send.sh`, so dim-ghost-aware and border-aware composer detection plus verified submit retry stay consistent; stalled escalation delivery raises `state/.subsuper-inject-wedged` after `FM_MAX_DEFER_SECS` instead of silently deferring forever.
-- **Worktrees, not branches in your checkout** - crewmates never touch your clone; herdr creates isolated git worktrees so parallel tasks on one repo cannot collide.
+- **Worktrees, not branches in your checkout** - crewmates never touch your clone; plain `git worktree add` creates an isolated checkout per task so parallel tasks on one repo cannot collide.
 - **Two task shapes** - ship tasks change projects and ship by project mode (`no-mistakes`, `direct-PR`, or `local-only`); scout tasks investigate, plan, reproduce bugs, or audit, then leave a report at `data/<id>/report.md` and never push.
 - **Optional secondmates** - `data/secondmates.md` records persistent domain supervisors with natural-language scopes, project clone lists, and home paths.
   `fm-home-seed.sh` provisions the isolated home, clones the listed PR-based projects into it, initializes newly cloned `no-mistakes` projects, copies the charter to `data/charter.md`, and `fm-spawn.sh --secondmate` launches it through the same herdr and status-file path as any direct report.
@@ -166,6 +166,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-wake-drain.sh`       | Atomically drain queued watcher wakes before handling supervision work                                              |
 | `fm-send.sh`             | Send one verified literal line (or `--key Escape`) to a crewmate window; exits non-zero when Enter is positively swallowed |
 | `fm-herdr-lib.sh`        | Shared herdr pane primitives for busy detection, dim-ghost-aware and border-aware composer detection, and verified submit retry |
+| `fm-identity-lib.sh`     | Sourced library: derives supervisor name/role/parent, worker tab labels, and task slugs from `config/identity` for consistent naming across spawn and brief scaffolding |
 | `fm-peek.sh`             | Print a bounded tail of a crewmate pane                                                                             |
 | `fm-pr-check.sh`         | Record a PR-ready task and arm the watcher's merge poll                                                             |
 | `fm-promote.sh`          | Promote a scout task in place so it becomes a protected ship task                                                   |
@@ -190,7 +191,7 @@ If `herdr worktree remove` fails during teardown, firstmate leaves the route and
 Secondmate routes cover `no-mistakes` and `direct-PR` projects; `local-only` projects remain main-firstmate work.
 For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home and refuses to mutate a preexisting clone that is not already initialized.
 After creating a secondmate, move existing main-backlog items that you have judged in-scope with `fm-backlog-handoff.sh <secondmate-id> <item-key>...`; it is idempotent and refuses in-flight items or non-secondmate homes.
-Set `FM_SECONDMATE_CHARTER` to seed from inline charter text when no filled charter brief exists; set `FM_SECONDMATE_SCOPE` when the routing scope should differ from the charter text; set `FM_SECONDMATE_NAME` to assign a human-readable name that is written to `config/identity` in the secondmate home and used to rename the herdr workspace and agent at spawn time.
+Set `FM_SECONDMATE_CHARTER` to seed from inline charter text when no filled charter brief exists; set `FM_SECONDMATE_SCOPE` when the routing scope should differ from the charter text; set `FM_SECONDMATE_NAME` to assign a human-readable name that is written to `config/identity` in the secondmate home and used as the herdr tab/agent label at spawn time.
 `FM_HOME` selects the operational home for one firstmate instance.
 When it is unset, the repo root is the home; when it is set, scripts still run from this repo's `bin/`, but `state/`, `data/`, `config/`, and `projects/` come from `$FM_HOME`.
 Harness support is a table in section 4: claude, codex, opencode, and pi are all empirically verified; new harnesses get verified through a supervised trial task before joining the table.
@@ -212,6 +213,10 @@ FM_BUSY_REGEX='esc (to )?interrupt|Working\.\.\.'   # busy-pane signatures, shar
 FM_COMPOSER_IDLE_RE=    # optional empty-composer regex, applied after dim-ghost and border stripping
 FM_SEND_RETRIES=3       # fm-send Enter-retry attempts after typing the line once
 FM_SEND_SLEEP=0.4       # seconds between fm-send submit checks
+# spawn placement (bin/fm-spawn.sh)
+FM_SHIP_WORKSPACE_LABEL=ship   # herdr workspace label for the shared "ship" workspace where secondmates land
+FM_TASK_LABEL=               # per-task worker label override (default: <supervisor>/<task-slug>)
+FM_TASK_DOMAIN=              # per-task domain override for workspace resolution (default: project name)
 # sub-supervisor (bin/fm-supervise-daemon.sh); presence-gated via /afk
 FM_SUPERVISOR_TARGET=firstmate:0   # supervisor tmux target (override; auto-discovers from $TMUX_PANE)
 FM_INJECT_SKIP=heartbeat           # |-prefixes force-self-handled bypassing classification; empty disables
