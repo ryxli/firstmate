@@ -14,13 +14,13 @@
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode.
 #
-# Worktrees are created with `git worktree add` at $FM_WORKTREE_BASE/<id>
-# (default: $FM_HOME/worktrees/<id>). herdr agent start launches the crewmate
-# directly in the worktree directory. herdr tracks agent status natively, so
-# no per-harness turn-end hook files are installed.
+# Worktrees are created with `herdr worktree create` at $FM_WORKTREE_BASE/<id>
+# (default: $FM_HOME/worktrees/<id>), giving each crewmate its own herdr workspace.
+# herdr agent start --workspace <id> launches the crewmate into that workspace.
+# herdr tracks agent status natively, so no per-harness turn-end hook files are installed.
 #
 # On success prints:
-#   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> worktree=<path>
+#   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> workspace_id=<id> worktree=<path>
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -264,17 +264,22 @@ else
 fi
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
-# Create a git worktree for ship/scout tasks.
+# Create a herdr-managed worktree for ship/scout tasks.
 WTBASE="${FM_WORKTREE_BASE:-$FM_HOME/worktrees}"
+WORKSPACE_ID=
 if [ "$KIND" != secondmate ]; then
   mkdir -p "$WTBASE"
   WT="$WTBASE/$ID"
   if [ -d "$WT" ]; then
     echo "error: worktree $WT already exists" >&2; exit 1
   fi
-  git -C "$PROJ_ABS" worktree add -b "fm/$ID" "$WT" HEAD 2>/dev/null \
-    || git -C "$PROJ_ABS" worktree add "$WT" HEAD 2>/dev/null \
-    || { echo "error: git worktree add failed for $PROJ_ABS -> $WT" >&2; exit 1; }
+  _create_json=$(herdr worktree create --cwd "$PROJ_ABS" --branch "fm/$ID" --path "$WT" --no-focus --json 2>&1) || {
+    echo "error: herdr worktree create failed for $PROJ_ABS -> $WT" >&2
+    echo "$_create_json" >&2
+    exit 1
+  }
+  WORKSPACE_ID=$(printf '%s' "$_create_json" | grep -o '"workspace_id":"[^"]*"' | head -1 | sed 's/"workspace_id":"//;s/"//')
+  [ -n "$WORKSPACE_ID" ] || { echo "error: herdr worktree create did not return a workspace_id" >&2; exit 1; }
 fi
 
 # Per-project delivery mode + yolo flag.
@@ -300,13 +305,20 @@ if [ "$KIND" = secondmate ]; then
 fi
 
 # Launch the agent via herdr. The agent name is "fm-<id>" so it is uniquely
-# addressable by name. The worktree (or secondmate home) is the --cwd.
+# addressable by name. Ship/scout tasks land in their own herdr workspace (--workspace).
 # herdr agent start outputs JSON with pane_id in the result.
 AGENT_NAME="fm-$ID"
-LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" --no-focus -- sh -c "$LAUNCH_CMD" 2>&1) || {
-  # Clean up the worktree we just created before failing.
-  if [ "$KIND" != secondmate ] && [ -d "$WT" ]; then
-    git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+if [ -n "$WORKSPACE_ID" ]; then
+  LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" --workspace "$WORKSPACE_ID" --no-focus -- sh -c "$LAUNCH_CMD" 2>&1)
+else
+  LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" --no-focus -- sh -c "$LAUNCH_CMD" 2>&1)
+fi || {
+  if [ "$KIND" != secondmate ]; then
+    if [ -n "$WORKSPACE_ID" ]; then
+      herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || rm -rf "$WT"
+    elif [ -d "$WT" ]; then
+      git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+    fi
   fi
   echo "error: herdr agent start failed for $ID" >&2
   echo "$LAUNCH_JSON" >&2
@@ -315,8 +327,12 @@ LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" --no-focus -- sh -c "$
 
 PANE=$(printf '%s\n' "$LAUNCH_JSON" | grep -o '"pane_id":"[^"]*"' | cut -d'"' -f4 | head -1 || true)
 [ -n "$PANE" ] || {
-  if [ "$KIND" != secondmate ] && [ -d "$WT" ]; then
-    git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+  if [ "$KIND" != secondmate ]; then
+    if [ -n "$WORKSPACE_ID" ]; then
+      herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || rm -rf "$WT"
+    elif [ -d "$WT" ]; then
+      git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+    fi
   fi
   echo "error: herdr agent start did not return a pane_id for $ID" >&2
   echo "$LAUNCH_JSON" >&2
@@ -332,10 +348,12 @@ mkdir -p "$STATE"
   echo "kind=$KIND"
   echo "mode=$MODE"
   echo "yolo=$YOLO"
+  [ -z "$WORKSPACE_ID" ] || echo "workspace_id=$WORKSPACE_ID"
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
   fi
 } > "$STATE/$ID.meta"
 
-echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO pane=$PANE worktree=$WT"
+_ws_suffix=${WORKSPACE_ID:+ workspace_id=$WORKSPACE_ID}
+echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO pane=$PANE${_ws_suffix} worktree=$WT"

@@ -43,6 +43,7 @@ PANE=$(grep '^pane=' "$META" | cut -d= -f2-)
 PROJ=$(grep '^project=' "$META" | cut -d= -f2-)
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
+WORKSPACE_ID=$(grep '^workspace_id=' "$META" | cut -d= -f2- || true)
 
 KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
 [ -n "$KIND" ] || KIND=ship
@@ -368,8 +369,13 @@ cleanup_firstmate_home_children() {
         remove_firstmate_home "$child_home" "child firstmate home" "$child_id"
       fi
     elif [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
+      local child_workspace_id
+      child_workspace_id=$(meta_value "$child_meta" workspace_id)
       validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
-      if [ -n "$child_proj" ] && [ -d "$child_proj" ]; then
+      if [ -n "$child_workspace_id" ]; then
+        herdr worktree remove --workspace "$child_workspace_id" --force 2>/dev/null || true
+        [ -n "$child_proj" ] && [ -d "$child_proj" ] && git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
+      elif [ -n "$child_proj" ] && [ -d "$child_proj" ]; then
         git -C "$child_proj" worktree remove --force "$child_wt" 2>/dev/null || safe_rm_rf_child_worktree "$child_wt" "$child_proj"
         git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
       else
@@ -457,16 +463,24 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   fi
 fi
 
-# Close the herdr agent pane (kills the process inside it).
-[ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
+# For new-style crewmates (workspace_id present): herdr worktree remove closes the
+# workspace and prunes the git worktree atomically. For old-style or secondmate:
+# close the pane explicitly first, then handle the worktree separately.
+if [ -z "$WORKSPACE_ID" ] || [ "$KIND" = secondmate ]; then
+  [ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
+fi
 
-# Remove the git worktree and its branch for ship/scout tasks.
-if [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
-  if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
-    git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
-    git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
-  else
-    rm -rf "$WT"
+if [ "$KIND" != secondmate ]; then
+  if [ -n "$WORKSPACE_ID" ]; then
+    herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || true
+    [ -n "$PROJ" ] && [ -d "$PROJ" ] && git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
+  elif [ -d "$WT" ]; then
+    if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
+      git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+      git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
+    else
+      rm -rf "$WT"
+    fi
   fi
 fi
 if [ "$KIND" = secondmate ]; then
