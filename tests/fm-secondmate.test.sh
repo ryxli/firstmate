@@ -491,7 +491,7 @@ test_home_seed_warns_when_herdr_workspace_remove_fails() {
 }
 
 test_home_seed_does_not_remove_herdr_workspace_for_unsafe_home() {
-  local home home_abs sm_base_eq sm_base_inside fakebin log err
+  local home sm_base_eq sm_base_inside fakebin log err
   # Case 1: auto_path equals FM_HOME (sm_base set so fm-sm-dash = FM_HOME).
   # FM_HOME must end with /fm-sm-dash for auto_path to equal it.
   mkdir -p "$TMP_ROOT/dash-active-sm-base/fm-sm-dash/projects" \
