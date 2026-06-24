@@ -485,10 +485,12 @@ fi
 [ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
 
 if [ "$KIND" != secondmate ]; then
-  # New-style crewmates record workspace_id: ask herdr to close the workspace
-  # and prune the git worktree. That can be partial (the workspace has non-agent
-  # panes, or the agent still holds the dir as cwd), so the directory removal
-  # below is the single backstop for both new-style and old-style tasks.
+  # Tasks spawned before the shared-workspace refactor record workspace_id= in
+  # meta; for those, ask herdr to close the workspace and prune the git worktree
+  # (though that can be partial, so the directory removal below is still the
+  # backstop). Tasks spawned after the refactor record workspace= (label),
+  # domain=, and worker= but deliberately omit workspace_id, so WORKSPACE_ID is
+  # empty for them and the plain git worktree remove below is the normal cleanup.
   [ -n "$WORKSPACE_ID" ] && herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || true
   if [ -d "$WT" ]; then
     if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then

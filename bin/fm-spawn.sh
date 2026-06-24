@@ -242,13 +242,9 @@ herdr_resolve_workspace() {
 
   wsid=$(herdr_workspace_id_for_label "$label")
   if [ -z "$wsid" ]; then
-    if create_json=$(herdr workspace create --label "$label" --cwd "$cwd" --no-focus 2>&1); then
-      wsid=$(printf '%s' "$create_json" | herdr_json_get result workspace workspace_id)
-    else
-      # Create failed; a concurrent or external spawn may have won the label.
-      create_err=$create_json
-      wsid=$(herdr_workspace_id_for_label "$label")
-    fi
+    create_json=$(herdr workspace create --label "$label" --cwd "$cwd" --no-focus 2>&1) || create_err=$create_json
+    wsid=$(printf '%s' "$create_json" | herdr_json_get result workspace workspace_id)
+    [ -n "$wsid" ] || wsid=$(herdr_workspace_id_for_label "$label")
   fi
 
   rmdir "$lockdir" 2>/dev/null || true
@@ -284,7 +280,9 @@ herdr_place_agent_tab() {
   }
   pane=$(printf '%s' "$start_json" | herdr_json_get result agent pane_id)
   [ -n "$pane" ] || { herdr tab close "$tab_id" >/dev/null 2>&1 || true; echo "error: herdr agent start did not return a pane_id" >&2; return 1; }
-  if [ -n "$root_pane" ] && [ "$root_pane" != "$pane" ]; then
+  if [ -z "$root_pane" ]; then
+    echo "warn: herdr tab create returned no root_pane for tab $tab_id; leaving its initial shell open" >&2
+  elif [ "$root_pane" != "$pane" ]; then
     herdr pane close "$root_pane" >/dev/null 2>&1 || true
   fi
   printf '%s\n' "$pane"
