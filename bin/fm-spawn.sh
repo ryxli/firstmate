@@ -256,7 +256,7 @@ herdr_place_agent_tab() {
   }
   tab_id=$(printf '%s' "$tab_json" | herdr_json_get result tab tab_id)
   root_pane=$(printf '%s' "$tab_json" | herdr_json_get result root_pane pane_id)
-  [ -n "$tab_id" ] || { echo "error: herdr tab create did not return a tab_id" >&2; return 1; }
+  [ -n "$tab_id" ] || { echo "error: herdr tab create did not return a tab_id" >&2; echo "$tab_json" >&2; return 1; }
   start_json=$(herdr agent start "$name" --tab "$tab_id" --cwd "$cwd" --no-focus -- sh -c "$cmd" 2>&1) || {
     echo "error: herdr agent start failed in tab $tab_id" >&2
     echo "$start_json" >&2

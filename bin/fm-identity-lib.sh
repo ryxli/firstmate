@@ -18,7 +18,9 @@
 # fm_identity_value <config-dir> <key>
 # Print the value of <key>= from <config-dir>/identity, or fail (rc 1) when
 # the file or key is absent. Leading/trailing whitespace around the value is
-# trimmed; only the first matching line is used.
+# trimmed; only the first matching line is used. <key> must be a literal
+# identifier; it is interpolated into a sed BRE pattern, so metacharacters
+# (. * [ \) in key would mismatch silently.
 fm_identity_value() {
   local cfg=$1 key=$2 file value
   file="$cfg/identity"
