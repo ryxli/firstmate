@@ -22,7 +22,7 @@
 # are renamed to the name= value so the pane is addressable by human-readable name.
 #
 # On success prints:
-#   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> workspace_id=<id> worktree=<path>
+#   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> workspace=<label> worker=<label> worktree=<path>
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,7 +31,10 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 SUB_HOME_MARKER=".fm-secondmate-home"
+# shellcheck source=bin/fm-identity-lib.sh
+. "$SCRIPT_DIR/fm-identity-lib.sh"
 [ -n "${FM_SPAWN_NO_GUARD:-}" ] || "$FM_ROOT/bin/fm-guard.sh" || true
 
 KIND=ship
@@ -173,6 +176,78 @@ path_is_ancestor_of() {
   return 1
 }
 
+# herdr_json_field <py-expression>: read JSON on stdin and print a field, or
+# nothing on any parse error. Centralizes the python3 dependency used to parse
+# herdr's JSON responses (the same approach the herdr agent skill documents).
+herdr_json_field() {
+  python3 -c "import sys, json
+try:
+    d = json.load(sys.stdin)
+    print($1)
+except Exception:
+    pass" 2>/dev/null || true
+}
+
+# herdr_resolve_workspace <label> <cwd>: find the herdr workspace whose label
+# matches <label>; create it (labelled, rooted at <cwd>, unfocused) when none
+# exists. Prints the workspace id. Deterministic: the same label always lands
+# on the same workspace, so every task of a domain/project shares one.
+herdr_resolve_workspace() {
+  local label=$1 cwd=$2 wsid create_json
+  wsid=$(herdr workspace list 2>/dev/null | python3 -c '
+import sys, json
+label = sys.argv[1]
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for w in d.get("result", {}).get("workspaces", []):
+    if w.get("label") == label:
+        print(w.get("workspace_id", ""))
+        break
+' "$label" 2>/dev/null || true)
+  if [ -n "$wsid" ]; then
+    printf '%s\n' "$wsid"
+    return 0
+  fi
+  create_json=$(herdr workspace create --label "$label" --cwd "$cwd" --no-focus 2>&1) || {
+    echo "error: herdr workspace create failed for label '$label'" >&2
+    echo "$create_json" >&2
+    return 1
+  }
+  wsid=$(printf '%s' "$create_json" | herdr_json_field 'd["result"]["workspace"]["workspace_id"]')
+  [ -n "$wsid" ] || { echo "error: herdr workspace create did not return a workspace_id for '$label'" >&2; return 1; }
+  printf '%s\n' "$wsid"
+}
+
+# herdr_place_agent_tab <wsid> <tab-label> <cwd> <agent-name> <launch-cmd>:
+# create a dedicated tab in <wsid>, start the named agent in it, and close the
+# tab's leftover root shell so the tab holds only the agent. Prints the agent
+# pane id. This is what makes a worker land as "its own tab/agent" rather than
+# a split of the focused tab.
+herdr_place_agent_tab() {
+  local wsid=$1 label=$2 cwd=$3 name=$4 cmd=$5 tab_json tab_id root_pane start_json pane
+  tab_json=$(herdr tab create --workspace "$wsid" --label "$label" --cwd "$cwd" --no-focus 2>&1) || {
+    echo "error: herdr tab create failed in workspace $wsid" >&2
+    echo "$tab_json" >&2
+    return 1
+  }
+  tab_id=$(printf '%s' "$tab_json" | herdr_json_field 'd["result"]["tab"]["tab_id"]')
+  root_pane=$(printf '%s' "$tab_json" | herdr_json_field 'd["result"]["root_pane"]["pane_id"]')
+  [ -n "$tab_id" ] || { echo "error: herdr tab create did not return a tab_id" >&2; return 1; }
+  start_json=$(herdr agent start "$name" --tab "$tab_id" --cwd "$cwd" --no-focus -- sh -c "$cmd" 2>&1) || {
+    echo "error: herdr agent start failed in tab $tab_id" >&2
+    echo "$start_json" >&2
+    return 1
+  }
+  pane=$(printf '%s' "$start_json" | herdr_json_field 'd["result"]["agent"]["pane_id"]')
+  [ -n "$pane" ] || { echo "error: herdr agent start did not return a pane_id" >&2; return 1; }
+  if [ -n "$root_pane" ] && [ "$root_pane" != "$pane" ]; then
+    herdr pane close "$root_pane" >/dev/null 2>&1 || true
+  fi
+  printf '%s\n' "$pane"
+}
+
 validate_firstmate_home_for_spawn() {
   local id=$1 home=$2 abs_home abs_active_home abs_root marker_id
   abs_home=$(resolved_existing_dir "$home") || return 1
@@ -207,11 +282,21 @@ validate_firstmate_home_for_spawn() {
   if [ "$marker_id" != "$id" ]; then
     echo "error: firstmate home $home is marked for secondmate ${marker_id:-unknown}, expected $id" >&2; return 1
   fi
-  if [ ! -f "$abs_home/AGENTS.md" ]; then
-    echo "error: $home is not a firstmate home (missing AGENTS.md)" >&2; return 1
+  # Valid by construction: a seeded home that is missing the shared firstmate
+  # AGENTS.md or bin/ is auto-repaired by symlinking them from the firstmate
+  # repo rather than forcing a manual fix. Safe here because the marker check
+  # above already confirmed this is the seeded home for exactly this id.
+  if [ ! -e "$abs_home/AGENTS.md" ] && [ -f "$abs_root/AGENTS.md" ]; then
+    ln -s "$abs_root/AGENTS.md" "$abs_home/AGENTS.md" 2>/dev/null || true
   fi
-  if [ ! -d "$abs_home/bin" ]; then
-    echo "error: $home is not a firstmate home (missing bin/)" >&2; return 1
+  if [ ! -e "$abs_home/bin" ] && [ -d "$abs_root/bin" ]; then
+    ln -s "$abs_root/bin" "$abs_home/bin" 2>/dev/null || true
+  fi
+  if [ ! -e "$abs_home/AGENTS.md" ]; then
+    echo "error: $home is not a firstmate home (missing AGENTS.md, auto-link failed)" >&2; return 1
+  fi
+  if [ ! -e "$abs_home/bin" ]; then
+    echo "error: $home is not a firstmate home (missing bin/, auto-link failed)" >&2; return 1
   fi
   printf '%s\n' "$abs_home"
 }
@@ -267,22 +352,38 @@ else
 fi
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
-# Create a herdr-managed worktree for ship/scout tasks.
+# Resolve identity-driven placement labels.
+#   workspace label = the domain/project (shared by every task of that domain)
+#   worker label    = "<supervisor>/<task>" for a crewmate, the mate's own name
+#                     for a named mate; the random task id stays in meta only.
+if [ "$KIND" = secondmate ]; then
+  WORKER_LABEL=$(fm_identity_value "$PROJ_ABS/config" name 2>/dev/null || true)
+  [ -n "$WORKER_LABEL" ] || WORKER_LABEL=$ID
+  WORKSPACE_LABEL="${FM_SHIP_WORKSPACE_LABEL:-ship}"
+  WORKSPACE_CWD="$FM_HOME"
+  DOMAIN="$WORKSPACE_LABEL"
+else
+  DOMAIN="${FM_TASK_DOMAIN:-$(basename "$PROJ_ABS")}"
+  WORKSPACE_LABEL="$DOMAIN"
+  WORKSPACE_CWD="$PROJ_ABS"
+  WORKER_LABEL=$(fm_worker_label "$CONFIG" "$ID" "${FM_TASK_LABEL:-}")
+fi
+
+# Create the isolated git worktree for ship/scout tasks. herdr placement (below)
+# is the workspace/tab layer; the git worktree is a plain per-task checkout so a
+# domain workspace can hold many tasks without their teardowns colliding.
 WTBASE="${FM_WORKTREE_BASE:-$FM_HOME/worktrees}"
-WORKSPACE_ID=
 if [ "$KIND" != secondmate ]; then
   mkdir -p "$WTBASE"
   WT="$WTBASE/$ID"
   if [ -d "$WT" ]; then
     echo "error: worktree $WT already exists" >&2; exit 1
   fi
-  _create_json=$(herdr worktree create --cwd "$PROJ_ABS" --branch "fm/$ID" --path "$WT" --no-focus --json 2>&1) || {
-    echo "error: herdr worktree create failed for $PROJ_ABS -> $WT" >&2
-    echo "$_create_json" >&2
+  _add_out=$(git -C "$PROJ_ABS" worktree add -b "fm/$ID" "$WT" HEAD 2>&1) || {
+    echo "error: git worktree add failed for $PROJ_ABS -> $WT" >&2
+    echo "$_add_out" >&2
     exit 1
   }
-  WORKSPACE_ID=$(printf '%s' "$_create_json" | grep -o '"workspace_id":"[^"]*"' | head -1 | sed 's/"workspace_id":"//;s/"//')
-  [ -n "$WORKSPACE_ID" ] || { echo "error: herdr worktree create did not return a workspace_id" >&2; exit 1; }
 fi
 
 # Per-project delivery mode + yolo flag.
@@ -292,9 +393,8 @@ if [ "$KIND" = secondmate ]; then
   YOLO=off
   SECONDMATE_PROJECTS=$(secondmate_registry_value "$ID" projects || true)
 else
-  PROJ_NAME=$(basename "$PROJ_ABS")
   read -r MODE YOLO <<EOF
-$("$FM_ROOT/bin/fm-project-mode.sh" "$PROJ_NAME")
+$("$FM_ROOT/bin/fm-project-mode.sh" "$(basename "$PROJ_ABS")")
 EOF
 fi
 
@@ -307,40 +407,22 @@ if [ "$KIND" = secondmate ]; then
   LAUNCH_CMD="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH_CMD"
 fi
 
-# Launch the agent via herdr. The agent name is "fm-<id>" so it is uniquely
-# addressable by name. Ship/scout tasks land in their own herdr workspace (--workspace).
-# herdr agent start outputs JSON with pane_id in the result.
-AGENT_NAME="fm-$ID"
-if [ -n "$WORKSPACE_ID" ]; then
-  LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" --workspace "$WORKSPACE_ID" --no-focus -- sh -c "$LAUNCH_CMD" 2>&1)
-else
-  LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" --no-focus -- sh -c "$LAUNCH_CMD" 2>&1)
-fi || {
-  if [ "$KIND" != secondmate ]; then
-    if [ -n "$WORKSPACE_ID" ]; then
-      herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || rm -rf "$WT"
-    elif [ -d "$WT" ]; then
-      git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
-    fi
+spawn_cleanup_worktree() {
+  [ "$KIND" = secondmate ] && return 0
+  if [ -d "$WT" ]; then
+    git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+    git -C "$PROJ_ABS" branch -D "fm/$ID" 2>/dev/null || true
   fi
-  echo "error: herdr agent start failed for $ID" >&2
-  echo "$LAUNCH_JSON" >&2
-  exit 1
 }
 
-PANE=$(printf '%s\n' "$LAUNCH_JSON" | grep -o '"pane_id":"[^"]*"' | cut -d'"' -f4 | head -1 || true)
-[ -n "$PANE" ] || {
-  if [ "$KIND" != secondmate ]; then
-    if [ -n "$WORKSPACE_ID" ]; then
-      herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || rm -rf "$WT"
-    elif [ -d "$WT" ]; then
-      git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
-    fi
-  fi
-  echo "error: herdr agent start did not return a pane_id for $ID" >&2
-  echo "$LAUNCH_JSON" >&2
-  exit 1
-}
+# Deterministic placement: resolve the domain/project workspace (creating it
+# when absent), then start the agent in its own tab inside that workspace so it
+# never lands as a split in whatever tab happens to be focused. No workspace_id
+# is recorded in meta: the workspace is shared, so teardown must clean up only
+# this task's pane + git worktree, never the whole workspace.
+WORKSPACE_ID=$(herdr_resolve_workspace "$WORKSPACE_LABEL" "$WORKSPACE_CWD") || { spawn_cleanup_worktree; exit 1; }
+AGENT_NAME="$WORKER_LABEL"
+PANE=$(herdr_place_agent_tab "$WORKSPACE_ID" "$WORKER_LABEL" "$WT" "$AGENT_NAME" "$LAUNCH_CMD") || { spawn_cleanup_worktree; exit 1; }
 
 mkdir -p "$STATE"
 {
@@ -351,22 +433,13 @@ mkdir -p "$STATE"
   echo "kind=$KIND"
   echo "mode=$MODE"
   echo "yolo=$YOLO"
-  [ -z "$WORKSPACE_ID" ] || echo "workspace_id=$WORKSPACE_ID"
+  echo "domain=$DOMAIN"
+  echo "workspace=$WORKSPACE_LABEL"
+  echo "worker=$WORKER_LABEL"
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
   fi
 } > "$STATE/$ID.meta"
 
-# For secondmates with a named identity, rename the herdr workspace and agent.
-if [ "$KIND" = secondmate ] && [ -f "$PROJ_ABS/config/identity" ]; then
-  _id_name=$(grep '^name=' "$PROJ_ABS/config/identity" | head -1 | cut -d= -f2- || true)
-  if [ -n "$_id_name" ]; then
-    _id_ws=$(secondmate_registry_value "$ID" workspace_id || true)
-    [ -z "$_id_ws" ] || herdr workspace rename "$_id_ws" "$_id_name" 2>/dev/null || true
-    herdr agent rename "$PANE" "$_id_name" 2>/dev/null || true
-  fi
-fi
-
-_ws_suffix=${WORKSPACE_ID:+ workspace_id=$WORKSPACE_ID}
-echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO pane=$PANE${_ws_suffix} worktree=$WT"
+echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO pane=$PANE workspace=$WORKSPACE_LABEL worker=$WORKER_LABEL worktree=$WT"

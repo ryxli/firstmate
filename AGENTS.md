@@ -84,7 +84,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
 projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by crewmates: "<state>: <note>" lines
-  <id>.meta          written by fm-spawn: pane=, worktree=, project=, harness=, kind=, mode=, yolo=, workspace_id= (herdr workspace for crewmate tasks; absent for secondmates and old-style tasks); kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
+  <id>.meta          written by fm-spawn: pane=, worktree=, project=, harness=, kind=, mode=, yolo=, domain=, workspace= (the domain/project herdr workspace label, shared by every task of that domain), worker= (the visible <supervisor>/<task> tab+agent label); kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
   <id>.check.sh      optional slow poll you write per task (e.g. merged-PR check)
   .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
   .afk               durable away-mode flag; present = sub-supervisor may inject escalations (set by /afk, cleared on user return)
@@ -97,7 +97,7 @@ state/               volatile runtime signals; gitignored
 ```
 
 Task ids are short kebab slugs with a random suffix, e.g. `fix-login-k3`.
-The herdr pane for a task is named `fm-<id>` (via `herdr agent start "fm-<id>"`); the pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
+Each task gets its OWN herdr tab inside the domain/project workspace; that tab and its agent are labelled `<supervisor>/<task-slug>` (e.g. `keel/fix-login`) while the random task id stays in meta/backlog/status. The pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
 
 ## 3. Bootstrap (run at every session start)
 
@@ -408,11 +408,11 @@ bin/fm-spawn.sh <id1>=projects/<repo1> <id2>=projects/<repo2> [--scout]   # batc
 Dispatch several tasks in one call by passing `id=repo` pairs instead of a single `<id> <project>`; each pair is spawned through the same single-task path, a shared `--scout` applies to all, and the looping happens inside the script so you never hand-write a multi-task shell loop.
 If one pair fails, the rest still run and the batch exits non-zero.
 
-The script resolves the harness (`fm-harness.sh crew`), owns the verified launch templates, resolves the project's delivery mode (`fm-project-mode.sh`) for ship/scout tasks, and records `harness=`, `kind=`, `mode=`, `yolo=`, and `pane=` in the task's meta; a non-flag third argument containing whitespace is treated as a raw launch command (only for verifying new adapters).
+The script resolves the harness (`fm-harness.sh crew`), owns the verified launch templates, resolves the project's delivery mode (`fm-project-mode.sh`) for ship/scout tasks, and records `harness=`, `kind=`, `mode=`, `yolo=`, `pane=`, `domain=`, `workspace=`, and `worker=` in the task's meta; a non-flag third argument containing whitespace is treated as a raw launch command (only for verifying new adapters).
 For `kind=secondmate`, the same script launches in the registered or explicit firstmate home instead of creating a project worktree, records `home=` and `projects=`, and uses the charter brief as the launch prompt.
 
-For ship and scout tasks, the script creates a git worktree via `git worktree add -b "fm/<id>" "$FM_WORKTREE_BASE/<id>" HEAD`, launches the agent with `herdr agent start "fm-<id>" --cwd <worktree>`, parses the returned `pane_id`, records `state/<id>.meta`, and submits the brief.
-For `kind=secondmate`, the script launches directly in the persistent home instead.
+For ship and scout tasks, the script creates a git worktree via `git worktree add -b "fm/<id>" "$FM_WORKTREE_BASE/<id>" HEAD`, resolves the domain/project herdr workspace (label = the project; created when absent, reused when it already exists), starts the agent in its OWN tab inside that workspace labelled `<supervisor>/<task-slug>`, closes the tab's leftover root shell so the tab is a single agent pane, parses the returned `pane_id`, records `state/<id>.meta`, and submits the brief. No `workspace_id` is recorded: the workspace is shared across the domain's tasks, so teardown cleans up only this task's pane and git worktree, never the whole workspace.
+For `kind=secondmate`, the script launches in the persistent home, placed as its own tab inside the single `ship` workspace (never a split of the focused tab) and labelled by the mate's name. If the seeded home is missing the shared `AGENTS.md` or `bin/`, fm-spawn auto-links them from the firstmate repo so the home is valid by construction.
 Project worktrees start on a fresh branch off the default; ship briefs tell the crewmate to use that branch, while scout briefs keep the worktree scratch.
 After spawning, peek the pane to confirm the crewmate is processing the brief (and handle any trust dialog per section 4).
 Add the task to `data/backlog.md` under In flight.
