@@ -6,5 +6,5 @@ worktrees/
 .lavish/
 .DS_Store
 .env
-config/crew-harness
+config/
 *.py

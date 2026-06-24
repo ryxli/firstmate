@@ -18,8 +18,13 @@
 #       on rollback; a failed removal warns because the workspace may still exist.
 #       Set FM_SECONDMATE_CHARTER='<charter>' to seed from inline charter text
 #       when no filled charter brief exists. Set FM_SECONDMATE_SCOPE='<scope>'
-#       to override the registry routing scope. Otherwise the registry summary
-#       and scope are derived from the filled charter brief.
+#       to override the registry routing scope. Set FM_SECONDMATE_NAME='<name>'
+#       to assign a human-readable name (e.g. "Harbour"); it is written to
+#       config/identity in the secondmate home, added to data/secondmates.md,
+#       and used to rename the herdr workspace and agent at spawn time. Seeding
+#       refuses a duplicate name when FM_SECONDMATE_NAME is set. Without it, the
+#       name defaults to the capitalized ID. Otherwise the registry summary and
+#       scope are derived from the filled charter brief.
 #   fm-home-seed.sh validate
 #       Refuse duplicate ids, duplicate homes, and nested or overlapping homes in
 #       data/secondmates.md.
@@ -597,6 +602,7 @@ SEED_PARENT_BRIEF_DIR_CREATED=0
 SEED_SUB_REG_EXISTED=0
 SEED_CHARTER_EXISTED=0
 SEED_MARKER_EXISTED=0
+SEED_IDENTITY_EXISTED=0
 
 restore_seed_file() {
   local existed=$1 backup=$2 path=$3
@@ -714,6 +720,7 @@ seed_rollback() {
         restore_seed_file "$SEED_MARKER_EXISTED" "$SEED_BACKUP_DIR/marker" "$SEED_HOME/$SUB_HOME_MARKER"
         restore_seed_file "$SEED_CHARTER_EXISTED" "$SEED_BACKUP_DIR/charter.md" "$SEED_HOME/data/charter.md"
         restore_seed_file "$SEED_SUB_REG_EXISTED" "$SEED_BACKUP_DIR/sub-projects.md" "$SEED_HOME/data/projects.md"
+        restore_seed_file "$SEED_IDENTITY_EXISTED" "$SEED_BACKUP_DIR/identity" "$SEED_HOME/config/identity"
       fi
     fi
   fi
@@ -791,7 +798,7 @@ initialize_no_mistakes_project() {
 }
 
 write_registry() {
-  local id=$1 home=$2 projects_csv=$3 brief=$4 workspace_id=${5:-} scope summary tmp today
+  local id=$1 home=$2 projects_csv=$3 brief=$4 workspace_id=${5:-} name=${6:-} scope summary tmp today
   mkdir -p "$DATA"
   scope=$(registry_scope_for_brief "$brief")
   summary=$(registry_summary_for_brief "$brief")
@@ -802,9 +809,15 @@ write_registry() {
   else
     : > "$tmp"
   fi
-  if [ -n "$workspace_id" ]; then
+  if [ -n "$workspace_id" ] && [ -n "$name" ]; then
+    printf -- '- %s - %s (home: %s; workspace: %s; name: %s; scope: %s; projects: %s; added %s)\n' \
+      "$id" "$summary" "$home" "$workspace_id" "$name" "$scope" "$projects_csv" "$today" >> "$tmp"
+  elif [ -n "$workspace_id" ]; then
     printf -- '- %s - %s (home: %s; workspace: %s; scope: %s; projects: %s; added %s)\n' \
       "$id" "$summary" "$home" "$workspace_id" "$scope" "$projects_csv" "$today" >> "$tmp"
+  elif [ -n "$name" ]; then
+    printf -- '- %s - %s (home: %s; name: %s; scope: %s; projects: %s; added %s)\n' \
+      "$id" "$summary" "$home" "$name" "$scope" "$projects_csv" "$today" >> "$tmp"
   else
     printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' \
       "$id" "$summary" "$home" "$scope" "$projects_csv" "$today" >> "$tmp"
@@ -813,12 +826,21 @@ write_registry() {
 }
 
 seed_home() {
-  local id=$1 requested_home=$2 requested_abs home projects_csv project project_dst charter_summary charter_scope
+  local id=$1 requested_home=$2 requested_abs home projects_csv project project_dst charter_summary charter_scope sm_name
   shift 2
   [ $# -gt 0 ] || { echo "error: secondmate needs at least one project" >&2; return 1; }
 
   mkdir -p "$DATA"
   validate_registry
+
+  # Reject duplicate name when FM_SECONDMATE_NAME is set.
+  if [ -n "${FM_SECONDMATE_NAME:-}" ] && [ -f "$REG" ]; then
+    if grep -qF "; name: $FM_SECONDMATE_NAME;" "$REG" 2>/dev/null; then
+      echo "error: secondmate name '$FM_SECONDMATE_NAME' is already in use" >&2
+      return 1
+    fi
+  fi
+
   for project in "$@"; do
     validate_seed_project "$project"
   done
@@ -841,6 +863,7 @@ seed_home() {
   SEED_SUB_REG_EXISTED=0
   SEED_CHARTER_EXISTED=0
   SEED_MARKER_EXISTED=0
+  SEED_IDENTITY_EXISTED=0
   trap seed_rollback EXIT
   if [ -f "$REG" ]; then
     SEED_PARENT_REG_EXISTED=1
@@ -880,6 +903,10 @@ seed_home() {
   if [ -f "$home/$SUB_HOME_MARKER" ]; then
     SEED_MARKER_EXISTED=1
     cp "$home/$SUB_HOME_MARKER" "$SEED_BACKUP_DIR/marker"
+  fi
+  if [ -f "$home/config/identity" ]; then
+    SEED_IDENTITY_EXISTED=1
+    cp "$home/config/identity" "$SEED_BACKUP_DIR/identity"
   fi
   SEED_HOME_BACKED_UP=1
 
@@ -924,9 +951,18 @@ seed_home() {
 
   cp "$SEED_PARENT_BRIEF" "$home/data/charter.md"
 
+  # Compute human-readable name: FM_SECONDMATE_NAME or capitalized ID.
+  if [ -n "${FM_SECONDMATE_NAME:-}" ]; then
+    sm_name="$FM_SECONDMATE_NAME"
+  else
+    sm_name=$(printf '%s' "$id" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+  fi
+  # Write config/identity so the secondmate can self-register at bootstrap.
+  printf 'name=%s\nrole=Secondmate - %s\n' "$sm_name" "$charter_scope" > "$home/config/identity"
+
   projects_csv=$(join_projects "$@")
   printf '%s\n' "$id" > "$home/$SUB_HOME_MARKER"
-  write_registry "$id" "$home" "$projects_csv" "$SEED_PARENT_BRIEF" "${SEED_HERDR_WORKSPACE_ID:-}"
+  write_registry "$id" "$home" "$projects_csv" "$SEED_PARENT_BRIEF" "${SEED_HERDR_WORKSPACE_ID:-}" "$sm_name"
   validate_registry
   SEED_COMMITTED=1
   trap - EXIT
