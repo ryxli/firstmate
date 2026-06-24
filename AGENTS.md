@@ -235,7 +235,7 @@ Reconcile reality with your records before doing anything else:
 2. Drain queued wakes with `bin/fm-wake-drain.sh` and keep the printed records as the first work queue for this recovery turn.
 3. Read `data/backlog.md`, `data/secondmates.md` if present, every `state/*.meta`, and every `state/*.status`.
 4. Use the `pane=` values from this home's `state/*.meta` files as the live direct-report set, then check those herdr panes via `herdr pane get <pane_id>`.
-   Do not sweep every `fm-*` herdr pane across all workspaces during recovery; another firstmate home's child panes may share that namespace and are not this home's orphans.
+   Do not sweep herdr panes by name pattern during recovery; another firstmate home's child panes may share the same supervisor-slug prefix and are not this home's orphans.
 5. If a recorded direct-report pane is missing or unreachable, reconcile it through its meta as described below.
 6. For meta with no pane, reconcile by kind.
    For ordinary crewmates, check whether the worktree still exists under `$FM_WORKTREE_BASE/<id>`, salvage or report.
@@ -279,7 +279,7 @@ Every persistent secondmate has one line:
 The optional `name:` field holds the human-readable name (e.g. `Harbour`); lines without it default to the capitalized ID for display.
 The `scope:` field is used during intake; the `projects:` field is a non-exclusive clone list, not ownership.
 Use `bin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the charter to provision the persistent home and registry entry; `-` creates a herdr-managed git worktree of the firstmate repo at `<parent-of-repo>/fm-sm-<id>` and records the herdr workspace ID in the registry.
-Set `FM_SECONDMATE_NAME=<human-name>` before seeding to assign a human-readable name; it is written to `config/identity` in the secondmate home and added to the registry line.
+Set `FM_SECONDMATE_NAME=<human-name>` before seeding to assign a human-readable name; it is written to `config/identity` in the secondmate home, added to the registry line, and used as the herdr tab/agent label at spawn time.
 The workspace ID is the durable handle for the home: teardown calls `herdr worktree remove --workspace <id>` to release the slot cleanly; a home without a workspace ID in the registry is a plain clone and is removed with `rm -rf`.
 The home persists with no live process and is never recycled by herdr until explicitly released; that release happens only on explicit retirement or seed rollback, never on a routine restart or recovery.
 The charter must be filled before seeding; direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.
@@ -688,6 +688,7 @@ Secondmates contribute their segment on firstmate's request or at week close; fo
 ## 11. Crewmate briefs
 
 Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
+Identity context (supervisor name, role, parent in the supervision chain, the crewmate's visible tab/agent label, its domain/project workspace, and its status-reporting path) is injected automatically via `fm-identity-lib.sh`; override the worker label with `FM_TASK_LABEL` or the domain with `FM_TASK_DOMAIN`.
 For a ship task the definition of done is shaped by the project's delivery mode (section 6): `no-mistakes` ends in the harness-appropriate no-mistakes validation pipeline, `direct-PR` has the crewmate push and open the PR itself, `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
 The scaffold reads the mode via `fm-project-mode.sh`, so you do not pass it.
 Ship briefs also include the project-memory contract: run `bin/fm-ensure-agents-md.sh` when the project already has agent-memory files or when the task produced durable project-intrinsic knowledge, then record proportionate learnings in `AGENTS.md`.
