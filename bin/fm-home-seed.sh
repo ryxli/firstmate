@@ -830,7 +830,7 @@ seed_home() {
 
   # Reject duplicate name when FM_SECONDMATE_NAME is set.
   if [ -n "${FM_SECONDMATE_NAME:-}" ] && [ -f "$REG" ]; then
-    if grep -qF "name: $FM_SECONDMATE_NAME" "$REG" 2>/dev/null; then
+    if grep -qF "; name: $FM_SECONDMATE_NAME;" "$REG" 2>/dev/null; then
       echo "error: secondmate name '$FM_SECONDMATE_NAME' is already in use" >&2
       return 1
     fi
