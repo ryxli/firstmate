@@ -1,6 +1,7 @@
 projects/
 state/
 data/
+worktrees/
 .no-mistakes/
 .lavish/
 .DS_Store
