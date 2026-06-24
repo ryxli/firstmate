@@ -135,7 +135,7 @@ secondmate_registry_value() {
   case "$key" in
     home) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: \([^;)]*\);.*/\1/p') ;;
     workspace_id) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*; workspace: \([^;)]*\);.*/\1/p') ;;
-    projects) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*; scope: [^;)]*; projects: \([^;)]*\); added .*/\1/p') ;;
+    projects) value=$(printf '%s\n' "$line" | sed -n 's/^.*; projects: \([^;)]*\); added .*/\1/p') ;;
     *) return 1 ;;
   esac
   [ -n "$value" ] || return 1
