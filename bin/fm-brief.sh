@@ -25,6 +25,9 @@
 # Scout tasks ignore mode - their deliverable is a report, not a merge.
 # Ship tasks include a project-memory section so durable project-intrinsic
 # learnings can be committed to AGENTS.md through the project's delivery path.
+# Identity context (supervisor name/role/parent, worker label, domain, status
+# path) is injected automatically from config/identity via fm-identity-lib.sh.
+# Override the worker label with FM_TASK_LABEL or the domain with FM_TASK_DOMAIN.
 # Refuses to overwrite an existing brief.
 set -eu
 
