@@ -409,6 +409,8 @@ if [ "$KIND" != secondmate ]; then
     echo "$_add_out" >&2
     exit 1
   }
+else
+  WT="$PROJ_ABS"
 fi
 
 # Per-project delivery mode + yolo flag.
