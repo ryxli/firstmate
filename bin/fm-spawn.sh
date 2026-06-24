@@ -14,12 +14,12 @@
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode.
 #
-# Worktrees are created with `herdr worktree create` at $FM_WORKTREE_BASE/<id>
-# (default: $FM_HOME/worktrees/<id>), giving each crewmate its own herdr workspace.
-# herdr agent start --workspace <id> launches the crewmate into that workspace.
+# Git worktrees are created with `git worktree add` at $FM_WORKTREE_BASE/<id>
+# (default: $FM_HOME/worktrees/<id>) for crewmate git isolation; secondmates launch
+# in their persistent home instead. Each project/domain gets a single shared herdr
+# workspace (label = project name), and each agent is placed in its own tab inside
+# that workspace via `herdr tab create` + `herdr agent start --tab`.
 # herdr tracks agent status natively, so no per-harness turn-end hook files are installed.
-# For secondmates with a config/identity file, the herdr workspace and agent pane
-# are renamed to the name= value so the pane is addressable by human-readable name.
 #
 # On success prints:
 #   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> workspace=<label> worker=<label> worktree=<path>
@@ -229,6 +229,23 @@ for w in d.get("result", {}).get("workspaces", []):
     return 0
   fi
   create_json=$(herdr workspace create --label "$label" --cwd "$cwd" --no-focus 2>&1) || {
+    wsid=$(herdr workspace list 2>/dev/null | python3 -c '
+import sys, json
+label = sys.argv[1]
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for w in d.get("result", {}).get("workspaces", []):
+    if w.get("label") == label:
+        print(w.get("workspace_id", ""))
+        break
+' "$label" 2>/dev/null || true)
+    if [ -n "$wsid" ]; then
+      rmdir "$lockdir" 2>/dev/null || true
+      printf '%s\n' "$wsid"
+      return 0
+    fi
     echo "error: herdr workspace create failed for label '$label'" >&2
     echo "$create_json" >&2
     rmdir "$lockdir" 2>/dev/null || true
