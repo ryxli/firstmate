@@ -134,6 +134,7 @@ secondmate_registry_value() {
   [ -n "$line" ] || return 1
   case "$key" in
     home) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: \([^;)]*\);.*/\1/p') ;;
+    workspace_id) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*; workspace: \([^;)]*\);.*/\1/p') ;;
     projects) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*; scope: [^;)]*; projects: \([^;)]*\); added .*/\1/p') ;;
     *) return 1 ;;
   esac
@@ -354,6 +355,16 @@ mkdir -p "$STATE"
     echo "projects=$SECONDMATE_PROJECTS"
   fi
 } > "$STATE/$ID.meta"
+
+# For secondmates with a named identity, rename the herdr workspace and agent.
+if [ "$KIND" = secondmate ] && [ -f "$PROJ_ABS/config/identity" ]; then
+  _id_name=$(grep '^name=' "$PROJ_ABS/config/identity" | head -1 | cut -d= -f2- || true)
+  if [ -n "$_id_name" ]; then
+    _id_ws=$(secondmate_registry_value "$ID" workspace_id || true)
+    [ -z "$_id_ws" ] || herdr workspace rename "$_id_ws" "$_id_name" 2>/dev/null || true
+    herdr agent rename "$PANE" "$_id_name" 2>/dev/null || true
+  fi
+fi
 
 _ws_suffix=${WORKSPACE_ID:+ workspace_id=$WORKSPACE_ID}
 echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO pane=$PANE${_ws_suffix} worktree=$WT"

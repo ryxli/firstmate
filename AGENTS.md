@@ -71,6 +71,9 @@ README.md            public overview and development notes
 .claude/skills       symlink to .agents/skills for claude compatibility
 bin/                 helper scripts, committed, including fm-fleet-sync.sh for clean default-branch refreshes and gone-branch pruning, and fm-update.sh for fast-forward-only self-updates; read each script's header before first use
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate
+config/identity      this instance's identity: name= and role= lines; LOCAL, gitignored;
+                     read at bootstrap before captain.md; written by fm-home-seed.sh for
+                     secondmates, set manually for Keel
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
   captain.md         captain's curated personal preferences and working style - approval posture, communication style, release habits; LOCAL, gitignored; compact rewrite-and-prune counterpart to shared AGENTS.md; canonical harness-portable home, even if harness memory mirrors it as a recall cache
@@ -97,6 +100,13 @@ Task ids are short kebab slugs with a random suffix, e.g. `fix-login-k3`.
 The herdr pane for a task is named `fm-<id>` (via `herdr agent start "fm-<id>"`); the pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
 
 ## 3. Bootstrap (run at every session start)
+
+Read `config/identity` if present to learn this instance's own name and role (key=value format, e.g. `name=Keel`).
+Then self-register in herdr so the pane is addressable by name for the session:
+
+  herdr agent rename $(herdr pane current) <name>
+
+This is idempotent and non-fatal if herdr is unavailable or the pane cannot be identified.
 
 Bootstrap is detect, then consent, then install.
 Never install anything the captain has not approved in this session.
@@ -262,16 +272,18 @@ Durable descriptive detail belongs in the project's own `AGENTS.md`.
 Every persistent secondmate has one line:
 
 ```markdown
-- <id> - <charter summary> (home: <absolute-home-path>[; workspace: <herdr-workspace-id>]; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
+- <id> - <charter summary> (home: <absolute-home-path>[; workspace: <herdr-workspace-id>][; name: <human-name>]; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
 ```
 
+The optional `name:` field holds the human-readable name (e.g. `Harbour`); lines without it default to the capitalized ID for display.
 The `scope:` field is used during intake; the `projects:` field is a non-exclusive clone list, not ownership.
 Use `bin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the charter to provision the persistent home and registry entry; `-` creates a herdr-managed git worktree of the firstmate repo at `<parent-of-repo>/fm-sm-<id>` and records the herdr workspace ID in the registry.
+Set `FM_SECONDMATE_NAME=<human-name>` before seeding to assign a human-readable name; it is written to `config/identity` in the secondmate home and added to the registry line.
 The workspace ID is the durable handle for the home: teardown calls `herdr worktree remove --workspace <id>` to release the slot cleanly; a home without a workspace ID in the registry is a plain clone and is removed with `rm -rf`.
 The home persists with no live process and is never recycled by herdr until explicitly released; that release happens only on explicit retirement or seed rollback, never on a routine restart or recovery.
 The charter must be filled before seeding; direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.
 Seeding is transactional: if validation, cloning, no-mistakes initialization, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
-`bin/fm-home-seed.sh validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes.
+`bin/fm-home-seed.sh validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes; seeding with `FM_SECONDMATE_NAME` set also refuses a duplicate name.
 Secondmate project lists may include `no-mistakes` and `direct-PR` projects only; `local-only` projects stay with the main firstmate.
 For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home and refuses to mutate a preexisting clone that is not already initialized.
 
