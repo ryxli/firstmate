@@ -283,7 +283,7 @@ test_local_only_force_overrides_unpushed() {
   pass "local-only worktree with unpushed work is torn down under --force (escape hatch)"
 }
 
-test_teardown_with_workspace_id_uses_herdr_worktree_remove() {
+test_teardown_with_workspace_id_closes_pane_before_worktree_remove() {
   local case_dir rc
   case_dir=$(make_case workspace-remove)
   write_meta_with_workspace "$case_dir" no-mistakes ship
@@ -301,9 +301,41 @@ test_teardown_with_workspace_id_uses_herdr_worktree_remove() {
     || fail "teardown did not call herdr worktree remove: $(cat "$case_dir/herdr.log" 2>/dev/null)"
   grep -qF 'wTEST' "$case_dir/herdr.log" \
     || fail "teardown did not pass workspace_id wTEST to herdr: $(cat "$case_dir/herdr.log" 2>/dev/null)"
-  ! grep -qF 'pane close' "$case_dir/herdr.log" \
-    || fail "teardown called herdr pane close separately when workspace_id is present (should be atomic)"
-  pass "teardown with workspace_id calls herdr worktree remove atomically"
+  # The bug: a workspace_id meta relied on "herdr worktree remove" alone and
+  # never closed the recorded agent pane, leaving it alive. The fix closes the
+  # recorded pane explicitly, before worktree/workspace removal.
+  grep -qF 'pane close w1:p1' "$case_dir/herdr.log" \
+    || fail "teardown with workspace_id did not close the recorded agent pane: $(cat "$case_dir/herdr.log" 2>/dev/null)"
+  local close_line remove_line
+  close_line=$(grep -nF 'pane close' "$case_dir/herdr.log" | head -1 | cut -d: -f1)
+  remove_line=$(grep -nF 'worktree remove' "$case_dir/herdr.log" | head -1 | cut -d: -f1)
+  [ -n "$close_line" ] && [ -n "$remove_line" ] && [ "$close_line" -lt "$remove_line" ] \
+    || fail "teardown closed the pane after worktree removal (should be before): $(cat "$case_dir/herdr.log" 2>/dev/null)"
+  pass "teardown with workspace_id closes recorded pane before worktree remove"
+}
+
+test_teardown_with_workspace_id_removes_surviving_worktree_dir() {
+  local case_dir rc
+  case_dir=$(make_case workspace-survive)
+  write_meta_with_workspace "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "shippable work"
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin
+
+  # The mock herdr is a no-op, so "herdr worktree remove --workspace" never
+  # actually removes the worktree directory - exactly the failure mode the fix
+  # guards against. The defensive cleanup must remove the surviving directory.
+  [ -d "$case_dir/wt" ] || fail "precondition: worktree dir should exist before teardown"
+
+  set +e
+  HERDR_LOG="$case_dir/herdr.log" run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "workspace-survive: teardown should succeed"
+  [ ! -d "$case_dir/wt" ] \
+    || fail "teardown left the worktree directory behind: $case_dir/wt"
+  pass "teardown defensively removes a surviving worktree directory"
 }
 
 test_teardown_without_workspace_id_uses_pane_close() {
@@ -332,5 +364,6 @@ test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows
 test_no_mistakes_truly_unpushed_refuses
 test_local_only_force_overrides_unpushed
-test_teardown_with_workspace_id_uses_herdr_worktree_remove
+test_teardown_with_workspace_id_closes_pane_before_worktree_remove
+test_teardown_with_workspace_id_removes_surviving_worktree_dir
 test_teardown_without_workspace_id_uses_pane_close

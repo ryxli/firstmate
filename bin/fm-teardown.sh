@@ -463,12 +463,13 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   fi
 fi
 
-# For new-style crewmates (workspace_id present): herdr worktree remove closes the
-# workspace and prunes the git worktree atomically. For old-style or secondmate:
-# close the pane explicitly first, then handle the worktree separately.
-if [ -z "$WORKSPACE_ID" ] || [ "$KIND" = secondmate ]; then
-  [ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
-fi
+# Close the recorded agent pane explicitly before any worktree/workspace
+# removal. "herdr worktree remove --workspace" is not reliable on its own: it
+# can leave the agent pane alive (and the worktree held as the agent's cwd)
+# when the workspace has non-agent panes or the agent still occupies the
+# directory. Closing only the recorded pane= leaves any non-agent panes in the
+# workspace intact.
+[ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
 
 if [ "$KIND" != secondmate ]; then
   if [ -n "$WORKSPACE_ID" ]; then
@@ -478,6 +479,16 @@ if [ "$KIND" != secondmate ]; then
     if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
       git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
       git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
+    else
+      rm -rf "$WT"
+    fi
+  fi
+  # Defensive: if the worktree directory survived the herdr/git cleanup above
+  # (a partial workspace removal, or the agent still holding it as cwd), remove
+  # it directly so teardown never leaves the directory behind.
+  if [ -n "$WT" ] && [ -d "$WT" ]; then
+    if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
+      git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
     else
       rm -rf "$WT"
     fi
