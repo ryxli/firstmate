@@ -18,8 +18,13 @@
 #       on rollback; a failed removal warns because the workspace may still exist.
 #       Set FM_SECONDMATE_CHARTER='<charter>' to seed from inline charter text
 #       when no filled charter brief exists. Set FM_SECONDMATE_SCOPE='<scope>'
-#       to override the registry routing scope. Otherwise the registry summary
-#       and scope are derived from the filled charter brief.
+#       to override the registry routing scope. Set FM_SECONDMATE_NAME='<name>'
+#       to assign a human-readable name (e.g. "Harbour"); it is written to
+#       config/identity in the secondmate home, added to data/secondmates.md,
+#       and used to rename the herdr workspace and agent at spawn time. Seeding
+#       refuses a duplicate name when FM_SECONDMATE_NAME is set. Without it, the
+#       name defaults to the capitalized ID. Otherwise the registry summary and
+#       scope are derived from the filled charter brief.
 #   fm-home-seed.sh validate
 #       Refuse duplicate ids, duplicate homes, and nested or overlapping homes in
 #       data/secondmates.md.

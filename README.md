@@ -181,7 +181,7 @@ When compatible `tasks-axi` is on `PATH`, firstmate uses its verbs for routine b
 Compatible means the shared bootstrap probe accepts `tasks-axi --version` as 0.1.1 or newer.
 Personal preferences for one captain's fleet live locally in `data/captain.md`; it is gitignored and read after `data/projects.md` and optional `data/secondmates.md` during bootstrap.
 Persistent secondmate routes live locally in `data/secondmates.md`.
-Each line records the secondmate id, charter summary, absolute home path, natural-language scope, project clone list, and added date; `fm-home-seed.sh validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes.
+Each line records the secondmate id, charter summary, absolute home path, optional human-readable name, natural-language scope, project clone list, and added date; `fm-home-seed.sh validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes; seeding with `FM_SECONDMATE_NAME` set also refuses a duplicate name.
 The main first mate routes by reading those scopes with judgment; the project list is provisioning data, not exclusive ownership.
 Use `fm-home-seed.sh <id> - <project>...` to create a herdr-managed git worktree as the secondmate home; the workspace ID is stored in the registry.
 The home persists until explicit retirement or seed rollback removes it; normal restarts do not recycle it.
@@ -190,7 +190,7 @@ If `herdr worktree remove` fails during teardown, firstmate leaves the route and
 Secondmate routes cover `no-mistakes` and `direct-PR` projects; `local-only` projects remain main-firstmate work.
 For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home and refuses to mutate a preexisting clone that is not already initialized.
 After creating a secondmate, move existing main-backlog items that you have judged in-scope with `fm-backlog-handoff.sh <secondmate-id> <item-key>...`; it is idempotent and refuses in-flight items or non-secondmate homes.
-Set `FM_SECONDMATE_CHARTER` to seed from inline charter text when no filled charter brief exists; set `FM_SECONDMATE_SCOPE` when the routing scope should differ from the charter text.
+Set `FM_SECONDMATE_CHARTER` to seed from inline charter text when no filled charter brief exists; set `FM_SECONDMATE_SCOPE` when the routing scope should differ from the charter text; set `FM_SECONDMATE_NAME` to assign a human-readable name that is written to `config/identity` in the secondmate home and used to rename the herdr workspace and agent at spawn time.
 `FM_HOME` selects the operational home for one firstmate instance.
 When it is unset, the repo root is the home; when it is set, scripts still run from this repo's `bin/`, but `state/`, `data/`, `config/`, and `projects/` come from `$FM_HOME`.
 Harness support is a table in section 4: claude, codex, opencode, and pi are all empirically verified; new harnesses get verified through a supervised trial task before joining the table.

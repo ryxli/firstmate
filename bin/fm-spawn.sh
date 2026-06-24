@@ -18,6 +18,8 @@
 # (default: $FM_HOME/worktrees/<id>), giving each crewmate its own herdr workspace.
 # herdr agent start --workspace <id> launches the crewmate into that workspace.
 # herdr tracks agent status natively, so no per-harness turn-end hook files are installed.
+# For secondmates with a config/identity file, the herdr workspace and agent pane
+# are renamed to the name= value so the pane is addressable by human-readable name.
 #
 # On success prints:
 #   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> workspace_id=<id> worktree=<path>
