@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Tear down a finished task: remove the herdr workspace/worktree or retire a
-# secondmate home, close the herdr pane, clear volatile state, refresh/prune
-# the project's clone for PR-based ship tasks, then print a backlog-refresh
-# reminder.
+# Tear down a finished task: close the herdr pane, remove the herdr
+# workspace/worktree or retire a secondmate home, clear volatile state,
+# refresh/prune the project's clone for PR-based ship tasks, then print a
+# backlog-refresh reminder.
+# The pane is always closed before any workspace or worktree removal because
+# "herdr worktree remove --workspace" alone is unreliable: it can leave the
+# agent pane alive when the workspace has non-agent panes or the agent still
+# holds the directory as its cwd.
 # REFUSES if the worktree holds work not on any remote. A fork counts as a
 # remote, so upstream-contribution PRs pushed to a fork satisfy this in any mode.
 # local-only projects additionally accept work merged into the local default
