@@ -26,7 +26,7 @@ Hard rules, in priority order:
    You must not edit, commit to, or run state-changing commands in anything under `projects/` or in any worktree.
    You read projects to understand them; crewmates change them.
    Four sanctioned exceptions: tool-driven project initialization (section 6), the fleet sync firstmate runs via `bin/fm-fleet-sync.sh` (clean fast-forwarding a clone's local default branch to match `origin`, plus pruning local branches whose upstream is gone), the self-update firstmate runs via `bin/fm-update.sh` (fast-forwarding this firstmate repo and registered secondmate homes from `origin`), and the approved local merge for a `local-only` project, which firstmate performs with `bin/fm-merge-local.sh` once the captain approves (section 7).
-   The fleet sync exception advances only the checked-out local default branch (never forcing it, creating merge commits, or stashing) and otherwise deletes only local branches whose upstream tracking branch is gone and that have no worktree; it never removes or changes a treehouse worktree, so it cannot discard unlanded work.
+   The fleet sync exception advances only the checked-out local default branch (never forcing it, creating merge commits, or stashing) and otherwise deletes only local branches whose upstream tracking branch is gone and that have no worktree; it never removes or changes a herdr-managed worktree, so it cannot discard unlanded work.
    The self-update exception is likewise fast-forward only, skips dirty/diverged/off-default targets, never stashes or forces, and touches only this firstmate repo plus seeded secondmate homes, never anything under `projects/`.
    Project `AGENTS.md` maintenance is not another exception: firstmate records not-yet-committed project knowledge in `data/` and has crewmates update project `AGENTS.md` through normal worktree delivery (section 6).
 2. **Never merge a PR without the captain's explicit word.**
@@ -81,20 +81,20 @@ data/                personal fleet records; LOCAL, gitignored as a whole
 projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by crewmates: "<state>: <note>" lines
-  <id>.turn-ended    touched by turn-end hooks
-  <id>.meta          written by fm-spawn: window=, worktree=, project=, harness=, kind=, mode=, yolo=; kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
+  <id>.meta          written by fm-spawn: pane=, worktree=, project=, harness=, kind=, mode=, yolo=; kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
   <id>.check.sh      optional slow poll you write per task (e.g. merged-PR check)
   .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
   .afk               durable away-mode flag; present = sub-supervisor may inject escalations (set by /afk, cleared on user return)
   .watch.lock .wake-queue.lock watcher singleton and queue serialization locks
-  .hash-* .count-* .stale-* .seen-* .last-* .heartbeat-streak   watcher internals; never touch
+  .herdr-prev-status-* .herdr-idle-count-* .herdr-turn-*   watcher herdr status tracking; never touch
+  .stale-* .seen-* .last-* .heartbeat-streak   watcher internals; never touch
   .last-watcher-beat watcher liveness beacon, touched every poll; fm-guard.sh reads it
   .subsuper-* .supervise-daemon.*   sub-supervisor internals (stale markers, escalation buffer, inject-wedged marker, seen-status dedup, log, lock, pid); never touch
 .no-mistakes/        local validation state and evidence; gitignored
 ```
 
 Task ids are short kebab slugs with a random suffix, e.g. `fix-login-k3`.
-The tmux window for a task is always named `fm-<id>`.
+The herdr pane for a task is named `fm-<id>` (via `herdr agent start "fm-<id>"`); the pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
 
 ## 3. Bootstrap (run at every session start)
 
@@ -108,7 +108,6 @@ Silence means all good: say nothing and move on.
 Otherwise it prints one line per problem or capability fact; handle each:
 
 - `MISSING: <tool> (install: <command>)` - list the missing tools to the captain with a one-line purpose each plus the printed install commands, wait for consent (one approval may cover the list), then run `bin/fm-bootstrap.sh install <approved tools...>`.
-  For `treehouse`, this also covers an installed version whose `treehouse get` lacks `--lease`; treat it as an upgrade request.
 - `NEEDS_GH_AUTH` - ask the captain to run `! gh auth login` (interactive; you cannot run it for them).
 - `CREW_HARNESS_OVERRIDE: <name>` - record and use the override silently; surface a harness fact only if it actually blocks work or the captain asks.
 - `FLEET_SYNC: <repo>: skipped: <reason>` - bootstrap continued; investigate only if the dirty, diverged, or offline clone blocks work.
@@ -140,10 +139,11 @@ The recorded harness is used for every dispatch until changed; a per-task instru
 Resolve `default` by detecting your own harness (below).
 
 Each adapter splits into mechanics and knowledge.
-The mechanics (launch command, autonomy flag, turn-end hook) live in `bin/fm-spawn.sh`; the knowledge you need while supervising (busy signature, exit, interrupt, dialogs, quirks) lives in the tables below.
+The mechanics (launch command, autonomy flag) live in `bin/fm-spawn.sh`; the knowledge you need while supervising (exit, interrupt, dialogs, quirks) lives in the tables below.
+Herdr provides native agent status tracking (`idle`/`working`/`blocked`/`done`) for all adapters; turn-end detection is via `working→idle` transitions, not per-harness hook files.
 **Never dispatch a crewmate on an unverified adapter.**
 If `config/crew-harness` names an unverified one, tell the captain and fall back to your own harness until it is verified.
-If the captain asks for a new harness, propose verifying it first: spawn a trivial supervised task using fm-spawn's raw-launch-command escape hatch, confirm every fact empirically, then record the mechanics in fm-spawn, the busy signature in `fm-watch.sh` and `fm-tmux-lib.sh` defaults, any needed `FM_COMPOSER_IDLE_RE` empty-composer override, and the knowledge here, and commit.
+If the captain asks for a new harness, propose verifying it first: spawn a trivial supervised task using fm-spawn's raw-launch-command escape hatch, confirm every fact empirically, then record the mechanics in fm-spawn, any needed `FM_COMPOSER_IDLE_RE` empty-composer override, and the knowledge here, and commit.
 
 ### Detecting harnesses
 
@@ -151,11 +151,25 @@ If the captain asks for a new harness, propose verifying it first: spawn a trivi
 On `unknown`, ask the captain instead of guessing; a captain override always beats detection.
 When you verify a new adapter, record its env marker and command name in that script.
 
+### omp (oh-my-pi) (VERIFIED 2026-06-24, omp v16.1.16)
+
+This workstation runs omp inside herdr, so omp is the default own-harness here.
+
+| Fact | Value |
+|---|---|
+| Exit command | `/quit` |
+| Interrupt | single Escape |
+| Skill invocation | `/skill:<name>` (e.g. `/skill:no-mistakes`); natural language also works |
+
+Detection: omp sets `OMPCODE=1` AND `CLAUDECODE=1` (Claude API compatibility), so `bin/fm-harness.sh` checks `OMPCODE` BEFORE the `CLAUDECODE` branch, otherwise omp misdetects as claude.
+The launch template is `omp --auto-approve "$(cat <brief>)"`; `--auto-approve` is omp's skip-all-approvals autonomy flag (the analog of claude's `--dangerously-skip-permissions`).
+No trust or permission dialog blocks a fresh worktree launch (an onboarding splash shows briefly, then the brief processes); still peek the pane within ~20s as for any spawn.
+Composer: omp draws a full rounded box (`╭── … ──╮` over `╰── … ──╯`) whose last visible line is the bottom border; `bin/fm-herdr-lib.sh` strips the full box-drawing set so a border-only idle composer reads as empty rather than pending input.
+
 ### claude (VERIFIED)
 
 | Fact | Value |
 |---|---|
-| Busy-pane signature | `esc to interrupt` |
 | Exit command | `/exit` |
 | Interrupt | single Escape |
 | Skill invocation | `/<skill>` (e.g. `/no-mistakes`) |
@@ -163,18 +177,13 @@ When you verify a new adapter, record its env marker and command name in that sc
 First launch in a fresh worktree (or first ever on a machine) may show a trust or bypass-permissions confirmation.
 After every spawn, peek the pane within ~20s; if such a dialog is showing, accept it with `bin/fm-send.sh <window> --key Enter` (or the choice the dialog requires) and verify the brief started processing.
 
-Ghost text (prompt suggestions): claude renders a predicted-next-prompt suggestion as dim/faint text inside an otherwise-empty composer after a turn completes.
-A plain `tmux capture-pane` cannot tell that ghost text apart from text a human typed, so left unhandled it makes firstmate misread an idle composer as holding pending input.
-Firstmate launches every claude crewmate and secondmate with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (a per-launch env prefix in `bin/fm-spawn.sh`, scoped to firstmate-launched agents - it never touches the captain's global config), which disables the interactive ghost text at the source.
-The CLI's `--prompt-suggestions` flag is print/SDK-mode only and does NOT suppress the interactive composer ghost text (verified empirically on v2.1.186), so the env var is the correct control.
-As defense in depth for any pane that flag cannot reach (such as the captain's own firstmate composer the away-mode daemon reads), the pane reader in `bin/fm-tmux-lib.sh` captures only the composer line with ANSI styling, drops dim/faint (SGR 2) runs, and ignores them, so only normal-intensity typed text counts as pending input.
-That styled capture is internal to the boolean detector only; `fm-peek` and every other human/LLM-facing capture path stay plain `tmux capture-pane` with no escape codes.
+Ghost text: claude renders a predicted-next-prompt suggestion in an otherwise-empty composer after a turn completes.
+Firstmate launches every claude crewmate with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (env prefix in `bin/fm-spawn.sh`) to suppress it; `bin/fm-herdr-lib.sh` strips box-drawing borders as defense-in-depth for panes that flag cannot reach.
 
 ### codex (VERIFIED 2026-06-11, codex-cli 0.139.0)
 
 | Fact | Value |
 |---|---|
-| Busy-pane signature | `esc to interrupt` (shown as `• Working (Xs • esc to interrupt)`) |
 | Exit command | `/quit` (slash popup needs ~1s between text and Enter; fm-send handles it) |
 | Interrupt | single Escape |
 | Skill invocation | `$<skill>` (e.g. `$no-mistakes`); `/<skill>` is claude-only and codex rejects it as "Unrecognized command" |
@@ -186,7 +195,6 @@ Resume after exit: `codex resume <session-id>` (printed on quit).
 
 | Fact | Value |
 |---|---|
-| Busy-pane signature | `esc interrupt` (dotted spinner footer; note: no "to") |
 | Exit command | `/exit` |
 | Interrupt | double Escape; known flaky while a long shell command runs - a wedged pane may need `/exit` and relaunch |
 
@@ -198,15 +206,12 @@ If a pane shows the exit banner, relaunch with `--continue` to resume the sessio
 
 | Fact | Value |
 |---|---|
-| Busy-pane signature | `Working...` (braille spinner prefix; no "esc to interrupt" text) |
 | Exit command | `/quit` |
 | Interrupt | single Escape |
 
 pi has no permission system - crewmates are always autonomous.
 Keep the brief as ONE positional argument - multiple positional args become separate queued messages (fm-spawn's template does this correctly).
 Project trust dialog can appear on the first pi run in any not-yet-trusted directory (observed even on clean worktrees); accept with Enter - the decision persists per path in `~/.pi/agent/trust.json`, so later spawns in the same worktree slot skip it.
-fm-spawn keeps the turn-end extension in `state/`, outside the worktree, because project-local extension files make the trust gate strictly worse (and pollute the project).
-The extension must listen for pi's `turn_end` event, not `agent_end`, so the watcher wakes after each completed turn instead of only when the whole agent run exits.
 Environment marker for harness detection: pi sets `PI_CODING_AGENT=true` for its children.
 
 ## 5. Recovery (run at every session start, after bootstrap)
@@ -218,11 +223,11 @@ Reconcile reality with your records before doing anything else:
    If it refuses because another live session holds the lock, tell the captain another active session is already managing the work and operate read-only until resolved.
 2. Drain queued wakes with `bin/fm-wake-drain.sh` and keep the printed records as the first work queue for this recovery turn.
 3. Read `data/backlog.md`, `data/secondmates.md` if present, every `state/*.meta`, and every `state/*.status`.
-4. Use the `window=` values from this home's `state/*.meta` files as the live direct-report set, then check those tmux panes.
-   Do not sweep every `fm-*` tmux window across all sessions during recovery; another firstmate home's child panes may share that namespace and are not this home's orphans.
-5. If a recorded direct-report window is missing, reconcile it through its meta as described below.
-6. For meta with no window, reconcile by kind.
-   For ordinary crewmates, check `treehouse status` in that project, salvage or report.
+4. Use the `pane=` values from this home's `state/*.meta` files as the live direct-report set, then check those herdr panes via `herdr pane get <pane_id>`.
+   Do not sweep every `fm-*` herdr pane across all workspaces during recovery; another firstmate home's child panes may share that namespace and are not this home's orphans.
+5. If a recorded direct-report pane is missing or unreachable, reconcile it through its meta as described below.
+6. For meta with no pane, reconcile by kind.
+   For ordinary crewmates, check whether the worktree still exists under `$FM_WORKTREE_BASE/<id>`, salvage or report.
    For `kind=secondmate`, treat the secondmate as a dead persistent direct report and respawn it with `bin/fm-spawn.sh <id> --secondmate` against the recorded `home=`.
    If the meta is missing but `data/secondmates.md` still registers the secondmate, respawn from the registry entry and its persistent on-disk home.
 7. Do not reconstruct a secondmate's whole tree from the main home.
@@ -235,7 +240,7 @@ Reconcile reality with your records before doing anything else:
 10. Handle drained wakes, then arm the watcher (section 8) unless afk was re-entered in step 8, in which case the daemon manages the watcher.
 
 A firstmate restart must be a non-event.
-All truth lives in tmux, state files, data/backlog.md, data/secondmates.md, persistent secondmate homes, and treehouse; your conversation memory is a cache.
+All truth lives in herdr (pane status), state files, data/backlog.md, data/secondmates.md, persistent secondmate homes, and worktrees; your conversation memory is a cache.
 
 ## 6. Project management
 
@@ -257,12 +262,13 @@ Durable descriptive detail belongs in the project's own `AGENTS.md`.
 Every persistent secondmate has one line:
 
 ```markdown
-- <id> - <charter summary> (home: <absolute-home-path>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
+- <id> - <charter summary> (home: <absolute-home-path>[; workspace: <herdr-workspace-id>]; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
 ```
 
 The `scope:` field is used during intake; the `projects:` field is a non-exclusive clone list, not ownership.
-Use `bin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the charter to provision the persistent home and registry entry; `-` durably leases a fresh firstmate worktree via `treehouse get --lease` under the secondmate id.
-A leased home survives with no live process and is never recycled by a later `treehouse get` or `prune`, so the secondmate's slot stays reserved across restarts until the lease is released; that release happens only on explicit retirement or seed rollback, never on a routine restart or recovery.
+Use `bin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the charter to provision the persistent home and registry entry; `-` creates a herdr-managed git worktree of the firstmate repo at `<parent-of-repo>/fm-sm-<id>` and records the herdr workspace ID in the registry.
+The workspace ID is the durable handle for the home: teardown calls `herdr worktree remove --workspace <id>` to release the slot cleanly; a home without a workspace ID in the registry is a plain clone and is removed with `rm -rf`.
+The home persists with no live process and is never recycled by herdr until explicitly released; that release happens only on explicit retirement or seed rollback, never on a routine restart or recovery.
 The charter must be filled before seeding; direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.
 Seeding is transactional: if validation, cloning, no-mistakes initialization, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
 `bin/fm-home-seed.sh validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes.
@@ -278,7 +284,7 @@ This idle contract is encoded in the charter brief (section 11), so it travels w
 When a secondmate is created for a domain, the existing main-backlog items that fall under its scope should become its work instead of staying stranded in the main backlog.
 Scope-matching is firstmate's judgment against the secondmate's natural-language scope, not a keyword rule: read `data/backlog.md`, pick the queued items that fit the new scope, and move them with `bin/fm-backlog-handoff.sh <secondmate-id> <item-key>...`.
 The helper resolves the secondmate home from `data/secondmates.md` and mechanically moves each named item from the main `data/backlog.md` into the secondmate home's `data/backlog.md`, preserving the line and its section, so the item is neither duplicated nor lost.
-It refuses `## In flight` entries because active task ownership also lives in tmux and `state/`.
+It refuses `## In flight` entries because active task ownership also lives in herdr and `state/`.
 It is idempotent (an item already in the secondmate backlog is skipped) and refuses any destination that is not a genuine seeded firstmate home with safe operational directories and a matching `.fm-secondmate-home` marker, so a move can never land in a project.
 Do not hand off `local-only` items: that work stays with the main firstmate (section 7).
 
@@ -356,7 +362,7 @@ Route by the nature of the task, not just the project name.
 A project may appear in several `projects:` clone lists, so choose the secondmate whose natural-language scope actually fits the work, such as triage versus feature development.
 If the resolved project is `local-only`, keep the work with the main firstmate even when a secondmate scope sounds relevant.
 If a secondmate's scope fits, steer that secondmate with one concise instruction via `bin/fm-send.sh fm-<id> '<work request>'` and let it run the normal lifecycle inside its own home.
-The bare `fm-<id>` target resolves through this home's `state/<id>.meta`; pass `session:window` only when intentionally targeting a window outside this firstmate home.
+The bare `fm-<id>` target resolves through this home's `state/<id>.meta`; pass a pane id directly only when intentionally targeting a pane outside this firstmate home.
 Do not spawn a direct crewmate for work that belongs to a secondmate scope unless the secondmate is blocked or the captain explicitly redirects it.
 If no secondmate scope fits, proceed in the main firstmate or create a new secondmate with the captain when that domain should become persistent.
 When you create a new secondmate, hand its in-scope queued items off from the main backlog into its home with `bin/fm-backlog-handoff.sh` so it owns its domain's queue from day one (section 6).
@@ -390,12 +396,12 @@ bin/fm-spawn.sh <id1>=projects/<repo1> <id2>=projects/<repo2> [--scout]   # batc
 Dispatch several tasks in one call by passing `id=repo` pairs instead of a single `<id> <project>`; each pair is spawned through the same single-task path, a shared `--scout` applies to all, and the looping happens inside the script so you never hand-write a multi-task shell loop.
 If one pair fails, the rest still run and the batch exits non-zero.
 
-The script resolves the harness (`fm-harness.sh crew`), owns the verified launch templates, resolves the project's delivery mode (`fm-project-mode.sh`) for ship/scout tasks, and records `harness=`, `kind=`, `mode=`, and `yolo=` in the task's meta; a non-flag third argument containing whitespace is treated as a raw launch command (only for verifying new adapters).
-For `kind=secondmate`, the same script launches in the registered or explicit firstmate home instead of running `treehouse get` for a project, records `home=` and `projects=`, and uses the charter brief as the launch prompt.
+The script resolves the harness (`fm-harness.sh crew`), owns the verified launch templates, resolves the project's delivery mode (`fm-project-mode.sh`) for ship/scout tasks, and records `harness=`, `kind=`, `mode=`, `yolo=`, and `pane=` in the task's meta; a non-flag third argument containing whitespace is treated as a raw launch command (only for verifying new adapters).
+For `kind=secondmate`, the same script launches in the registered or explicit firstmate home instead of creating a project worktree, records `home=` and `projects=`, and uses the charter brief as the launch prompt.
 
-For ship and scout tasks, the script creates the window (in your current tmux session, or a dedicated `firstmate` session when you are outside tmux), runs `treehouse get`, waits for the worktree subshell, installs the turn-end hook, records `state/<id>.meta`, and launches the agent with the brief.
-For `kind=secondmate`, the script creates the same kind of window but starts directly in the persistent home.
-Project worktrees start at detached HEAD on a clean default branch; ship briefs tell the crewmate to create its branch, while scout briefs keep the worktree scratch.
+For ship and scout tasks, the script creates a git worktree via `git worktree add -b "fm/<id>" "$FM_WORKTREE_BASE/<id>" HEAD`, launches the agent with `herdr agent start "fm-<id>" --cwd <worktree>`, parses the returned `pane_id`, records `state/<id>.meta`, and submits the brief.
+For `kind=secondmate`, the script launches directly in the persistent home instead.
+Project worktrees start on a fresh branch off the default; ship briefs tell the crewmate to use that branch, while scout briefs keep the worktree scratch.
 After spawning, peek the pane to confirm the crewmate is processing the brief (and handle any trust dialog per section 4).
 Add the task to `data/backlog.md` under In flight.
 
@@ -461,10 +467,10 @@ A secondmate is persistent by default.
 An empty queue is healthy and does not trigger teardown.
 Run `bin/fm-teardown.sh <id>` for `kind=secondmate` only when the captain or main firstmate explicitly decides to retire that persistent supervisor.
 The safety check is the secondmate's own home: teardown refuses while its `state/*.meta` contains in-flight work.
-When it is safe, teardown kills the direct tmux window, removes the `data/secondmates.md` route, clears the main home metadata, and removes the retired secondmate home.
-Removing a leased home releases its durable treehouse lease (via `treehouse return`) so the pool slot is freed for reuse rather than left leased forever; a plain-clone home with no pool slot is simply removed.
-If `treehouse return` fails for a leased home, teardown stops with state intact rather than raw-removing the directory and hiding a held lease.
-With `--force`, teardown is the explicit discard path: it kills child windows, discards child work and state inside the secondmate home, removes the route, releases the lease, and removes the retired secondmate home.
+When it is safe, teardown closes the direct herdr pane, removes the `data/secondmates.md` route, clears the main home metadata, and removes the retired secondmate home.
+For herdr-managed homes (those with a `workspace:` field in `data/secondmates.md`), teardown calls `herdr worktree remove --workspace <id>` to remove the worktree and release the slot; a plain-clone home with no workspace field is removed directly with `rm -rf`.
+If `herdr worktree remove` fails, teardown stops with state intact rather than raw-removing the directory and hiding a still-live workspace.
+With `--force`, teardown is the explicit discard path: it closes child herdr panes, discards child work and state inside the secondmate home, removes the route, removes the workspace, and removes the retired secondmate home.
 
 ### Scout tasks (report instead of PR)
 
@@ -505,8 +511,8 @@ bin/fm-wake-drain.sh   # drain queued wake records at turn start
 On wake, in order of cheapness:
 
 1. Read the reason line and drain queued wake records with `bin/fm-wake-drain.sh`.
-2. `signal:` read the listed status files first; a wake lists every signal that landed within the coalescing grace window (e.g. a status write plus the same turn's turn-end marker), and each is ~30 tokens and usually sufficient.
-3. `stale:` the crewmate stopped without reporting; peek the pane (`bin/fm-peek.sh <window>`) to diagnose.
+2. `signal:` read the listed status files first; a wake lists every signal that landed within the coalescing grace window (e.g. a status write plus a herdr `working→idle` transition), and each is ~30 tokens and usually sufficient.
+3. `stale:` the crewmate's pane has been idle without a status update; peek the pane (`bin/fm-peek.sh <pane_id>`) to diagnose.
 4. `check:` a per-task poll fired (usually a merge); act on it.
 5. `heartbeat:` review the whole fleet: skim each window's status file, peek panes that look off, check PR-ready tasks for merge, reconcile data/backlog.md, then re-arm the watcher.
    A heartbeat with no captain-relevant change is internal; do not report that the fleet is unchanged.
@@ -514,12 +520,12 @@ On wake, in order of cheapness:
 Heartbeats back off exponentially while they are the only wakes firing (600s doubling to a 2h cap - an idle fleet stops burning turns); any signal, stale, or check wake resets the cadence to the base interval.
 Due per-task checks run before signal scanning so chatty crewmate status updates cannot starve slow polls like merge detection.
 
-Never rely on hooks or status files alone; the heartbeat review of every window is mandatory and unconditional.
-tmux is the ground truth.
+Never rely on status files alone; the heartbeat review of every pane is mandatory and unconditional.
+Herdr's native agent status is the ground truth.
 For `kind=secondmate`, an idle pane is healthy.
-A secondmate may be sitting on its own watcher with no visible pane changes, so parent supervision uses status writes plus heartbeat review, not pane-staleness.
-`fm-watch.sh` therefore skips stale-pane wakes for windows whose meta records `kind=secondmate`.
-This exception is narrow: ordinary crewmates still trip stale detection when their pane stops changing without a busy signature.
+A secondmate may be sitting on its own watcher with no herdr status changes, so parent supervision uses status writes plus heartbeat review, not pane-staleness.
+`fm-watch.sh` therefore skips stale-pane wakes for panes whose meta records `kind=secondmate`.
+This exception is narrow: ordinary crewmates still trip stale detection when their herdr status remains idle without a status update after the expected working period.
 
 **Watcher liveness is guarded, not just disciplined.**
 Arming the watcher is the last action of every wake-handling turn - but the protocol no longer relies on remembering that.
@@ -577,35 +583,19 @@ The marker travels with the message text; it does not rely on harness-level type
 The single-line format and the marker solve the same problem as the busy-guard (the daemon and the captain share one input channel): the digest is one unambiguous submission regardless of TUI, and firstmate can tell it apart from a real message.
 This is why fewer, cheaper firstmate turns handle the same fleet.
 
-**Injection hardening (the fixes):**
-- **Single-line digest** - embedded newlines are collapsed to a literal separator before injection, so submission is unambiguous regardless of harness.
-- **Composer guard on the supervisor pane** - before injecting, the daemon checks both `pane_is_busy` (harness busy footer = agent mid-turn) and `pane_input_pending` (real unsubmitted text on the cursor line = human mid-typing or previous injection with swallowed Enter).
-  Either condition **defers** the injection (buffer preserved for retry).
-  This is the human-in-the-pane safety property: the daemon never merges its digest into the captain's half-typed line.
-  The composer detector (shared with `fm-send.sh` in `bin/fm-tmux-lib.sh`) drops dim/faint ghost text, then strips the harness's composer box borders, so a ghost-only or idle *bordered* composer (claude draws `│ > … │`) reads as empty, not pending.
-  Without these filters, idle bordered composers and dim ghost suggestions can look like pending input and stall supervision (incidents afk-invx-i5 and composer-robust).
-  `FM_COMPOSER_IDLE_RE` still overrides empty-composer matching after dim-ghost and border stripping, and `FM_BUSY_REGEX` overrides busy footers.
-- **Max-defer escape** - the daemon must never silently wedge.
-  If anything stays buffered past `FM_MAX_DEFER_SECS` (default 300s), the daemon attempts one normal flush, which still requires an idle pane and empty composer.
-  If that cannot confirm a submit, it raises a loud, rate-limited wedge alarm (ERROR log + durable `state/.subsuper-inject-wedged` marker + a status-line flash).
-  A composer false-positive is then surfaced as a visible stall, never an unbounded silent no-op.
-- **Verified type-once submit model** - the digest is typed once via `send-keys -l`, then submitted with Enter and **verified**.
-  Enter is retried, Enter only and never a retype, until the composer is confirmed empty.
-  That empty composer is the acknowledgement that the submit landed, using the same dim-ghost-aware and border-aware detector so a ghost-only or bordered-empty claude composer counts as submitted rather than a false "swallowed Enter".
-  `fm-send.sh` shares this primitive and exits non-zero on a positively-confirmed swallow, so firstmate learns a steer did not land instead of leaving it unsubmitted.
-- **Marker strip** - `strip_injection_marker` removes the sentinel prefix before classification/relay, so the digest text firstmate sees is clean.
-- **Portable singleton lock** - the daemon uses the repo's mkdir-based lock helper (`fm-wake-lib.sh`) instead of `flock`, which is absent on macOS.
-- **Dedupe across signal/stale/scan** - `classify_signal` and `classify_stale` both check the seen-status marker before escalating, so a status escalated by one path is not re-escalated by another in the same digest.
-- **Auto-discovered supervisor pane** - the daemon resolves its injection target from `FM_SUPERVISOR_TARGET`, then `$TMUX_PANE` (inherited from the pane that launched it), then a `firstmate:0` fallback with a warning; the resolution source is logged at startup so a wrong-but-resolving fallback is detectable.
-
-**Reliability properties (must hold):** nothing is lost (the #29 queue plus `fm-wake-drain.sh` recover any missed/crashed injection); wedge detection is bounded-latency, not lossy; the catch-all scan backs up the keyword classifier; the daemon preserves single-instance portable lock, crash-loop backoff, a pane-gone guard, and a signal-trapped shutdown that flushes buffered escalations before exit.
-`FM_INJECT_SKIP` (default `heartbeat`) force-self-handles matching kinds, overriding classification - use sparingly.
+Before injecting, the daemon checks herdr agent status (busy = defer) and visible composer content (unsubmitted human text = defer), so it never merges a digest into the captain's half-typed line.
+The digest is collapsed to a single line, submitted via `herdr pane run`, and delivery is verified by waiting for a `working/done` status transition; `fm-send.sh` shares this primitive and exits non-zero if delivery cannot be confirmed.
+If anything stays buffered past `FM_MAX_DEFER_SECS` (default 300s) and the submit cannot be confirmed, the daemon raises a wedge alarm (ERROR log + `state/.subsuper-inject-wedged` marker) rather than silently dropping it.
+The supervisor pane is resolved from `FM_SUPERVISOR_TARGET`, then `herdr pane current`, then a named-pane fallback.
+`FM_COMPOSER_IDLE_RE` overrides empty-composer matching for custom prompt patterns.
+`FM_INJECT_SKIP` (default `heartbeat`) force-self-handles matching kinds - use sparingly.
+Nothing is lost: the durable wake queue plus `fm-wake-drain.sh` recover any missed injection; the daemon has crash-loop backoff and flushes buffered escalations on shutdown.
 
 ### Stuck-crewmate playbook (escalate in order)
 
 1. Peek the pane.
 2. Crewmate is waiting on a question its brief already answers: answer in one line via fm-send.
-3. Crewmate is confused or looping: interrupt with the adapter's interrupt key (the window's harness is recorded as `harness=` in `state/<id>.meta`; e.g. `bin/fm-send.sh <window> --key Escape`), then redirect with one corrective line.
+3. Crewmate is confused or looping: interrupt with the adapter's interrupt key (the pane's harness is recorded as `harness=` in `state/<id>.meta`; e.g. `bin/fm-send.sh fm-<id> --key Escape`), then redirect with one corrective line.
 4. Crewmate is genuinely wedged after redirection: exit the agent with the adapter's exit command, relaunch with the same brief plus a `progress so far` note you append to it.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; modern harnesses auto-compact and keep going.
@@ -706,6 +696,6 @@ The `/updatefirstmate` skill performs that pull in place for the running main fi
 It runs `bin/fm-update.sh`, which fast-forwards this firstmate repo's default branch from origin and then fast-forwards every registered secondmate home (resolved from `state/*.meta` and `data/secondmates.md`) the same way.
 The mechanics mirror `bin/fm-fleet-sync.sh` exactly: fast-forward only, never forcing, never creating a merge commit, never stashing, and skipping with a reported reason anything dirty, diverged, offline, or on a non-default branch, so prime directive #3 holds and no unlanded work is ever discarded.
 A tracked-files fast-forward leaves the gitignored operational dirs untouched, so a secondmate's in-flight work is never disrupted; secondmate homes are leased at a detached HEAD on the default branch and a fast-forward there advances only that worktree's HEAD.
-`bin/fm-update.sh` does only the git mechanics and prints a summary plus two action lines, `reread-firstmate: yes|no` and `nudge-secondmates: <window-targets...>|none`.
-The skill then performs the parts a script cannot: when the running firstmate's instruction surface changed it re-reads `AGENTS.md`, and for each updated live secondmate with metadata it sends a gentle one-line re-read nudge via `bin/fm-send.sh <window-target>` so the whole tree converges on the latest `bin/` and instructions.
+`bin/fm-update.sh` does only the git mechanics and prints a summary plus two action lines, `reread-firstmate: yes|no` and `nudge-secondmates: <pane-targets...>|none`.
+The skill then performs the parts a script cannot: when the running firstmate's instruction surface changed it re-reads `AGENTS.md`, and for each updated live secondmate with metadata it sends a gentle one-line re-read nudge via `bin/fm-send.sh <pane-target>` so the whole tree converges on the latest `bin/` and instructions.
 This is a sanctioned self-write to the firstmate repo and its own worktrees only, exactly like the fleet sync, and never touches anything under `projects/`.

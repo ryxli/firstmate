@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Tear down a finished task: return the treehouse worktree or retire a
-# secondmate home, kill the tmux window, clear volatile state, refresh/prune
+# Tear down a finished task: remove the herdr workspace/worktree or retire a
+# secondmate home, close the herdr pane, clear volatile state, refresh/prune
 # the project's clone for PR-based ship tasks, then print a backlog-refresh
 # reminder.
-# REFUSES if the worktree holds work not on any remote, because treehouse return
-# hard-resets the worktree and kills its processes. A fork counts as a remote,
-# so upstream-contribution PRs pushed to a fork satisfy this in any mode.
+# REFUSES if the worktree holds work not on any remote. A fork counts as a
+# remote, so upstream-contribution PRs pushed to a fork satisfy this in any mode.
 # local-only projects additionally accept work merged into the local default
 # branch (firstmate performs that merge on the captain's approval) as a fallback
 # for the common case where there is no remote at all.
@@ -15,10 +14,9 @@
 # Secondmates (kind=secondmate in meta) are retired explicitly. Normal
 # teardown refuses while their home has in-flight crewmate meta files; --force
 # is the approved discard path that prevalidates child removal targets, discards
-# child work, kills child windows, and removes the retired home. Removing a
-# leased home releases its durable treehouse lease so the pool slot is freed,
-# never left leased forever. If the treehouse return fails, teardown leaves the
-# leased home and state in place instead of hiding a still-held lease.
+# child work, kills child panes, and removes the retired home. Removing a
+# herdr-managed home calls "herdr worktree remove" to close the workspace and
+# prune the git worktree cleanly. A plain-clone home is removed with rm -rf.
 # Usage: fm-teardown.sh <task-id> [--force]
 #   --force skips the unpushed-work check for ordinary tasks and discards
 #   secondmate child work for kind=secondmate. Only use it when the captain has
@@ -41,7 +39,7 @@ FORCE=${2:-}
 META="$STATE/$ID.meta"
 [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
 WT=$(grep '^worktree=' "$META" | cut -d= -f2-)
-T=$(grep '^window=' "$META" | cut -d= -f2-)
+PANE=$(grep '^pane=' "$META" | cut -d= -f2-)
 PROJ=$(grep '^project=' "$META" | cut -d= -f2-)
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
@@ -126,6 +124,12 @@ removal_target_abs_path() {
   fi
 }
 
+registry_workspace_id_for_id() {
+  local id=$1 reg=$2
+  [ -f "$reg" ] || return 0
+  sed -n "s/^- $id [^(]*(.*workspace: \\([^;)]*\\).*/\\1/p" "$reg" | head -1
+}
+
 worktree_registered_for_project() {
   local project=$1 target=$2 abs_target listed line listed_abs
   [ -n "$project" ] || return 1
@@ -144,11 +148,6 @@ worktree_registered_for_project() {
 $listed
 EOF
   return 1
-}
-
-firstmate_home_has_treehouse_slot() {
-  local home=$1
-  worktree_registered_for_project "$FM_ROOT" "$home"
 }
 
 validate_removal_target() {
@@ -307,18 +306,15 @@ EOF
 }
 
 remove_firstmate_home() {
-  local home=$1 label=$2 expected_id=${3:-} abs_home_path
+  local home=$1 label=$2 expected_id=${3:-} abs_home_path workspace_id
   [ -n "$home" ] || return 0
   [ -e "$home" ] || return 0
   abs_home_path=$(validate_firstmate_home_for_removal "$home" "$label" "$expected_id") || return 1
   [ -n "$abs_home_path" ] || return 0
-  if firstmate_home_has_treehouse_slot "$abs_home_path"; then
-    command -v treehouse >/dev/null 2>&1 || {
-      echo "error: treehouse command not found; cannot return $label $abs_home_path" >&2
-      return 1
-    }
-    ( cd "$FM_ROOT" && treehouse return --force "$abs_home_path" ) || {
-      echo "error: treehouse return failed for $label $abs_home_path; lease may still be held" >&2
+  workspace_id=$(registry_workspace_id_for_id "$expected_id" "$SECONDMATE_REG")
+  if [ -n "$workspace_id" ]; then
+    herdr worktree remove --workspace "$workspace_id" --force >/dev/null 2>&1 || {
+      echo "error: herdr worktree remove failed for $label workspace $workspace_id; workspace may still exist" >&2
       return 1
     }
     return 0
@@ -355,13 +351,14 @@ cleanup_firstmate_home_children() {
   for child_meta in "$sub_state"/*.meta; do
     [ -e "$child_meta" ] || continue
     child_id=$(basename "$child_meta" .meta)
-    child_t=$(meta_value "$child_meta" window)
     child_wt=$(meta_value "$child_meta" worktree)
     child_proj=$(meta_value "$child_meta" project)
     child_kind=$(meta_value "$child_meta" kind)
     [ -n "$child_kind" ] || child_kind=ship
-    if [ -n "$child_t" ]; then
-      tmux kill-window -t "$child_t" 2>/dev/null || true
+    local child_pane
+    child_pane=$(meta_value "$child_meta" pane)
+    if [ -n "$child_pane" ]; then
+      herdr pane close "$child_pane" 2>/dev/null || true
     fi
     if [ "$child_kind" = secondmate ]; then
       child_home=$(meta_value "$child_meta" home)
@@ -372,14 +369,17 @@ cleanup_firstmate_home_children() {
       fi
     elif [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
       validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
-      rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js"
-      if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
-        ( cd "$child_proj" && treehouse return --force "$child_wt" ) || safe_rm_rf_child_worktree "$child_wt" "$child_proj"
+      if [ -n "$child_proj" ] && [ -d "$child_proj" ]; then
+        git -C "$child_proj" worktree remove --force "$child_wt" 2>/dev/null || safe_rm_rf_child_worktree "$child_wt" "$child_proj"
+        git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
       else
         safe_rm_rf_child_worktree "$child_wt" "$child_proj"
       fi
     fi
-    rm -f "$sub_state/$child_id.status" "$sub_state/$child_id.turn-ended" "$sub_state/$child_id.check.sh" "$sub_state/$child_id.meta" "$sub_state/$child_id.pi-ext.ts"
+    local ck
+    ck=$(printf '%s' "$(meta_value "$child_meta" pane)" | tr ':' '_')
+    rm -f "$sub_state/$child_id.status" "$sub_state/$child_id.check.sh" "$sub_state/$child_id.meta"
+    rm -f "$sub_state/.herdr-prev-status-$ck" "$sub_state/.herdr-idle-count-$ck" "$sub_state/.herdr-turn-$ck" "$sub_state/.stale-$ck"
   done
 }
 
@@ -457,31 +457,28 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   fi
 fi
 
-# Best-effort: drop the local task branch so the shared repo does not accumulate refs.
-if [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
-  branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
-  if [ "$branch" != "HEAD" ]; then
-    if git -C "$WT" checkout --detach -q 2>/dev/null; then
-      git -C "$WT" branch -D "$branch" >/dev/null 2>&1 || true
-    fi
-  fi
-  # Remove our hook file so a reused pool worktree cannot fire signals for a dead task.
-  rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js"
-  # Kills remaining processes in the worktree (including the agent), resets, returns
-  # to pool. treehouse resolves the pool from the working directory, so run it from
-  # the project.
-  ( cd "$PROJ" && treehouse return --force "$WT" )
-fi
+# Close the herdr agent pane (kills the process inside it).
+[ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
 
-tmux kill-window -t "$T" 2>/dev/null || true
+# Remove the git worktree and its branch for ship/scout tasks.
+if [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
+  if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
+    git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+    git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
+  else
+    rm -rf "$WT"
+  fi
+fi
 if [ "$KIND" = secondmate ]; then
   [ -n "$HOME_PATH" ] || HOME_PATH=$WT
   remove_firstmate_home "$HOME_PATH" "secondmate home" "$ID"
   remove_secondmate_registry_entry "$ID"
 fi
-rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.check.sh" "$STATE/$ID.meta" "$STATE/$ID.pi-ext.ts"
+PANE_KEY=$(printf '%s' "$PANE" | tr ':' '_')
+rm -f "$STATE/$ID.status" "$STATE/$ID.check.sh" "$STATE/$ID.meta"
+rm -f "$STATE/.herdr-prev-status-$PANE_KEY" "$STATE/.herdr-idle-count-$PANE_KEY" "$STATE/.herdr-turn-$PANE_KEY" "$STATE/.stale-$PANE_KEY"
 if [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$MODE" != local-only ]; then
   "$FM_ROOT/bin/fm-fleet-sync.sh" "$PROJ" || true
 fi
-echo "teardown $ID complete (window $T, worktree $WT)"
+echo "teardown $ID complete (pane $PANE, worktree $WT)"
 backlog_refresh_reminder

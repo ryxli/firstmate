@@ -40,7 +40,7 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-teardown-tests.XXXXXX")
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)
-#   $CASE/fakebin/      - mocks for treehouse, tmux (PATH-prepended by caller)
+#   $CASE/fakebin/      - mocks for herdr (PATH-prepended by caller)
 #   $CASE/origin.git/   - bare upstream repo (so the project clone has origin)
 #   $CASE/project/      - clone of origin; acts as the firstmate project dir
 #   $CASE/wt/           - a worktree of the project (the task worktree)
@@ -53,17 +53,12 @@ make_case() {
 
   # Mocks for the post-check teardown steps. Refuse logic exits before these
   # run; the ALLOW cases need them so the script can complete cleanly.
-  cat > "$fakebin/treehouse" <<'SH'
+  cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
-# `treehouse return --force <wt>`: succeed silently.
+# herdr pane close, worktree remove, etc.: succeed silently.
 exit 0
 SH
-  cat > "$fakebin/tmux" <<'SH'
-#!/usr/bin/env bash
-# tmux kill-window etc.: succeed silently.
-exit 0
-SH
-  chmod +x "$fakebin/treehouse" "$fakebin/tmux"
+  chmod +x "$fakebin/herdr"
 
   # Bare origin so the clone has an `origin` remote and origin/HEAD.
   git init -q --bare "$case_dir/origin.git"
@@ -102,7 +97,7 @@ SH
 write_meta() {
   local case_dir=$1 mode=$2 kind=$3
   cat > "$case_dir/state/task-x1.meta" <<EOF
-window=fm-task-x1
+pane=w1:p1
 worktree=$case_dir/wt
 project=$case_dir/project
 kind=$kind
