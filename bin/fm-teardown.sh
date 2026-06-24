@@ -375,6 +375,15 @@ cleanup_firstmate_home_children() {
       if [ -n "$child_workspace_id" ]; then
         herdr worktree remove --workspace "$child_workspace_id" --force 2>/dev/null || true
         [ -n "$child_proj" ] && [ -d "$child_proj" ] && git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
+        if [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
+          if [ -n "$child_proj" ] && [ -d "$child_proj" ]; then
+            git -C "$child_proj" worktree remove --force "$child_wt" 2>/dev/null || safe_rm_rf_child_worktree "$child_wt" "$child_proj"
+            git -C "$child_proj" worktree prune 2>/dev/null || true
+            git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
+          else
+            safe_rm_rf_child_worktree "$child_wt" "$child_proj"
+          fi
+        fi
       elif [ -n "$child_proj" ] && [ -d "$child_proj" ]; then
         git -C "$child_proj" worktree remove --force "$child_wt" 2>/dev/null || safe_rm_rf_child_worktree "$child_wt" "$child_proj"
         git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
