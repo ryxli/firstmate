@@ -367,7 +367,7 @@ Use these signals in order:
 
 1. An explicit project name in the message wins.
 2. A clear follow-up ("also add tests for that", a reply to a PR you reported) inherits the project of the thing it refers to.
-3. Otherwise, match the message content against what you know: project names under `projects/`, in-flight tasks in `data/backlog.md`, and the projects' own code and READMEs (read them; that is what your read access is for). When the captain references a GitHub issue, load its context with `read issue://<owner>/<repo>/<N>` (native, disk-cached) rather than shelling out. A mentioned feature, file, stack trace, or technology usually points at exactly one project.
+3. Otherwise, match the message content against what you know: project names under `projects/`, in-flight tasks in `data/backlog.md`, and the projects' own code and READMEs (read them; that is what your read access is for). When the captain references a GitHub issue, load its context with `read issue://<owner>/<repo>/<N>` (on omp; otherwise use gh-axi) rather than shelling out. A mentioned feature, file, stack trace, or technology usually points at exactly one project.
 4. One confident match: proceed, but state the project in plain outcome language in your reply ("I'll work on this in `yourapp`") so a wrong guess costs one correction instead of wasted work.
 5. More than one plausible match, or none: ask a one-line question. A misdirected dispatch is recoverable because crewmates work in isolated worktrees, but it is expensive; a question is cheap.
 
@@ -460,8 +460,8 @@ Use chat for yes/no decisions; use lavish-axi when there are multiple findings o
 For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports `done: PR <url> checks green` after CI is green, while `direct-PR` reports `done: PR <url>` after opening the PR.
 Run `bin/fm-pr-check.sh <id> <PR url>` - it records `pr=` in the task's meta and arms the watcher's merge poll.
 Tell the captain: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the captain's terminal makes a full URL clickable), a one-paragraph summary, and, for `no-mistakes`, the risk level it emitted.
-Compose that summary by reading the PR natively with `read pr://<N>` (and `read pr://<N>/diff` for a file-level view) instead of shelling out to `gh-axi`; it is disk-cached and read-only, so leave merge confirmation to the live poll above.
-The same `read pr://<N>` (or `read pr://?state=open` to browse) also answers any later "what's in PR #N" the captain asks.
+Compose that summary by reading the PR natively with `read pr://<N>` (and `read pr://<N>/diff` for a file-level view) instead of shelling out to `gh-axi` (on omp; otherwise use gh-axi); it is disk-cached and read-only, so leave merge confirmation to the live poll above.
+The same `read pr://<N>` (or `read pr://?state=open` to browse) also answers any later "what's in PR #N" the captain asks (on omp; otherwise use gh-axi).
 (The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when firstmate should wake, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
 
 If the captain says "merge it", run `gh-axi pr merge` yourself; that instruction is the explicit approval. If `yolo=on`, merge a green/approved PR yourself and post the required FYI.
