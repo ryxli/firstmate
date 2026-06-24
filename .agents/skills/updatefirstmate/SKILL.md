@@ -21,7 +21,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    ```sh
    bin/fm-update.sh
    ```
-   It fast-forwards this firstmate repo's default branch from origin, then fast-forwards every registered secondmate home (each a treehouse worktree of this same repo, leased at a detached HEAD on the default branch) the same way.
+   It fast-forwards this firstmate repo's default branch from origin, then fast-forwards every registered secondmate home (each a herdr-managed git worktree of this repo, or a plain-clone secondmate home) the same way.
    It prints one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
    - `reread-firstmate: yes|no`
    - `nudge-secondmates: <window-targets...>|none`

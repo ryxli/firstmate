@@ -77,7 +77,7 @@ opencode, and pi).
 ## Busy-guard and composer guard
 
 The daemon never injects into an in-use pane. Two checks run before every
-injection (shared with `fm-send.sh` via `bin/fm-tmux-lib.sh`):
+injection (shared with `fm-send.sh` via `bin/fm-herdr-lib.sh`):
 
 - **`pane_is_busy`** — the harness shows a busy footer (agent mid-turn).
 - **`pane_input_pending`** — the cursor line holds real unsubmitted text (a

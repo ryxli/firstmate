@@ -6,8 +6,6 @@
 #          Lines: "MISSING: <tool> (install: <command>)", "NEEDS_GH_AUTH",
 #                 "CREW_HARNESS_OVERRIDE: <name>", "FLEET_SYNC: <repo>: skipped: <reason>",
 #                 "TASKS_AXI: available".
-#          treehouse is also MISSING when its installed version lacks
-#          "treehouse get --lease" support.
 #          tasks-axi is an OPTIONAL backlog-management capability reported only
 #          when tasks-axi --version is 0.1.1 or newer. It is never a MISSING
 #          line and never prompts an install.
@@ -66,18 +64,19 @@ fleet_sync() {
 
 install_cmd() {
   case "$1" in
-    tmux|node|gh) echo "brew install $1  # or the platform's package manager" ;;
-    treehouse) echo "curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh" ;;
+    herdr) echo "mise install herdr  # or download from https://herdr.dev" ;;
+    node|gh) echo "brew install $1  # or the platform's package manager" ;;
     no-mistakes) echo "curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh" ;;
     gh-axi|chrome-devtools-axi|lavish-axi) echo "npm install -g $1 && $1 setup hooks" ;;
     *) return 1 ;;
   esac
 }
 
-TOOLS="tmux node gh treehouse no-mistakes gh-axi chrome-devtools-axi lavish-axi"
+# herdr is the terminal/agent substrate and also manages secondmate home worktrees.
+TOOLS="herdr node gh no-mistakes gh-axi chrome-devtools-axi lavish-axi"
 
-treehouse_supports_lease() {
-  treehouse get --help 2>&1 | grep -Eq '(^|[^[:alnum:]_-])--lease([^[:alnum:]_-]|$)'
+herdr_server_running() {
+  herdr status 2>/dev/null | grep -q 'status: running'
 }
 
 if [ "${1:-}" = "install" ]; then
@@ -95,8 +94,8 @@ fi
 for t in $TOOLS; do
   command -v "$t" >/dev/null || echo "MISSING: $t (install: $(install_cmd "$t"))"
 done
-if command -v treehouse >/dev/null 2>&1 && ! treehouse_supports_lease; then
-  echo "MISSING: treehouse (install: $(install_cmd treehouse))"
+if command -v herdr >/dev/null 2>&1 && ! herdr_server_running; then
+  echo "MISSING: herdr-server (start with: herdr)"
 fi
 gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
 crew=

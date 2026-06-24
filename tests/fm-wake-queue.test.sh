@@ -35,113 +35,108 @@ trap cleanup EXIT
 
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-wake-tests.XXXXXX")
 
+# make_case: minimal fake herdr for tests that run the watcher directly.
+# Status is controlled by writing a status string to the file at
+# $FM_FAKE_HERDR_STATUS_FILE (default: returns "idle").
 make_case() {
   local name=$1 dir fakebin
   dir="$TMP_ROOT/$name"
   fakebin="$dir/fakebin"
   mkdir -p "$dir/state" "$fakebin"
-  cat > "$fakebin/tmux" <<'SH'
+  cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
-set -u
-if [ "${1:-}" = "list-windows" ]; then
-  if [ -n "${FM_FAKE_TMUX_WINDOW:-}" ]; then
-    printf '%s\n' "$FM_FAKE_TMUX_WINDOW"
-  fi
-  exit 0
-fi
-if [ "${1:-}" = "capture-pane" ]; then
-  if [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ]; then
-    cat "$FM_FAKE_TMUX_CAPTURE"
-  fi
-  exit 0
-fi
-exit 1
+get_status() {
+  local f="${FM_FAKE_HERDR_STATUS_FILE:-}"
+  [ -n "$f" ] && [ -f "$f" ] && cat "$f" 2>/dev/null && return
+  printf 'idle'
+}
+case "${1:-}" in
+  agent)
+    case "${2:-}" in
+      get) printf '{"agent_status":"%s"}\n' "$(get_status)"; exit 0 ;;
+    esac ;;
+  pane)
+    case "${2:-}" in
+      read) exit 0 ;;
+    esac ;;
+esac
+exit 0
 SH
-  chmod +x "$fakebin/tmux"
+  chmod +x "$fakebin/herdr"
   printf '%s\n' "$dir"
 }
 
-# Like make_case, but the fake tmux also covers the sub-supervisor daemon's
-# surface (display-message pane probe, send-keys capture) so the daemon's
-# injection + housekeeping paths can be exercised. Behavior is controlled via
-# FM_FAKE_TMUX_* env vars set per test.
+# make_supercase: comprehensive fake herdr covering all daemon + injection paths.
+# Control knobs (all env vars):
+#   FM_FAKE_HERDR_STATUS_FILE   path to a file holding the agent status string
+#   FM_FAKE_HERDR_PANE_FILE     path to a file whose content herdr pane read returns
+#   FM_FAKE_HERDR_SENT          path to a log file; herdr pane run appends submitted text
+#   FM_FAKE_HERDR_PANE_ALIVE    "1" (default) means herdr pane get succeeds; "0" = exit 1
+#   FM_FAKE_HERDR_SWALLOW_FILE  path to a flag file; when present, pane run is swallowed
+#   FM_FAKE_HERDR_PERSIST_SWALLOW  "1" = keep swallow flag (persistent); default one-shot
+#   FM_FAKE_HERDR_SEND_FAIL     "1" = herdr pane run exits 1 (send failure)
+#   FM_FAKE_HERDR_CURRENT_PANE  pane id returned by herdr pane current (default "fakepane")
 make_supercase() {
   local name=$1 dir fakebin
   dir="$TMP_ROOT/$name"
   fakebin="$dir/fakebin"
   mkdir -p "$dir/state" "$fakebin"
-  cat > "$fakebin/tmux" <<'SH'
+  cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 set -u
+get_status() {
+  local f="${FM_FAKE_HERDR_STATUS_FILE:-}"
+  [ -n "$f" ] && [ -f "$f" ] && cat "$f" 2>/dev/null && return
+  printf 'idle'
+}
+set_status() {
+  local f="${FM_FAKE_HERDR_STATUS_FILE:-}"
+  [ -n "$f" ] && printf '%s' "$1" > "$f"
+}
+pane_content() {
+  local f="${FM_FAKE_HERDR_PANE_FILE:-}"
+  [ -n "$f" ] && [ -f "$f" ] && cat "$f" 2>/dev/null || true
+}
+
 case "${1:-}" in
-  display-message)
-    [ "${FM_FAKE_TMUX_PANE_ALIVE:-1}" = "1" ] || exit 1
-    _print=0
-    # Return cursor_y when the format asks for it (pane_input_pending).
-    for _a in "$@"; do
-      case "$_a" in *cursor_y*) printf '%s\n' "${FM_FAKE_TMUX_CURSOR_Y:-0}"; exit 0 ;; esac
-      [ "$_a" = "-p" ] && _print=1
-    done
-    [ "$_print" = 1 ] && printf 'fakepane\n'
-    exit 0 ;;
-  list-windows)
-    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] && printf '%s\n' "$FM_FAKE_TMUX_WINDOW"
-    exit 0 ;;
-  capture-pane)
-    # Honor a single-line band capture (-S N -E M, both non-negative) the way the
-    # composer reader now bounds its capture to the cursor row; otherwise (e.g.
-    # fm_pane_is_busy's "-S -40" tail) return the whole capture. -e is accepted and
-    # ignored: this fake emits plain text, which the dim-stripper passes through.
-    _S=""; _E=""; shift
-    while [ "$#" -gt 0 ]; do
-      case "$1" in
-        -S) _S="${2:-}"; shift 2; continue ;;
-        -E) _E="${2:-}"; shift 2; continue ;;
-        *) shift ;;
-      esac
-    done
-    [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ] || exit 0
-    if [ -n "$_S" ] && [ -n "$_E" ]; then
-      case "$_S$_E" in
-        *[!0-9]*) cat "$FM_FAKE_TMUX_CAPTURE" 2>/dev/null ;;
-        *) sed -n "$((_S + 1)),$((_E + 1))p" "$FM_FAKE_TMUX_CAPTURE" 2>/dev/null ;;
-      esac
-    else
-      cat "$FM_FAKE_TMUX_CAPTURE" 2>/dev/null
-    fi
-    exit 0 ;;
-  send-keys)
-    while [ "$#" -gt 0 ]; do
-      case "$1" in
-        -l) shift; [ "$#" -gt 0 ] && {
-          printf '%s\n' "$1" >> "${FM_FAKE_TMUX_SENT:-/dev/null}"
-          # Reflect sent text into capture so pane_input_pending sees it as
-          # pending input (text in the composer).
-          [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ] && printf '%s\n' "$1" >> "$FM_FAKE_TMUX_CAPTURE"
-        } ;;
-        Enter)
-          # Optionally swallow Enter (file-based flag) to test the retry path.
-          if [ -n "${FM_FAKE_TMUX_SWALLOW_FILE:-}" ] && [ -f "$FM_FAKE_TMUX_SWALLOW_FILE" ]; then
-            rm -f "$FM_FAKE_TMUX_SWALLOW_FILE"
-          else
-            printf '[ENTER]\n' >> "${FM_FAKE_TMUX_SENT:-/dev/null}"
-            # Enter submits: clear the last line (the typed text) from the
-            # capture, simulating the composer being cleared on submit.
-            if [ -n "${FM_FAKE_TMUX_CAPTURE:-}" ] && [ -s "$FM_FAKE_TMUX_CAPTURE" ]; then
-              _tmp=$(mktemp 2>/dev/null) || _tmp="${FM_FAKE_TMUX_CAPTURE}.tmp"
-              sed '$d' "$FM_FAKE_TMUX_CAPTURE" > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$FM_FAKE_TMUX_CAPTURE"
-              rm -f "$_tmp" 2>/dev/null
-            fi
-          fi
-          ;;
-      esac
-      shift
-    done
-    exit 0 ;;
+  pane)
+    case "${2:-}" in
+      get)
+        [ "${FM_FAKE_HERDR_PANE_ALIVE:-1}" = "1" ] || exit 1
+        exit 0 ;;
+      read)
+        pane_content; exit 0 ;;
+      run)
+        # herdr pane run <pane> <text>
+        pane="${3:-}"; shift 3 2>/dev/null || true; text="$*"
+        [ "${FM_FAKE_HERDR_SEND_FAIL:-0}" = "1" ] && exit 1
+        sw="${FM_FAKE_HERDR_SWALLOW_FILE:-}"
+        if [ -n "$sw" ] && [ -f "$sw" ]; then
+          [ "${FM_FAKE_HERDR_PERSIST_SWALLOW:-0}" = "1" ] || rm -f "$sw"
+          # Text lands in pane as pending (not submitted)
+          [ -n "${FM_FAKE_HERDR_PANE_FILE:-}" ] && printf '%s\n' "$text" > "${FM_FAKE_HERDR_PANE_FILE}"
+        else
+          [ -n "${FM_FAKE_HERDR_SENT:-}" ] && printf '%s\n' "$text" >> "${FM_FAKE_HERDR_SENT}"
+          # Agent transitions to working (message received)
+          set_status working
+          # Composer cleared
+          [ -n "${FM_FAKE_HERDR_PANE_FILE:-}" ] && : > "${FM_FAKE_HERDR_PANE_FILE}"
+        fi
+        exit 0 ;;
+      send-keys) exit 0 ;;
+      current)
+        printf '{"pane_id":"%s"}\n' "${FM_FAKE_HERDR_CURRENT_PANE:-fakepane}"; exit 0 ;;
+    esac ;;
+  agent)
+    case "${2:-}" in
+      get) printf '{"agent_status":"%s"}\n' "$(get_status)"; exit 0 ;;
+    esac ;;
+  notification) exit 0 ;;
+  status) printf 'status: running\n'; exit 0 ;;
 esac
-exit 1
+exit 0
 SH
-  chmod +x "$fakebin/tmux"
+  chmod +x "$fakebin/herdr"
   printf '%s\n' "$dir"
 }
 
@@ -194,14 +189,6 @@ is_live_non_zombie() {
     Z*) return 1 ;;
   esac
   return 0
-}
-
-hash_text() {
-  if command -v md5 >/dev/null 2>&1; then
-    printf '%s' "$1" | md5 -q
-  else
-    printf '%s' "$1" | md5sum | cut -d' ' -f1
-  fi
 }
 
 test_concurrent_append_and_drain() {
@@ -258,26 +245,29 @@ test_signal_catchup_without_running_watcher() {
 }
 
 test_stale_enqueue_before_suppressor() {
-  local dir state fakebin out drain_out capture_file window key pane_hash
+  local dir state fakebin out drain_out status_file pane key
   dir=$(make_case stale)
   state="$dir/state"
   fakebin="$dir/fakebin"
   out="$dir/watch.out"
   drain_out="$dir/drain.out"
-  capture_file="$dir/pane.txt"
-  window="test:fm-stale"
-  printf 'idle prompt' > "$capture_file"
-  printf 'window=%s\nkind=ship\n' "$window" > "$state/stale.meta"
-  key=$(printf '%s' "$window" | tr ':/.' '___')
-  pane_hash=$(hash_text "idle prompt")
-  printf '%s' "$pane_hash" > "$state/.hash-$key"
-  printf '1\n' > "$state/.count-$key"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pane="w1:p1"
+  key=$(printf '%s' "$pane" | tr ':' '_')
+  # Meta file so recorded_panes() yields this pane.
+  printf 'pane=%s\nkind=ship\n' "$pane" > "$state/stale.meta"
+  # Seed idle count at STALE_POLLS-1 so the next poll hits the threshold.
+  printf '1\n' > "$state/.herdr-idle-count-$key"
+  # Fake herdr reports idle status.
+  status_file="$dir/herdr-status"
+  printf 'idle' > "$status_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_STALE_POLLS=2 "$WATCH" > "$out" &
   wait_for_exit "$!" 40 || fail "watcher did not exit for stale pane"
-  grep -Fx "stale: $window" "$out" >/dev/null || fail "watcher did not print stale wake"
+  grep -Fx "stale: $pane" "$out" >/dev/null || fail "watcher did not print stale wake"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after stale wake failed"
-  grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null || fail "stale wake was not queued"
-  [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$pane_hash" ] || fail "stale suppressor was not written"
+  grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$pane" >/dev/null || fail "stale wake was not queued"
+  [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "idle" ] || fail "stale suppressor was not written"
   pass "stale wake is queued before suppressor state is advanced"
 }
 
@@ -358,12 +348,12 @@ test_drain_dedupes_obvious_duplicates() {
   append_wake "$state" heartbeat heartbeat heartbeat || fail "first heartbeat append failed"
   append_wake "$state" signal task.status "signal: $state/task.status" || fail "first signal append failed"
   append_wake "$state" heartbeat heartbeat heartbeat || fail "second heartbeat append failed"
-  append_wake "$state" signal task.status "signal: $state/task.status $state/task.turn-ended" || fail "second signal append failed"
+  append_wake "$state" signal task.status "signal: $state/task.status $state/task.herdr-turn" || fail "second signal append failed"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "dedupe drain failed"
   count=$(awk 'NF { count++ } END { print count + 0 }' "$out")
   [ "$count" -eq 2 ] || fail "expected 2 deduped records, got $count"
   grep "$(printf '\theartbeat\theartbeat\theartbeat')" "$out" >/dev/null || fail "heartbeat was not preserved"
-  grep "$(printf '\tsignal\ttask.status\t')" "$out" | grep -F "$state/task.turn-ended" >/dev/null || fail "latest signal payload was not preserved"
+  grep "$(printf '\tsignal\ttask.status\t')" "$out" | grep -F "$state/task.herdr-turn" >/dev/null || fail "latest signal payload was not preserved"
   pass "drain collapses obvious duplicate heartbeat and signal records"
 }
 
@@ -493,17 +483,19 @@ test_stale_terminal_escalates() {
 }
 
 test_housekeeping_persistent_stale_escalates() {
-  local dir state fakebin win pane key
+  local dir state fakebin pane key status_file
   dir=$(make_supercase stale-persistent)
   state="$dir/state"
   fakebin="$dir/fakebin"
-  win="sess:fm-pers-w5"
-  pane="$dir/pane.txt"
+  pane="w1:p5"
   printf 'working\n' > "$state/pers-w5.status"
-  printf 'idle prompt $\n' > "$pane"
+  # Meta file so pane_for_task("pers_w5") resolves to the pane id.
+  printf 'pane=%s\nkind=ship\n' "$pane" > "$state/pers-w5.meta"
   key=$(printf '%s' "pers-w5" | tr ':/.' '___')
   echo $(( $(date +%s) - 500 )) > "$state/.subsuper-stale-$key"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$win" FM_FAKE_TMUX_CAPTURE="$pane" \
+  # Pane reports idle (not busy) so housekeeping escalates the stale.
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_STATUS_FILE="$status_file" \
     FM_STATE_OVERRIDE="$state" FM_STALE_ESCALATE_SECS=240 housekeeping "$state"
   [ -s "$state/.subsuper-escalations" ] || fail "persistent stale was not escalated"
   [ ! -e "$state/.subsuper-stale-$key" ] || fail "stale marker not cleared after escalation"
@@ -511,17 +503,18 @@ test_housekeeping_persistent_stale_escalates() {
 }
 
 test_housekeeping_resumed_stale_cleared() {
-  local dir state fakebin win pane key
+  local dir state fakebin pane key status_file
   dir=$(make_supercase stale-resumed)
   state="$dir/state"
   fakebin="$dir/fakebin"
-  win="sess:fm-res-w6"
-  pane="$dir/pane.txt"
+  pane="w1:p6"
   printf 'working\n' > "$state/res-w6.status"
-  printf 'Working...\n' > "$pane"
+  printf 'pane=%s\nkind=ship\n' "$pane" > "$state/res-w6.meta"
   key=$(printf '%s' "res-w6" | tr ':/.' '___')
   echo $(( $(date +%s) - 500 )) > "$state/.subsuper-stale-$key"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$win" FM_FAKE_TMUX_CAPTURE="$pane" \
+  # Pane is busy (working) so housekeeping clears the stale marker without escalating.
+  status_file="$dir/herdr-status"; printf 'working' > "$status_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_STATUS_FILE="$status_file" \
     FM_STATE_OVERRIDE="$state" FM_STALE_ESCALATE_SECS=240 housekeeping "$state"
   [ -e "$state/.subsuper-stale-$key" ] && fail "resumed stale marker was not cleared"
   [ -s "$state/.subsuper-escalations" ] && fail "resumed stale was escalated"
@@ -529,17 +522,23 @@ test_housekeeping_resumed_stale_cleared() {
 }
 
 test_escalate_batches_into_one_digest() {
-  local dir state fakebin sent capture n
+  local dir state fakebin sent status_file pane_file n
   dir=$(make_supercase batch)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"; : > "$capture"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   escalate_add "$state" "event A: done: PR 1"
   escalate_add "$state" "event B: done: PR 2"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
     || fail "escalate_flush failed"
   grep -F "event A" "$sent" >/dev/null || fail "batch digest missing event A"
   grep -F "event B" "$sent" >/dev/null || fail "batch digest missing event B"
@@ -547,24 +546,31 @@ test_escalate_batches_into_one_digest() {
     || fail "batch digest did not join events with literal ' | '"
   [ -s "$state/.subsuper-escalations" ] && fail "escalation buffer not cleared after flush"
   [ -e "$state/.subsuper-escalations.since" ] && fail "first-append sidecar not cleared after flush"
-  n=$(grep -c '\[ENTER\]' "$sent")
-  [ "$n" -eq 1 ] || fail "expected one injected digest, got $n send-keys submits"
+  # herdr pane run is atomic (text+Enter in one call); exactly one line in sent.
+  n=$(wc -l < "$sent" | tr -d ' ')
+  [ "$n" -eq 1 ] || fail "expected one injected digest line, got $n"
   pass "multiple escalations flush as a single batched digest"
 }
 
 test_escalate_batch_age_uses_first_append() {
-  local dir state fakebin sent capture
+  local dir state fakebin sent status_file pane_file
   dir=$(make_supercase batch-age)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"; : > "$capture"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   escalate_add "$state" "event A: done: PR 1"
   escalate_add "$state" "event B: done: PR 2"
   echo $(( $(date +%s) - 100 )) > "$state/.subsuper-escalations.since"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_ESCALATE_BATCH_SECS=90 FM_HOUSEKEEPING_TICK=0 \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_ESCALATE_BATCH_SECS=90 FM_HOUSEKEEPING_TICK=0 \
     housekeeping "$state"
   grep -F 'event A: done: PR 1 | event B: done: PR 2' "$sent" >/dev/null \
     || fail "backdated batch did not flush as a joined digest (max-delay measured from last append)"
@@ -674,16 +680,22 @@ test_collapse_newlines_pure() {
 }
 
 test_afk_absent_daemon_does_not_inject() {
-  local dir state fakebin sent capture
+  local dir state fakebin sent status_file pane_file
   dir=$(make_supercase afk-off)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"; : > "$capture"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   escalate_add "$state" "done: PR 1"
   # afk flag deliberately NOT set
-  if PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state"; then
+  if PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state"; then
     fail "escalate_flush succeeded while afk inactive"
   fi
   [ -s "$sent" ] && fail "daemon injected while afk inactive"
@@ -692,60 +704,74 @@ test_afk_absent_daemon_does_not_inject() {
 }
 
 test_afk_present_injects_with_marker() {
-  local dir state fakebin sent capture sent_line
+  local dir state fakebin sent status_file pane_file sent_line
   dir=$(make_supercase afk-on)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"; : > "$capture"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   escalate_add "$state" "done: PR 1"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
     || fail "escalate_flush failed with afk active"
   [ -s "$sent" ] || fail "no injection sent with afk active"
-  sent_line=$(grep -v '\[ENTER\]' "$sent" | head -1)
+  sent_line=$(head -1 "$sent")
   message_is_injection "$sent_line" || fail "injection not prefixed with sentinel marker"
   pass "afk flag present: daemon injects with sentinel marker prefix"
 }
 
 test_inject_digest_is_single_line() {
-  local dir state fakebin sent capture non_enter
+  local dir state fakebin sent status_file pane_file lines
   dir=$(make_supercase single-line)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"; : > "$capture"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   escalate_add "$state" "done: PR https://x/y/pull/1"
   escalate_add "$state" "needs-decision: pick A"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
     || fail "escalate_flush failed"
-  # The sent log is: <digest-line>\n[ENTER]\n. The digest must be exactly one
-  # line (no embedded newlines that would fragment submission).
-  non_enter=$(grep -cv '\[ENTER\]' "$sent")
-  [ "$non_enter" -eq 1 ] || fail "expected 1 digest line, got $non_enter (embedded newlines?)"
-  grep -v '\[ENTER\]' "$sent" | grep -qF 'done: PR https://x/y/pull/1' \
+  # herdr pane run is one atomic call; digest must be exactly one line.
+  lines=$(wc -l < "$sent" | tr -d ' ')
+  [ "$lines" -eq 1 ] || fail "expected 1 digest line, got $lines (embedded newlines?)"
+  grep -qF 'done: PR https://x/y/pull/1' "$sent" \
     || fail "digest missing first event"
-  grep -v '\[ENTER\]' "$sent" | grep -qF 'needs-decision: pick A' \
+  grep -qF 'needs-decision: pick A' "$sent" \
     || fail "digest missing second event"
   pass "injected digest is single-line (no embedded newlines)"
 }
 
 test_busy_guard_defers_when_supervisor_busy() {
-  local dir state fakebin sent capture
+  local dir state fakebin sent status_file
   dir=$(make_supercase busy-guard)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"
-  # pane shows a busy signature (firstmate mid-turn)
-  printf 'esc to interrupt\n' > "$capture"
+  # Pane is busy (agent mid-turn).
+  status_file="$dir/herdr-status"; printf 'working' > "$status_file"
   escalate_add "$state" "done: PR 1"
   afk_enter "$state"
-  if PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state"; then
+  if PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state"; then
     fail "escalate_flush should defer when supervisor pane busy"
   fi
   [ -s "$sent" ] && fail "daemon injected into a busy pane"
@@ -809,92 +835,95 @@ test_strip_injection_marker() {
   stripped=$(strip_injection_marker "${FM_INJECT_MARK}Supervisor escalate: done")
   [ "$stripped" = "Supervisor escalate: done" ] \
     || fail "marker not stripped: '$stripped'"
-  # No marker → unchanged.
+  # No marker -> unchanged.
   stripped=$(strip_injection_marker "no marker here")
   [ "$stripped" = "no marker here" ] \
     || fail "non-marker text changed: '$stripped'"
-  # Empty → empty.
+  # Empty -> empty.
   stripped=$(strip_injection_marker "")
   [ "$stripped" = "" ] || fail "empty text changed: '$stripped'"
-  # Only marker → empty.
+  # Only marker -> empty.
   stripped=$(strip_injection_marker "$FM_INJECT_MARK")
   [ "$stripped" = "" ] || fail "bare marker not stripped: '$stripped'"
   pass "strip_injection_marker removes the sentinel marker cleanly"
 }
 
 test_pane_input_pending_detects_partial_input() {
-  local dir state fakebin capture
+  local dir state fakebin pane_file
   dir=$(make_supercase pending-input)
   state="$dir/state"
   fakebin="$dir/fakebin"
-  capture="$dir/pane.txt"
-  # Line 3 (cursor_y=2) has human's partial text (no Enter) → pending.
-  printf 'line one\nline two\nhuman draft text\n' > "$capture"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_CURSOR_Y=2 \
+  pane_file="$dir/pane.txt"
+  # Last non-empty line has human's partial text -> pending.
+  printf 'line one\nline two\nhuman draft text\n' > "$pane_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_PANE_FILE="$pane_file" \
     pane_input_pending "fakepane" \
     || fail "pane_input_pending should detect non-empty composer (human text)"
-  pass "pane_input_pending detects partial input on the cursor line"
+  pass "pane_input_pending detects partial input on the last visible line"
 }
 
 test_pane_input_pending_blank_is_not_pending() {
-  local dir state fakebin capture
+  local dir state fakebin pane_file
   dir=$(make_supercase pending-blank)
   state="$dir/state"
   fakebin="$dir/fakebin"
-  capture="$dir/pane.txt"
-  # Cursor line (line 3, cursor_y=2) is blank → not pending.
-  printf 'some output\nmore output\n\n' > "$capture"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_CURSOR_Y=2 \
+  pane_file="$dir/pane.txt"
+  # All lines blank -> no last non-blank line -> not pending.
+  printf '\n\n\n' > "$pane_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_PANE_FILE="$pane_file" \
     pane_input_pending "fakepane" \
     && fail "blank composer line falsely detected as pending"
   pass "pane_input_pending: blank cursor line is not pending"
 }
 
 test_pane_input_pending_idle_prompt_not_pending() {
-  local dir state fakebin capture
+  local dir state fakebin pane_file
   dir=$(make_supercase pending-prompt)
   state="$dir/state"
   fakebin="$dir/fakebin"
-  capture="$dir/pane.txt"
-  # Cursor line (line 3, cursor_y=2) is a bare prompt ($) → idle → not pending.
-  printf 'output\noutput\n$ \n' > "$capture"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_CURSOR_Y=2 \
+  pane_file="$dir/pane.txt"
+  printf 'output\noutput\n$ \n' > "$pane_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_PANE_FILE="$pane_file" \
     pane_input_pending "fakepane" \
     && fail "bare prompt falsely detected as pending"
-  # Bare > prompt also idle.
-  printf 'output\noutput\n> \n' > "$capture"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_CURSOR_Y=2 \
+  printf 'output\noutput\n> \n' > "$pane_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_PANE_FILE="$pane_file" \
     pane_input_pending "fakepane" \
     && fail "bare > prompt falsely detected as pending"
   pass "pane_input_pending: bare prompts are not pending (idle)"
 }
 
 test_pane_input_pending_honors_idle_override_after_border_strip() {
-  local dir state fakebin capture
+  local dir state fakebin pane_file
   dir=$(make_supercase pending-custom-idle)
   state="$dir/state"
   fakebin="$dir/fakebin"
-  capture="$dir/pane.txt"
-  printf '│ custom idle> │\n' > "$capture"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_CURSOR_Y=0 \
+  pane_file="$dir/pane.txt"
+  printf '│ custom idle> │\n' > "$pane_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_PANE_FILE="$pane_file" \
     FM_COMPOSER_IDLE_RE='^custom idle>$' pane_input_pending "fakepane" \
     && fail "FM_COMPOSER_IDLE_RE was not applied after border stripping"
   pass "pane_input_pending honors FM_COMPOSER_IDLE_RE after border stripping"
 }
 
 test_composer_guard_defers_on_partial_input() {
-  local dir state fakebin sent capture
+  local dir state fakebin sent status_file pane_file
   dir=$(make_supercase composer-guard)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"
-  # Cursor line has partial text (human mid-typing, no Enter).
-  printf 'human draft text\n' > "$capture"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"
+  printf 'human draft text\n' > "$pane_file"
   escalate_add "$state" "done: PR 1"
   afk_enter "$state"
-  if PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state"; then
+  if PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state"; then
     fail "escalate_flush should defer when composer has pending input"
   fi
   [ -s "$sent" ] && fail "daemon injected into a pane with pending input"
@@ -902,62 +931,60 @@ test_composer_guard_defers_on_partial_input() {
   pass "composer guard defers injection when pane has pending input"
 }
 
-test_inject_types_once_retries_enter_only() {
-  # Scenario: Enter is swallowed on the first attempt. The daemon must retry
-  # Enter (NOT retype the digest) and succeed on the second Enter. Assert
-  # exactly ONE digest was typed (no concatenation), and the digest was
-  # eventually submitted.
-  local dir state fakebin sent capture swallow_file
-  dir=$(make_supercase swallow-enter)
+test_inject_detects_swallowed_submit() {
+  # When herdr pane run appears to succeed (exit 0) but text never reaches the
+  # agent (status stays idle, composer still shows the text), inject_msg must
+  # return failure and preserve the buffer.
+  local dir state fakebin sent status_file pane_file swallow_file
+  dir=$(make_supercase swallow-detect)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"; : > "$capture"
-  swallow_file="$dir/.swallow"
-  touch "$swallow_file"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
+  swallow_file="$dir/.swallow"; touch "$swallow_file"
   escalate_add "$state" "done: PR 1"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_SWALLOW_FILE="$swallow_file" \
-    FM_INJECT_CONFIRM_SLEEP=0.1 FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
-    || fail "escalate_flush failed despite Enter retry"
-  # Exactly ONE digest line typed (send-keys -l called once). No retype.
-  local digest_lines
-  digest_lines=$(grep -cv '\[ENTER\]' "$sent")
-  [ "$digest_lines" -eq 1 ] \
-    || fail "expected 1 digest type, got $digest_lines (retype into uncleared composer?)"
-  # Two Enters: first swallowed, second submitted.
-  local enters
-  enters=$(grep -c '\[ENTER\]' "$sent")
-  [ "$enters" -eq 1 ] \
-    || fail "expected 1 recorded Enter (second after swallow), got $enters"
-  # Buffer cleared → success.
-  [ -s "$state/.subsuper-escalations" ] && fail "buffer not cleared after successful inject"
-  pass "swallowed Enter: type-once + Enter-retry, no concatenation"
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_FAKE_HERDR_SWALLOW_FILE="$swallow_file" \
+    FM_FAKE_HERDR_PERSIST_SWALLOW=1 \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_INJECT_CONFIRM_RETRIES=2 \
+    FM_INJECT_CONFIRM_SLEEP=0.05 \
+    FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" || true
+  [ -s "$state/.subsuper-escalations" ] || fail "buffer cleared despite swallowed submission"
+  [ ! -s "$sent" ] || fail "swallowed submission logged to sent as delivered"
+  pass "inject detects swallowed submission and preserves buffer"
 }
 
 test_inject_no_duplicate_on_success() {
-  # Scenario: normal inject (Enter works first time). Exactly ONE digest typed,
-  # ONE Enter, buffer cleared.
-  local dir state fakebin sent capture
+  # Normal inject: exactly ONE digest submitted, buffer cleared.
+  local dir state fakebin sent status_file pane_file lines
   dir=$(make_supercase normal-inject)
   state="$dir/state"
   fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"; : > "$capture"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   escalate_add "$state" "done: PR 1"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_INJECT_CONFIRM_SLEEP=0.1 \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_INJECT_CONFIRM_SLEEP=0.1 \
     FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
     || fail "escalate_flush failed"
-  local digest_lines enters
-  digest_lines=$(grep -cv '\[ENTER\]' "$sent")
-  [ "$digest_lines" -eq 1 ] || fail "expected 1 digest, got $digest_lines (duplicate?)"
-  enters=$(grep -c '\[ENTER\]' "$sent")
-  [ "$enters" -eq 1 ] || fail "expected 1 Enter, got $enters"
+  lines=$(wc -l < "$sent" | tr -d ' ')
+  [ "$lines" -eq 1 ] || fail "expected 1 digest, got $lines (duplicate?)"
   [ -s "$state/.subsuper-escalations" ] && fail "buffer not cleared"
-  pass "normal inject: exactly one digest, one Enter, no duplicates"
+  pass "normal inject: exactly one digest submitted, no duplicates"
 }
 
 test_classify_signal_dedup_against_scan() {
@@ -998,202 +1025,174 @@ test_classify_stale_dedup_against_signal() {
 }
 
 # ============================================================================
-# afk-invx-i5 regressions: bordered-composer detection (RC1), submit-ACK on a
-# bordered composer (RC2), and the max-defer escape (RC1b).
+# Bordered composer detection (herdr pane read returns box-drawing chars).
+# fm_pane_input_pending strips box borders before checking for pending text.
 # ============================================================================
 
-# Fake tmux simulating a claude-style BORDERED composer ("│ > … │"), the exact
-# rendering the old detector misread as permanent pending input.
-#   - display-message cursor_y -> 0 (composer is line 1)
-#   - capture-pane          -> the current composer line from $FM_FAKE_COMPOSER
-#   - send-keys -l <text>   -> composer becomes "│ > <text> │"  (typed, unsent)
-#   - send-keys Enter       -> unless $FM_FAKE_SWALLOW exists, composer clears to
-#                              "│ > │" (bordered-empty); a one-shot swallow
-#                              deletes the flag, a persistent one keeps it.
-# $FM_FAKE_SENT (optional) logs each typed line and each non-swallowed [ENTER].
-make_bordered_case() {
-  local name=$1 dir fakebin
-  dir="$TMP_ROOT/$name"; fakebin="$dir/fakebin"
-  mkdir -p "$dir/state" "$fakebin"
-  printf '│ > │\n' > "$dir/composer"
-  cat > "$fakebin/tmux" <<'SH'
-#!/usr/bin/env bash
-set -u
-COMPOSER="${FM_FAKE_COMPOSER:?FM_FAKE_COMPOSER unset}"
-case "${1:-}" in
-  display-message)
-    print=0
-    for a in "$@"; do case "$a" in *cursor_y*) printf '0\n'; exit 0 ;; esac; done
-    for a in "$@"; do [ "$a" = "-p" ] && print=1; done
-    [ "$print" = 1 ] && printf 'fakepane\n'
-    exit 0 ;;
-  capture-pane) cat "$COMPOSER" 2>/dev/null; exit 0 ;;
-  list-windows) exit 0 ;;
-  send-keys)
-    shift
-    text=""; is_enter=0; lit=0
-    while [ "$#" -gt 0 ]; do
-      case "$1" in
-        -t) shift ;;
-        -l) lit=1 ;;
-        Enter) is_enter=1 ;;
-        *) [ "$lit" = 1 ] && text="$1" ;;
-      esac
-      shift
-    done
-    if [ "$is_enter" = 1 ]; then
-      if [ -n "${FM_FAKE_SWALLOW:-}" ] && [ -f "$FM_FAKE_SWALLOW" ]; then
-        [ "${FM_FAKE_PERSIST_SWALLOW:-0}" = 1 ] || rm -f "$FM_FAKE_SWALLOW"
-      else
-        [ -n "${FM_FAKE_SENT:-}" ] && printf '[ENTER]\n' >> "$FM_FAKE_SENT"
-        printf '│ > │\n' > "$COMPOSER"
-      fi
-    elif [ "$lit" = 1 ]; then
-      [ "${FM_FAKE_SEND_FAIL:-0}" = 1 ] && exit 1
-      [ -n "${FM_FAKE_SENT:-}" ] && printf '%s\n' "$text" >> "$FM_FAKE_SENT"
-      printf '│ > %s │\n' "$text" > "$COMPOSER"
-    fi
-    exit 0 ;;
-esac
-exit 1
-SH
-  chmod +x "$fakebin/tmux"
-  printf '%s\n' "$dir"
-}
-
 test_pane_input_pending_bordered_idle_not_pending() {
-  # THE regression: an idle claude composer is a bordered box ("│ > … │"). The
-  # old idle regex only matched a BARE prompt, so every idle claude pane read as
-  # pending and the away-mode daemon deferred 100% of escalations for 9.5h.
-  local dir state fakebin capture line
+  local dir state fakebin pane_file line
   dir=$(make_supercase pending-bordered-idle)
-  state="$dir/state"; fakebin="$dir/fakebin"; capture="$dir/pane.txt"
+  state="$dir/state"; fakebin="$dir/fakebin"; pane_file="$dir/pane.txt"
   for line in \
     "│ >                                            │" \
     "│ ❯                                            │" \
     "│ >  │" \
     "│                                              │"; do
-    printf '%s\n' "$line" > "$capture"
-    if PATH="$fakebin:$PATH" FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_CURSOR_Y=0 \
+    printf '%s\n' "$line" > "$pane_file"
+    if PATH="$fakebin:$PATH" FM_FAKE_HERDR_PANE_FILE="$pane_file" \
       pane_input_pending "fakepane"; then
       fail "bordered idle composer falsely detected as pending: <$line>"
     fi
   done
-  pass "pane_input_pending: an idle bordered composer is NOT pending (afk-invx-i5)"
+  pass "pane_input_pending: an idle bordered composer is NOT pending"
 }
 
 test_pane_input_pending_bordered_with_text_is_pending() {
-  # Guard against over-broadening: real unsubmitted text inside the box must
-  # still read as pending so the daemon defers (and the captain-return race is
-  # still protected).
-  local dir state fakebin capture
+  local dir state fakebin pane_file
   dir=$(make_supercase pending-bordered-text)
-  state="$dir/state"; fakebin="$dir/fakebin"; capture="$dir/pane.txt"
-  printf '%s\n' "│ > fix findings 1 and 3, skip 2               │" > "$capture"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_CURSOR_Y=0 \
+  state="$dir/state"; fakebin="$dir/fakebin"; pane_file="$dir/pane.txt"
+  printf '%s\n' "│ > fix findings 1 and 3, skip 2               │" > "$pane_file"
+  PATH="$fakebin:$PATH" FM_FAKE_HERDR_PANE_FILE="$pane_file" \
     pane_input_pending "fakepane" \
     || fail "real text inside a bordered composer was not detected as pending"
   pass "pane_input_pending: text inside a bordered composer is still pending"
 }
 
-test_submit_ack_confirms_on_bordered_empty_composer() {
-  # RC2: the submit acknowledgement must recognize a bordered-EMPTY composer as
-  # "submitted." The old ACK reused the broken check, so on claude it could never
-  # confirm and always reported a false "Enter swallowed."
-  local dir fakebin sent verdict
-  dir=$(make_bordered_case ack-bordered)
+test_submit_ack_confirms_on_normal_submit() {
+  # fm_herdr_submit_core must return "empty" when herdr pane run succeeds and
+  # the agent transitions to "working" (message received).
+  local dir fakebin sent verdict status_file pane_file
+  dir=$(make_supercase ack-submit)
   fakebin="$dir/fakebin"; sent="$dir/sent.log"; : > "$sent"
-  verdict=$(PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
-    fm_tmux_submit_core "win" "the digest" 3 0.05 0.05)
-  [ "$verdict" = empty ] || fail "submit-ACK did not confirm on a bordered-empty composer: $verdict"
-  [ "$(grep -cv '\[ENTER\]' "$sent")" -eq 1 ] || fail "digest typed more than once (retype)"
-  [ "$(grep -c '\[ENTER\]' "$sent")" -eq 1 ] || fail "expected exactly one submitted Enter"
-  pass "submit-ACK confirms a submit when the composer returns to a bordered-empty box"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
+  verdict=$(PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_SENT="$sent" \
+    fm_herdr_submit_core "fakepane" "the digest" 3 0.05 0.05)
+  [ "$verdict" = empty ] || fail "submit did not confirm on a normal submit: $verdict"
+  [ "$(wc -l < "$sent" | tr -d ' ')" -eq 1 ] || fail "digest submitted more than once"
+  pass "submit-ACK: fm_herdr_submit_core returns empty when agent transitions"
 }
 
 test_submit_ack_reports_pending_on_persistent_swallow() {
-  # A genuinely swallowed Enter (text stays in the box across all retries) is
-  # reported as "pending" — the daemon keeps the buffer, fm-send exits non-zero —
-  # and the digest is typed ONCE (Enter-only retries, never a retype).
-  local dir fakebin sent verdict
-  dir=$(make_bordered_case ack-swallow)
+  # When herdr pane run is persistently swallowed (text stays in pane, agent
+  # never transitions), fm_herdr_submit_core must return "pending".
+  local dir fakebin sent verdict status_file pane_file swallow_file
+  dir=$(make_supercase ack-swallow)
   fakebin="$dir/fakebin"; sent="$dir/sent.log"; : > "$sent"
-  touch "$dir/.swallow"
-  verdict=$(PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
-    FM_FAKE_SWALLOW="$dir/.swallow" FM_FAKE_PERSIST_SWALLOW=1 \
-    fm_tmux_submit_core "win" "the digest" 3 0.05 0.05)
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
+  swallow_file="$dir/.swallow"; touch "$swallow_file"
+  verdict=$(PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_FAKE_HERDR_SWALLOW_FILE="$swallow_file" \
+    FM_FAKE_HERDR_PERSIST_SWALLOW=1 \
+    fm_herdr_submit_core "fakepane" "the digest" 3 0.05 0.05)
   [ "$verdict" = pending ] || fail "persistent swallow not reported as pending: $verdict"
-  [ "$(grep -cv '\[ENTER\]' "$sent")" -eq 1 ] || fail "digest retyped on swallow (expected type-once)"
-  pass "submit-ACK reports pending on a persistently swallowed Enter (type-once)"
+  # Text was swallowed -> not logged to sent, only appears in pane_file.
+  [ "$(wc -l < "$sent" | tr -d ' ')" -eq 0 ] || fail "swallowed text appeared in sent log as delivered"
+  pass "submit-ACK: fm_herdr_submit_core returns pending on persistent swallow"
 }
 
-test_max_defer_empty_swallow_types_once_and_alarms() {
-  local dir state fakebin sent
-  dir=$(make_bordered_case maxdefer-stuck)
+test_max_defer_alarms_on_stuck_inject() {
+  # When escalate_flush repeatedly fails (swallowed pane) and the age exceeds
+  # FM_MAX_DEFER_SECS, inject_wedge_alarm fires and the buffer is preserved.
+  local dir state fakebin sent status_file pane_file swallow_file
+  dir=$(make_supercase maxdefer-stuck)
   state="$dir/state"; fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  printf '│ > │\n' > "$dir/composer"
-  touch "$dir/.swallow"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
+  swallow_file="$dir/.swallow"; touch "$swallow_file"
   escalate_add "$state" "needs-decision: pick A"
   echo $(( $(date +%s) - 600 )) > "$state/.subsuper-escalations.since"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
-    FM_FAKE_SWALLOW="$dir/.swallow" FM_FAKE_PERSIST_SWALLOW=1 FM_INJECT_CONFIRM_SLEEP=0.05 \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_FAKE_HERDR_SWALLOW_FILE="$swallow_file" \
+    FM_FAKE_HERDR_PERSIST_SWALLOW=1 \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_SUPERVISOR_TARGET=fakepane \
+    FM_INJECT_CONFIRM_SLEEP=0.05 \
     FM_ESCALATE_BATCH_SECS=99999 FM_MAX_DEFER_SECS=60 housekeeping "$state"
-  [ "$(grep -c 'Supervisor escalate' "$sent" 2>/dev/null || true)" -eq 1 ] \
-    || fail "max-defer typed the digest more than once"
   [ -s "$state/.subsuper-inject-wedged" ] \
     || fail "stuck max-defer inject did not raise a wedge alarm marker"
   [ -s "$state/.subsuper-escalations" ] \
     || fail "buffer lost after a failed max-defer inject (must be preserved)"
-  pass "max-defer on an empty stuck pane types once, alarms, and preserves the buffer"
+  pass "max-defer on a stuck inject alarms and preserves the buffer"
 }
 
 test_max_defer_flushes_empty_idle_pane() {
-  local dir state fakebin sent
-  dir=$(make_bordered_case maxdefer-recover)
+  local dir state fakebin sent status_file pane_file
+  dir=$(make_supercase maxdefer-recover)
   state="$dir/state"; fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  printf '│ > │\n' > "$dir/composer"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   escalate_add "$state" "done: PR https://x/y/pull/1"
   echo $(( $(date +%s) - 600 )) > "$state/.subsuper-escalations.since"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_SUPERVISOR_TARGET=fakepane \
     FM_ESCALATE_BATCH_SECS=99999 FM_MAX_DEFER_SECS=60 FM_INJECT_CONFIRM_SLEEP=0.05 \
     housekeeping "$state"
   [ ! -s "$state/.subsuper-escalations" ] || fail "buffer not cleared after a recovered max-defer flush"
   [ ! -e "$state/.subsuper-inject-wedged" ] || fail "wedge alarm left behind after a successful max-defer flush"
-  pass "max-defer flushes and clears the buffer on an empty bordered pane"
+  pass "max-defer flushes and clears the buffer on an empty idle pane"
 }
 
 test_max_defer_pending_composer_alarms_without_typing() {
-  local dir state fakebin sent
-  dir=$(make_bordered_case maxdefer-pending-digest)
+  local dir state fakebin sent status_file pane_file
+  dir=$(make_supercase maxdefer-pending-digest)
   state="$dir/state"; fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  printf '│ > human draft │\n' > "$dir/composer"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"
+  printf 'human draft\n' > "$pane_file"  # pending input in composer
   escalate_add "$state" "needs-decision: pick B"
   echo $(( $(date +%s) - 600 )) > "$state/.subsuper-escalations.since"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_SUPERVISOR_TARGET=fakepane \
     FM_ESCALATE_BATCH_SECS=99999 FM_MAX_DEFER_SECS=60 FM_INJECT_CONFIRM_SLEEP=0.05 \
     housekeeping "$state"
   [ ! -s "$sent" ] || fail "max-defer typed into a pending composer"
   [ -s "$state/.subsuper-inject-wedged" ] || fail "pending composer did not raise a wedge alarm marker"
   [ -s "$state/.subsuper-escalations" ] || fail "buffer lost while composer was pending"
-  grep -F 'human draft' "$dir/composer" >/dev/null || fail "pending composer content changed"
+  grep -F 'human draft' "$pane_file" >/dev/null || fail "pending composer content changed"
   pass "max-defer on a pending composer alarms without typing"
 }
 
 test_normal_flush_clears_stale_wedge_marker() {
-  local dir state fakebin sent
-  dir=$(make_bordered_case normal-clears-wedge)
+  local dir state fakebin sent status_file pane_file
+  dir=$(make_supercase normal-clears-wedge)
   state="$dir/state"; fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   printf 'old wedge\n' > "$state/.subsuper-inject-wedged"
   escalate_add "$state" "done: PR https://x/y/pull/2"
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_SUPERVISOR_TARGET=fakepane \
     FM_INJECT_CONFIRM_SLEEP=0.05 escalate_flush "$state" \
     || fail "normal escalate_flush failed"
   [ ! -s "$state/.subsuper-escalations" ] || fail "buffer not cleared after normal flush"
@@ -1202,16 +1201,22 @@ test_normal_flush_clears_stale_wedge_marker() {
 }
 
 test_below_max_defer_does_nothing() {
-  local dir state fakebin sent capture
+  local dir state fakebin sent status_file pane_file
   dir=$(make_supercase below-maxdefer)
   state="$dir/state"; fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
-  capture="$dir/pane.txt"; printf 'stuck junk line\n' > "$capture"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"
+  printf 'stuck junk line\n' > "$pane_file"
   escalate_add "$state" "needs-decision: pick A"
   date +%s > "$state/.subsuper-escalations.since"   # just now
   afk_enter "$state"
-  PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
-    FM_FAKE_TMUX_CAPTURE="$capture" FM_FAKE_TMUX_CURSOR_Y=0 \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_SUPERVISOR_TARGET=fakepane \
     FM_ESCALATE_BATCH_SECS=99999 FM_MAX_DEFER_SECS=300 housekeeping "$state"
   [ ! -s "$sent" ] || fail "injected before MAX_DEFER elapsed"
   [ ! -e "$state/.subsuper-inject-wedged" ] || fail "wedge alarm fired before MAX_DEFER"
@@ -1220,13 +1225,21 @@ test_below_max_defer_does_nothing() {
 }
 
 test_max_defer_afk_inactive_does_not_flush_or_alarm() {
-  local dir state fakebin sent
-  dir=$(make_bordered_case maxdefer-inactive)
+  local dir state fakebin sent status_file pane_file
+  dir=$(make_supercase maxdefer-inactive)
   state="$dir/state"; fakebin="$dir/fakebin"
   sent="$dir/sent.log"; : > "$sent"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
   escalate_add "$state" "needs-decision: pick B"
   echo $(( $(date +%s) - 600 )) > "$state/.subsuper-escalations.since"
-  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$dir/composer" FM_FAKE_SENT="$sent" \
+  # afk NOT active
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_SENT="$sent" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_SUPERVISOR_TARGET=fakepane \
     FM_ESCALATE_BATCH_SECS=99999 FM_MAX_DEFER_SECS=60 FM_INJECT_CONFIRM_SLEEP=0.05 \
     housekeeping "$state"
   [ ! -s "$sent" ] || fail "injected while afk was inactive"
@@ -1236,36 +1249,52 @@ test_max_defer_afk_inactive_does_not_flush_or_alarm() {
 }
 
 test_fm_send_exits_nonzero_on_confirmed_swallow() {
-  # fm-send.sh must exit NON-ZERO when a steer's Enter is positively swallowed
-  # (text left in the composer), so firstmate learns the instruction did not land
-  # — and exit ZERO on a clean submit.
-  local dir fakebin err
-  dir=$(make_bordered_case send-swallow)
+  # fm-send.sh must exit NON-ZERO when herdr pane run is swallowed, ZERO on clean submit.
+  local dir fakebin err status_file pane_file swallow_file
+  dir=$(make_supercase send-swallow)
   fakebin="$dir/fakebin"; err="$dir/send.err"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
+  swallow_file="$dir/.swallow"
   # Clean submit -> exit 0.
-  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_COMPOSER="$dir/composer" \
-    FM_SEND_SLEEP=0.05 "$ROOT/bin/fm-send.sh" sess:win 'route this work' >/dev/null 2>"$err" \
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_STATE_OVERRIDE="$dir/state" \
+    FM_SEND_SLEEP=0.05 "$ROOT/bin/fm-send.sh" w1:p1 'route this work' >/dev/null 2>"$err" \
     || fail "fm-send exited non-zero on a clean submit: $(cat "$err")"
-  # Persistent swallow -> exit non-zero with a clear message.
-  printf '│ > │\n' > "$dir/composer"
-  touch "$dir/.swallow"
-  if PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_COMPOSER="$dir/composer" \
-    FM_FAKE_SWALLOW="$dir/.swallow" FM_FAKE_PERSIST_SWALLOW=1 FM_SEND_SLEEP=0.05 \
-    "$ROOT/bin/fm-send.sh" sess:win 'fix findings 1 and 3, skip 2' >/dev/null 2>"$err"; then
-    fail "fm-send exited zero despite a swallowed Enter (silent unsubmitted instruction)"
+  # Persistent swallow -> exit non-zero.
+  printf 'idle' > "$status_file"; : > "$pane_file"
+  touch "$swallow_file"
+  if PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SWALLOW_FILE="$swallow_file" \
+    FM_FAKE_HERDR_PERSIST_SWALLOW=1 \
+    FM_STATE_OVERRIDE="$dir/state" \
+    FM_SEND_SLEEP=0.05 "$ROOT/bin/fm-send.sh" w1:p1 'fix findings 1 and 3, skip 2' >/dev/null 2>"$err"; then
+    fail "fm-send exited zero despite a swallowed pane run (silent unsubmitted instruction)"
   fi
   grep -F 'not submitted' "$err" >/dev/null || fail "fm-send did not explain the swallowed submit: $(cat "$err")"
   pass "fm-send exits non-zero on a confirmed swallow, zero on a clean submit"
 }
 
 test_fm_send_exits_nonzero_on_initial_send_failure() {
-  local dir fakebin err
-  dir=$(make_bordered_case send-type-failure)
+  local dir fakebin err status_file pane_file
+  dir=$(make_supercase send-type-failure)
   fakebin="$dir/fakebin"; err="$dir/send.err"
-  if PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_COMPOSER="$dir/composer" \
-    FM_FAKE_SEND_FAIL=1 FM_SEND_SLEEP=0.05 \
-    "$ROOT/bin/fm-send.sh" sess:win 'route this work' >/dev/null 2>"$err"; then
-    fail "fm-send exited zero despite initial tmux send-keys failure"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
+  if PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SEND_FAIL=1 \
+    FM_STATE_OVERRIDE="$dir/state" \
+    FM_SEND_SLEEP=0.05 "$ROOT/bin/fm-send.sh" w1:p1 'route this work' >/dev/null 2>"$err"; then
+    fail "fm-send exited zero despite initial herdr pane run failure"
   fi
   grep -F 'text not sent' "$err" >/dev/null || fail "fm-send did not explain initial send failure: $(cat "$err")"
   pass "fm-send exits non-zero when initial text send fails"
@@ -1308,23 +1337,23 @@ test_busy_guard_defers_when_supervisor_busy
 test_marker_detection
 test_afk_turn_exemption
 test_should_exit_afk_when_afk_inactive
-# Injection hardening: composer guard, type-once submit, strip marker, dedupe.
+# Injection hardening: composer guard, submit detection, strip marker, dedupe.
 test_strip_injection_marker
 test_pane_input_pending_detects_partial_input
 test_pane_input_pending_blank_is_not_pending
 test_pane_input_pending_idle_prompt_not_pending
 test_pane_input_pending_honors_idle_override_after_border_strip
 test_composer_guard_defers_on_partial_input
-test_inject_types_once_retries_enter_only
+test_inject_detects_swallowed_submit
 test_inject_no_duplicate_on_success
 test_classify_signal_dedup_against_scan
 test_classify_stale_dedup_against_signal
-# afk-invx-i5 regressions: bordered-composer detection, submit-ACK, max-defer.
+# Bordered-composer detection (herdr pane read returns box-drawing chars).
 test_pane_input_pending_bordered_idle_not_pending
 test_pane_input_pending_bordered_with_text_is_pending
-test_submit_ack_confirms_on_bordered_empty_composer
+test_submit_ack_confirms_on_normal_submit
 test_submit_ack_reports_pending_on_persistent_swallow
-test_max_defer_empty_swallow_types_once_and_alarms
+test_max_defer_alarms_on_stuck_inject
 test_max_defer_flushes_empty_idle_pane
 test_max_defer_pending_composer_alarms_without_typing
 test_normal_flush_clears_stale_wedge_marker
