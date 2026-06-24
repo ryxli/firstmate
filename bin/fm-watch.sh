@@ -101,7 +101,7 @@ awaiting_merge() {
   [ -e "$statusf" ] || return 1
   last=$(grep -v '^[[:space:]]*$' "$statusf" | tail -n1)
   case "$last" in
-    done:*PR*|*"PR ready"*) return 0 ;;
+    done:*" PR "*|*"PR ready"*) return 0 ;;
     *) return 1 ;;
   esac
 }
