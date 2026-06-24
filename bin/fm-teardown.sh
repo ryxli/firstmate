@@ -489,6 +489,8 @@ if [ "$KIND" != secondmate ]; then
   if [ -n "$WT" ] && [ -d "$WT" ]; then
     if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
       git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
+      git -C "$PROJ" worktree prune 2>/dev/null || true
+      git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
     else
       rm -rf "$WT"
     fi
