@@ -176,26 +176,54 @@ path_is_ancestor_of() {
   return 1
 }
 
-# herdr_json_field <py-expression>: read JSON on stdin and print a field, or
-# nothing on any parse error. Centralizes the python3 dependency used to parse
-# herdr's JSON responses (the same approach the herdr agent skill documents).
-herdr_json_field() {
-  python3 -c "import sys, json
+# herdr_json_get <key> [<key>...]: read JSON on stdin, walk the nested keys, and
+# print the leaf value, or nothing on any parse error or missing key. One small
+# python3 dependency (the herdr agent skill documents the same approach) keeps
+# every herdr JSON read uniform and free of brittle grep/sed.
+herdr_json_get() {
+  python3 -c '
+import sys, json
 try:
-    d = json.load(sys.stdin)
-    print($1)
+    v = json.load(sys.stdin)
+    for k in sys.argv[1:]:
+        v = v[k]
+    print(v)
 except Exception:
-    pass" 2>/dev/null || true
+    pass
+' "$@" 2>/dev/null || true
 }
 
-# herdr_resolve_workspace <label> <cwd>: find the herdr workspace whose label
-# matches <label>; create it (labelled, rooted at <cwd>, unfocused) when none
-# exists. Prints the workspace id. Deterministic: the same label always lands
-# on the same workspace, so every task of a domain/project shares one.
+# herdr_workspace_id_for_label <label>: print the id of the herdr workspace whose
+# label matches <label>, or nothing. herdr does not enforce label uniqueness, so
+# the first match wins deterministically.
+herdr_workspace_id_for_label() {
+  herdr workspace list 2>/dev/null | python3 -c '
+import sys, json
+label = sys.argv[1]
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for w in d.get("result", {}).get("workspaces", []):
+    if w.get("label") == label:
+        print(w.get("workspace_id", ""))
+        break
+' "$1" 2>/dev/null || true
+}
+
+# herdr_resolve_workspace <label> <cwd>: return the id of the domain/project
+# workspace labelled <label>, creating it (rooted at <cwd>, unfocused) when it
+# does not exist. The same label always resolves to the same workspace, so every
+# task of a domain/project shares one.
+#
+# list+create runs under a label-keyed advisory lock so concurrent same-repo
+# spawns serialize: the loser re-lists and reuses the winner's workspace rather
+# than racing to create a duplicate. A lock older than the staleness window is
+# reclaimed so a crashed spawn cannot wedge the next one. Max contention wait is
+# ~10s (100 x 0.1s); a stale lock is reclaimed on sight, well before that.
 herdr_resolve_workspace() {
-  local label=$1 cwd=$2 wsid create_json sanitized_label lockdir i mtime now
-  sanitized_label=$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_')
-  lockdir="$STATE/.wslock-${sanitized_label}"
+  local label=$1 cwd=$2 wsid create_json create_err='' lockdir i mtime now
+  lockdir="$STATE/.wslock-$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_')"
   mkdir -p "$STATE"
   i=0
   while ! mkdir "$lockdir" 2>/dev/null; do
@@ -211,53 +239,25 @@ herdr_resolve_workspace() {
     fi
     sleep 0.1
   done
-  wsid=$(herdr workspace list 2>/dev/null | python3 -c '
-import sys, json
-label = sys.argv[1]
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for w in d.get("result", {}).get("workspaces", []):
-    if w.get("label") == label:
-        print(w.get("workspace_id", ""))
-        break
-' "$label" 2>/dev/null || true)
-  if [ -n "$wsid" ]; then
-    rmdir "$lockdir" 2>/dev/null || true
-    printf '%s\n' "$wsid"
-    return 0
-  fi
-  create_json=$(herdr workspace create --label "$label" --cwd "$cwd" --no-focus 2>&1) || {
-    wsid=$(herdr workspace list 2>/dev/null | python3 -c '
-import sys, json
-label = sys.argv[1]
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for w in d.get("result", {}).get("workspaces", []):
-    if w.get("label") == label:
-        print(w.get("workspace_id", ""))
-        break
-' "$label" 2>/dev/null || true)
-    if [ -n "$wsid" ]; then
-      rmdir "$lockdir" 2>/dev/null || true
-      printf '%s\n' "$wsid"
-      return 0
-    fi
-    echo "error: herdr workspace create failed for label '$label'" >&2
-    echo "$create_json" >&2
-    rmdir "$lockdir" 2>/dev/null || true
-    return 1
-  }
-  wsid=$(printf '%s' "$create_json" | herdr_json_field 'd["result"]["workspace"]["workspace_id"]')
+
+  wsid=$(herdr_workspace_id_for_label "$label")
   if [ -z "$wsid" ]; then
-    echo "error: herdr workspace create did not return a workspace_id for '$label'" >&2
-    rmdir "$lockdir" 2>/dev/null || true
+    if create_json=$(herdr workspace create --label "$label" --cwd "$cwd" --no-focus 2>&1); then
+      wsid=$(printf '%s' "$create_json" | herdr_json_get result workspace workspace_id)
+    else
+      # Create failed; a concurrent or external spawn may have won the label.
+      create_err=$create_json
+      wsid=$(herdr_workspace_id_for_label "$label")
+    fi
+  fi
+
+  rmdir "$lockdir" 2>/dev/null || true
+
+  if [ -z "$wsid" ]; then
+    echo "error: could not resolve or create herdr workspace for label '$label'" >&2
+    [ -z "$create_err" ] || echo "$create_err" >&2
     return 1
   fi
-  rmdir "$lockdir" 2>/dev/null || true
   printf '%s\n' "$wsid"
 }
 
@@ -273,8 +273,8 @@ herdr_place_agent_tab() {
     echo "$tab_json" >&2
     return 1
   }
-  tab_id=$(printf '%s' "$tab_json" | herdr_json_field 'd["result"]["tab"]["tab_id"]')
-  root_pane=$(printf '%s' "$tab_json" | herdr_json_field 'd["result"]["root_pane"]["pane_id"]')
+  tab_id=$(printf '%s' "$tab_json" | herdr_json_get result tab tab_id)
+  root_pane=$(printf '%s' "$tab_json" | herdr_json_get result root_pane pane_id)
   [ -n "$tab_id" ] || { echo "error: herdr tab create did not return a tab_id" >&2; return 1; }
   start_json=$(herdr agent start "$name" --tab "$tab_id" --cwd "$cwd" --no-focus -- sh -c "$cmd" 2>&1) || {
     echo "error: herdr agent start failed in tab $tab_id" >&2
@@ -282,7 +282,7 @@ herdr_place_agent_tab() {
     herdr tab close "$tab_id" >/dev/null 2>&1 || true
     return 1
   }
-  pane=$(printf '%s' "$start_json" | herdr_json_field 'd["result"]["agent"]["pane_id"]')
+  pane=$(printf '%s' "$start_json" | herdr_json_get result agent pane_id)
   [ -n "$pane" ] || { herdr tab close "$tab_id" >/dev/null 2>&1 || true; echo "error: herdr agent start did not return a pane_id" >&2; return 1; }
   if [ -n "$root_pane" ] && [ "$root_pane" != "$pane" ]; then
     herdr pane close "$root_pane" >/dev/null 2>&1 || true
@@ -381,7 +381,6 @@ fi
 if [ "$KIND" = secondmate ]; then
   [ -n "$FIRSTMATE_HOME" ] || { echo "error: no firstmate home supplied or registered for $ID" >&2; exit 1; }
   PROJ_ABS=$(validate_firstmate_home_for_spawn "$ID" "$FIRSTMATE_HOME")
-  WT="$PROJ_ABS"
   if [ -f "$PROJ_ABS/data/charter.md" ]; then
     BRIEF="$PROJ_ABS/data/charter.md"
   else
@@ -389,7 +388,6 @@ if [ "$KIND" = secondmate ]; then
   fi
 else
   PROJ_ABS="$(cd "$(resolve_project_dir_arg "$PROJ")" && pwd)"
-  WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
