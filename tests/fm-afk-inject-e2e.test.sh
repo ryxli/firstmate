@@ -85,7 +85,7 @@ case "\${1:-}" in
         printf '{"agent_status":"%s"}\n' "\$status"
         exit 0 ;;
       current)
-        printf '{"pane_id":"test:p1"}\n'
+        printf '{"result":{"pane":{"pane_id":"test:p1"}}}\n'
         exit 0 ;;
     esac ;;
   agent)

@@ -38,7 +38,7 @@ resolve() {
       echo "$pane"
       ;;
     *)
-      pane=$(herdr agent get "$1" 2>/dev/null | grep -o '"pane_id":"[^"]*"' | cut -d'"' -f4 | head -1 || true)
+      pane=$(herdr agent get "$1" 2>/dev/null | herdr_json_get result agent pane_id)
       [ -n "$pane" ] || { echo "error: no pane found for $1" >&2; exit 1; }
       echo "$pane"
       ;;

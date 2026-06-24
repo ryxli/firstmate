@@ -35,6 +35,8 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 SUB_HOME_MARKER=".fm-secondmate-home"
 # shellcheck source=bin/fm-identity-lib.sh
 . "$SCRIPT_DIR/fm-identity-lib.sh"
+# shellcheck source=bin/fm-herdr-lib.sh
+. "$SCRIPT_DIR/fm-herdr-lib.sh"
 [ -n "${FM_SPAWN_NO_GUARD:-}" ] || "$FM_ROOT/bin/fm-guard.sh" || true
 
 KIND=ship
@@ -174,23 +176,6 @@ path_is_ancestor_of() {
   [ "$ancestor" != "$path" ] || return 1
   case "$path" in "$ancestor"/*) return 0 ;; esac
   return 1
-}
-
-# herdr_json_get <key> [<key>...]: read JSON on stdin, walk the nested keys, and
-# print the leaf value, or nothing on any parse error or missing key. One small
-# python3 dependency (the herdr agent skill documents the same approach) keeps
-# every herdr JSON read uniform and free of brittle grep/sed.
-herdr_json_get() {
-  python3 -c '
-import sys, json
-try:
-    v = json.load(sys.stdin)
-    for k in sys.argv[1:]:
-        v = v[k]
-    print(v)
-except Exception:
-    pass
-' "$@" 2>/dev/null || true
 }
 
 # herdr_workspace_id_for_label <label>: print the id of the herdr workspace whose

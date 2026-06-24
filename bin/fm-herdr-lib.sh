@@ -20,6 +20,29 @@
 #
 # All functions are set -u and set -e safe.
 
+# herdr_json_get <key> [<key>...]: read a herdr JSON response on stdin, walk the
+# nested keys, and print the leaf value (or nothing on any parse error / missing
+# key). This is the canonical accessor for herdr's one-shot JSON responses -
+# prefer it over grep/sed on the raw JSON, which silently assumes one object per
+# line and breaks on multi-object payloads (e.g. `workspace list`).
+#
+# Exception: fm_herdr_agent_status below stays on grep deliberately. It is the
+# hot-path supervision poll (called per agent, every watcher cycle), where a
+# python3 startup per call would be a real cost; a single-field grep is correct
+# and ~30x cheaper there.
+herdr_json_get() {
+  python3 -c '
+import sys, json
+try:
+    v = json.load(sys.stdin)
+    for k in sys.argv[1:]:
+        v = v[k]
+    print(v)
+except Exception:
+    pass
+' "$@" 2>/dev/null || true
+}
+
 # fm_herdr_agent_status: print the current herdr agent status for a pane id.
 # Outputs one of: idle working blocked done unknown
 fm_herdr_agent_status() {
