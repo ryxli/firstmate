@@ -10,10 +10,8 @@ Building a Lavish artifact should be **content work, not boilerplate work**. A p
 ## The fast path (use this every time)
 
 1. **Copy the template** into the subject project's `.lavish/` dir:
-   `cp "$(git -C "$(dirname "$(which lavish-axi 2>/dev/null || echo /dev/null)")" rev-parse --show-toplevel 2>/dev/null || echo "$HOME")/.../template.html" <subject-project>/.lavish/<name>.html`
-   The template lives at `.agents/skills/lavish-fast/template.html` inside the firstmate repo (typically `~/code/firstmate`), or find it relative to this skill file.
-   Simplest: `cp "$(dirname "$0")/template.html" <subject-project>/.lavish/<name>.html`
-   (Also reachable as `skill://lavish-fast/template.html` on harnesses that support skill URIs.)
+   `cp ~/code/firstmate/.agents/skills/lavish-fast/template.html <subject-project>/.lavish/<name>.html`
+   The template lives at `.agents/skills/lavish-fast/template.html` inside the firstmate repo (typically `~/code/firstmate`), also reachable as `/Users/ryan/code/firstmate/worktrees/lavish-skill-m7/.claude/skills/lavish-fast/template.html`.
 2. **Fill only the `<main>` content.** The template ships a working gallery - hero, verdict callout, stat row, card, table, decision form, action button - plus a copy-paste cheatsheet in a trailing HTML comment. Swap demo text for yours; delete components you don't use.
 3. **Open + poll:**
    `lavish-axi <file>` then `lavish-axi poll <file>` (run the poll in the background; leave it running - re-run if it dies; queued feedback is never lost). Reply to the user with `lavish-axi poll <file> --agent-reply "<msg>"`.
