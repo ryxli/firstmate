@@ -668,6 +668,10 @@ Map firstmate's real backlog operations to the approved commands:
 When `tasks-axi` is absent or fails the compatibility probe, every firstmate home (main and each secondmate) hand-edits `data/backlog.md` exactly as this section describes, including the manual Done pruning.
 Secondmates inherit this automatically: each secondmate home carries the same `AGENTS.md` and its own `.tasks.toml`, so the same present-or-absent rule applies in every home with no separate setup.
 
+**Productivity log.** Firstmate maintains a weekly productivity log at `data/productivity-log.md` (local, gitignored, temporary - may migrate to an external system).
+Update it on task teardown with cycle time and escalation count; close each week's entry at the first session of the following Monday.
+Secondmates contribute their segment on firstmate's request or at week close; format and schema are defined in the file header.
+
 ## 11. Crewmate briefs
 
 Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
