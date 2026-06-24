@@ -67,7 +67,7 @@ CONTRIBUTING.md      contributor workflow and repo conventions
 README.md            public overview and development notes
 .github/workflows/   shared CI and PR enforcement, committed
 .tasks.toml          tracked tasks-axi markdown backend config; drives backlog mutations when a compatible tasks-axi is on PATH (section 10), otherwise inert
-.agents/skills/      shared skills, committed
+.agents/skills/      shared skills, committed; includes lavish-fast (harness-agnostic Lavish artifact builder with prebuilt HTML template) and the no-mistakes, afk, and updatefirstmate orchestration skills
 .claude/skills       symlink to .agents/skills for claude compatibility
 bin/                 helper scripts, committed, including fm-fleet-sync.sh for clean default-branch refreshes and gone-branch pruning, and fm-update.sh for fast-forward-only self-updates; read each script's header before first use
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate

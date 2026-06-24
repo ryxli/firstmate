@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!--
+  LAVISH FAST TEMPLATE  -  copy this file, fill only the <main> content, run it.
+  Everything trivial is already baked in: CDN, luxury theme, viewport, overflow
+  guards, the .mono helper, and the exact window.lavish.queuePrompt() JS for
+  decision forms. DO NOT re-fetch `lavish-axi design` or the playbooks - the
+  patterns you need are all below, including a copy-paste cheatsheet at the end.
+
+  WORKFLOW:
+    1. cp this file to ./.lavish/<name>.html  (in the SUBJECT project, not cwd)
+    2. Replace the demo sections in <main> with your content (delete what you don't use)
+    3. bunx lavish-axi ./.lavish/<name>.html      # open
+    4. bunx lavish-axi poll ./.lavish/<name>.html  # leave running for feedback
+
+  DESIGN SOURCE (priority): (1) a look the user named; (2) the SUBJECT project's
+  own design system if it has one (match it); (3) otherwise this luxury Tailwind+
+  DaisyUI fallback - already wired here. Only swap the theme/CSS for case (1)/(2).
+
+  RULES BAKED IN (do not re-derive): min-width:0 on every flex/grid child;
+  break-words on long text; tables inside .overflow-x-auto; semantic DaisyUI
+  colors (bg-base-*, badge, alert, card) so themes stay readable. Keep it AIRY
+  and scannable - short blocks, lead with the conclusion.
+-->
+<html lang="en" data-theme="luxury">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TITLE HERE</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { overflow-x: hidden; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; font-size: 0.875em; }
+  </style>
+</head>
+<body class="bg-base-200 text-base-content">
+<main class="mx-auto max-w-5xl p-5 lg:p-8 space-y-8" style="min-width:0">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero bg-base-100 rounded-box border border-base-content/10 py-10 px-6">
+    <div class="hero-content text-center w-full" style="min-width:0">
+      <div style="min-width:0; max-width:100%">
+        <h1 class="text-3xl lg:text-4xl font-bold break-words">Title here</h1>
+        <p class="mt-4 text-lg opacity-70 break-words">One-line subtitle / the point at a glance.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VERDICT / CALLOUT (lead with the conclusion) ============ -->
+  <div role="alert" class="alert alert-soft alert-success" style="min-width:0">
+    <span class="break-words">Lead with the key takeaway here so it's obvious at a glance.</span>
+  </div>
+
+  <!-- ============ STAT ROW (optional headline numbers) ============ -->
+  <div class="stats stats-vertical sm:stats-horizontal bg-base-100 w-full" style="min-width:0">
+    <div class="stat"><div class="stat-title">Label</div><div class="stat-value text-2xl">3</div><div class="stat-desc">detail</div></div>
+    <div class="stat"><div class="stat-title">Label</div><div class="stat-value text-2xl">2</div><div class="stat-desc">detail</div></div>
+  </div>
+
+  <!-- ============ SECTION with CARDS ============ -->
+  <section class="space-y-4" style="min-width:0">
+    <h2 class="text-2xl font-bold">Section heading</h2>
+    <div class="card card-border bg-base-100" style="min-width:0">
+      <div class="card-body" style="min-width:0">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="badge badge-primary">Tag</span>
+          <h3 class="card-title text-lg">Card title</h3>
+        </div>
+        <p class="break-words opacity-80">Short, scannable body. Use <span class="mono">monospace</span> for code/keys.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TABLE (always inside overflow-x-auto) ============ -->
+  <section class="space-y-3" style="min-width:0">
+    <h2 class="text-2xl font-bold">Comparison</h2>
+    <div class="overflow-x-auto rounded-box border border-base-content/10 bg-base-100">
+      <table class="table table-zebra">
+        <thead><tr><th>Column</th><th>A</th><th>B</th></tr></thead>
+        <tbody>
+          <tr><td>Row</td><td class="mono">val</td><td class="mono">val</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ DECISION FORM (collects a structured choice) ============ -->
+  <!-- The onsubmit calls window.lavish.queuePrompt EXACTLY ONCE on submit.
+       Native radios update local state; do NOT queue on each change. -->
+  <section class="space-y-3" style="min-width:0">
+    <h2 class="text-2xl font-bold">Your decision</h2>
+    <div class="card card-border bg-base-100"><div class="card-body" style="min-width:0">
+      <form data-lavish-question="choice"
+        onsubmit="event.preventDefault(); const c=new FormData(event.currentTarget).get('choice'); if(c) window.lavish.queuePrompt('Chosen: '+c, {tag:'choice', text:'Chosen: '+c, element:event.currentTarget, data:{question:'choice', answer:c}});">
+        <div class="space-y-2">
+          <label class="flex items-start gap-3 p-2 rounded-box hover:bg-base-200 cursor-pointer">
+            <input type="radio" name="choice" value="Option A" class="radio radio-primary mt-1" checked>
+            <span><strong>Option A</strong> <span class="badge badge-soft badge-success badge-sm">recommended</span><br><span class="text-sm opacity-60">what it means</span></span>
+          </label>
+          <label class="flex items-start gap-3 p-2 rounded-box hover:bg-base-200 cursor-pointer">
+            <input type="radio" name="choice" value="Option B" class="radio radio-primary mt-1">
+            <span><strong>Option B</strong><br><span class="text-sm opacity-60">what it means</span></span>
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm mt-3">Queue this answer</button>
+      </form>
+    </div></div>
+  </section>
+
+  <!-- ============ ACTION BUTTON (one-click prompt back to the agent) ============ -->
+  <div class="card-actions">
+    <button class="btn btn-success" data-lavish-action
+      data-lavish-prompt="Approved: do the thing. Go.">Approve &mdash; go</button>
+  </div>
+
+  <p class="text-center text-xs opacity-40">Annotate any element or queue an instruction; the agent is watching for feedback.</p>
+
+</main>
+</body>
+</html>
+
+<!--
+================  COMPONENT CHEATSHEET (copy-paste; delete this comment in finals)  ================
+
+NATIVE controls (radio/checkbox/select/text/contenteditable) are interactive
+automatically - no data-lavish-action needed. Custom elements that should act
+like feedback controls need data-lavish-action + data-lavish-prompt.
+
+DECISION FORM (single choice) - queue exactly once on submit:
+  <form data-lavish-question="KEY"
+    onsubmit="event.preventDefault(); const c=new FormData(event.currentTarget).get('KEY'); if(c) window.lavish.queuePrompt('PROMPT '+c, {tag:'choice', text:'LABEL '+c, element:event.currentTarget, data:{question:'KEY', answer:c}});">
+    <label><input type="radio" name="KEY" value="V1" checked> V1</label>
+    <label><input type="radio" name="KEY" value="V2"> V2</label>
+    <button type="submit">Queue this answer</button>
+  </form>
+
+ACTION BUTTON (custom element -> one prompt):
+  <button data-lavish-action data-lavish-prompt="THE PROMPT TO SEND">Label</button>
+
+VERTICAL FLOW DIAGRAM (hand-built; no mermaid/JS): nested <div> boxes with
+border-2 rounded-xl + text arrows  |  v  between them; min-width:0 on each.
+
+NUMBERED STEPS (avoid DaisyUI `steps` for rich content - it breaks): use
+  <ol class="space-y-3"><li class="flex items-start gap-3"><span class="badge badge-primary badge-lg shrink-0">1</span><span>...</span></li></ol>
+
+THEMES (data-theme on <html>): luxury (default), dark, light, corporate,
+business, night, dim, nord, etc. Per-section override: <section data-theme="night">.
+
+CDN VERSIONS pinned above: daisyui 5.5.19, @tailwindcss/browser 4.2.4.
+================================================================================
+-->
