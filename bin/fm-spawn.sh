@@ -193,7 +193,24 @@ except Exception:
 # exists. Prints the workspace id. Deterministic: the same label always lands
 # on the same workspace, so every task of a domain/project shares one.
 herdr_resolve_workspace() {
-  local label=$1 cwd=$2 wsid create_json
+  local label=$1 cwd=$2 wsid create_json sanitized_label lockdir i mtime now
+  sanitized_label=$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_')
+  lockdir="$STATE/.wslock-${sanitized_label}"
+  mkdir -p "$STATE"
+  i=0
+  while ! mkdir "$lockdir" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -ge 100 ]; then
+      echo "error: timed out acquiring workspace lock for '$label'" >&2
+      return 1
+    fi
+    mtime=$(stat -f %m "$lockdir" 2>/dev/null || stat -c %Y "$lockdir" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    if [ $((now - mtime)) -gt 30 ]; then
+      rmdir "$lockdir" 2>/dev/null || true
+    fi
+    sleep 0.1
+  done
   wsid=$(herdr workspace list 2>/dev/null | python3 -c '
 import sys, json
 label = sys.argv[1]
@@ -207,16 +224,23 @@ for w in d.get("result", {}).get("workspaces", []):
         break
 ' "$label" 2>/dev/null || true)
   if [ -n "$wsid" ]; then
+    rmdir "$lockdir" 2>/dev/null || true
     printf '%s\n' "$wsid"
     return 0
   fi
   create_json=$(herdr workspace create --label "$label" --cwd "$cwd" --no-focus 2>&1) || {
     echo "error: herdr workspace create failed for label '$label'" >&2
     echo "$create_json" >&2
+    rmdir "$lockdir" 2>/dev/null || true
     return 1
   }
   wsid=$(printf '%s' "$create_json" | herdr_json_field 'd["result"]["workspace"]["workspace_id"]')
-  [ -n "$wsid" ] || { echo "error: herdr workspace create did not return a workspace_id for '$label'" >&2; return 1; }
+  if [ -z "$wsid" ]; then
+    echo "error: herdr workspace create did not return a workspace_id for '$label'" >&2
+    rmdir "$lockdir" 2>/dev/null || true
+    return 1
+  fi
+  rmdir "$lockdir" 2>/dev/null || true
   printf '%s\n' "$wsid"
 }
 
