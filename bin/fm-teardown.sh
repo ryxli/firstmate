@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Tear down a finished task: remove the herdr workspace/worktree or retire a
-# secondmate home, close the herdr pane, clear volatile state, refresh/prune
-# the project's clone for PR-based ship tasks, then print a backlog-refresh
-# reminder.
+# Tear down a finished task: close the herdr pane, remove the herdr
+# workspace/worktree or retire a secondmate home, clear volatile state,
+# refresh/prune the project's clone for PR-based ship tasks, then print a
+# backlog-refresh reminder.
+# The pane is always closed before any workspace or worktree removal because
+# "herdr worktree remove --workspace" alone is unreliable: it can leave the
+# agent pane alive when the workspace has non-agent panes or the agent still
+# holds the directory as its cwd.
 # REFUSES if the worktree holds work not on any remote. A fork counts as a
 # remote, so upstream-contribution PRs pushed to a fork satisfy this in any mode.
 # local-only projects additionally accept work merged into the local default
@@ -346,7 +350,7 @@ validate_firstmate_home_children_removal() {
 }
 
 cleanup_firstmate_home_children() {
-  local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home
+  local home=$1 sub_state child_meta child_id child_wt child_proj child_kind child_home
   sub_state="$home/state"
   [ -d "$sub_state" ] || return 0
   for child_meta in "$sub_state"/*.meta; do
@@ -375,6 +379,15 @@ cleanup_firstmate_home_children() {
       if [ -n "$child_workspace_id" ]; then
         herdr worktree remove --workspace "$child_workspace_id" --force 2>/dev/null || true
         [ -n "$child_proj" ] && [ -d "$child_proj" ] && git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
+        if [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
+          if [ -n "$child_proj" ] && [ -d "$child_proj" ]; then
+            git -C "$child_proj" worktree remove --force "$child_wt" 2>/dev/null || safe_rm_rf_child_worktree "$child_wt" "$child_proj"
+            git -C "$child_proj" worktree prune 2>/dev/null || true
+            git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
+          else
+            safe_rm_rf_child_worktree "$child_wt" "$child_proj"
+          fi
+        fi
       elif [ -n "$child_proj" ] && [ -d "$child_proj" ]; then
         git -C "$child_proj" worktree remove --force "$child_wt" 2>/dev/null || safe_rm_rf_child_worktree "$child_wt" "$child_proj"
         git -C "$child_proj" branch -D "fm/$child_id" 2>/dev/null || true
@@ -463,25 +476,29 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   fi
 fi
 
-# For new-style crewmates (workspace_id present): herdr worktree remove closes the
-# workspace and prunes the git worktree atomically. For old-style or secondmate:
-# close the pane explicitly first, then handle the worktree separately.
-if [ -z "$WORKSPACE_ID" ] || [ "$KIND" = secondmate ]; then
-  [ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
-fi
+# Close the recorded agent pane explicitly before any worktree/workspace
+# removal. "herdr worktree remove --workspace" is not reliable on its own: it
+# can leave the agent pane alive (and the worktree held as the agent's cwd)
+# when the workspace has non-agent panes or the agent still occupies the
+# directory. Closing only the recorded pane= leaves any non-agent panes in the
+# workspace intact.
+[ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
 
 if [ "$KIND" != secondmate ]; then
-  if [ -n "$WORKSPACE_ID" ]; then
-    herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || true
-    [ -n "$PROJ" ] && [ -d "$PROJ" ] && git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
-  elif [ -d "$WT" ]; then
+  # New-style crewmates record workspace_id: ask herdr to close the workspace
+  # and prune the git worktree. That can be partial (the workspace has non-agent
+  # panes, or the agent still holds the dir as cwd), so the directory removal
+  # below is the single backstop for both new-style and old-style tasks.
+  [ -n "$WORKSPACE_ID" ] && herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || true
+  if [ -d "$WT" ]; then
     if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
       git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
-      git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
+      git -C "$PROJ" worktree prune 2>/dev/null || true
     else
       rm -rf "$WT"
     fi
   fi
+  [ -n "$PROJ" ] && [ -d "$PROJ" ] && git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
 fi
 if [ "$KIND" = secondmate ]; then
   [ -n "$HOME_PATH" ] || HOME_PATH=$WT
