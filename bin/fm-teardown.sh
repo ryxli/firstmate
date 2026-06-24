@@ -350,7 +350,7 @@ validate_firstmate_home_children_removal() {
 }
 
 cleanup_firstmate_home_children() {
-  local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home
+  local home=$1 sub_state child_meta child_id child_wt child_proj child_kind child_home
   sub_state="$home/state"
   [ -d "$sub_state" ] || return 0
   for child_meta in "$sub_state"/*.meta; do
@@ -485,29 +485,20 @@ fi
 [ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
 
 if [ "$KIND" != secondmate ]; then
-  if [ -n "$WORKSPACE_ID" ]; then
-    herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || true
-    [ -n "$PROJ" ] && [ -d "$PROJ" ] && git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
-  elif [ -d "$WT" ]; then
-    if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
-      git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
-      git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
-    else
-      rm -rf "$WT"
-    fi
-  fi
-  # Defensive: if the worktree directory survived the herdr/git cleanup above
-  # (a partial workspace removal, or the agent still holding it as cwd), remove
-  # it directly so teardown never leaves the directory behind.
-  if [ -n "$WT" ] && [ -d "$WT" ]; then
+  # New-style crewmates record workspace_id: ask herdr to close the workspace
+  # and prune the git worktree. That can be partial (the workspace has non-agent
+  # panes, or the agent still holds the dir as cwd), so the directory removal
+  # below is the single backstop for both new-style and old-style tasks.
+  [ -n "$WORKSPACE_ID" ] && herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || true
+  if [ -d "$WT" ]; then
     if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then
       git -C "$PROJ" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
       git -C "$PROJ" worktree prune 2>/dev/null || true
-      git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
     else
       rm -rf "$WT"
     fi
   fi
+  [ -n "$PROJ" ] && [ -d "$PROJ" ] && git -C "$PROJ" branch -D "fm/$ID" 2>/dev/null || true
 fi
 if [ "$KIND" = secondmate ]; then
   [ -n "$HOME_PATH" ] || HOME_PATH=$WT
