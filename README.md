@@ -156,7 +156,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-brief.sh`            | Scaffold a ship brief, a report-only scout brief with `--scout`, or a secondmate charter with `--secondmate`      |
 | `fm-classify-status.sh`  | Classify one status line as `captain` (exit 0) or `internal` (exit 1); shared by the watcher and sub-supervisor   |
 | `fm-ensure-agents-md.sh` | Ensure project `AGENTS.md` is the real memory file and `CLAUDE.md` symlinks to it                                   |
-| `fm-guard.sh`            | Warn when tasks are in flight but queued wakes are pending or the watcher liveness beacon is stale or missing      |
+| `fm-guard.sh`            | Warn when tasks are in flight but queued wakes are pending, the re-arm marker is set and the beacon is stale, or the beacon is missing or too old |
 | `fm-home-seed.sh`        | Lease/provision a secondmate home transactionally, clone projects, initialize gates, and maintain `data/secondmates.md` |
 | `fm-spawn.sh`            | Spawn one task, several `id=repo` pairs, or a persistent secondmate with `--secondmate`                            |
 | `fm-resolve-spawn.sh`    | Preflight check called by `fm-spawn.sh`: verifies harness binary is on PATH, warns if project is unregistered, and confirms worktree base is writable before any git or herdr state is created |
@@ -166,7 +166,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-watch.sh`            | Singleton-safe one-shot watcher; blocks until supervision work is due, queues it durably, then exits with one reason line |
 | `fm-supervise-daemon.sh` | Presence-gated sub-supervisor for walk-away (`/afk`) supervision: wraps `fm-watch.sh`, self-handles routine wakes in bash, and escalates only captain-relevant events as one verified, batched, single-line digest prefixed with a sentinel marker |
 | `fm-wake-drain.sh`       | Atomically drain queued watcher wakes before handling supervision work                                              |
-| `fm-send.sh`             | Send one verified literal line (or `--key Escape`) to a crewmate window; exits non-zero when Enter is positively swallowed |
+| `fm-send.sh`             | Drain queued wakes to stderr, then send one verified literal line (or `--key Escape`) to a crewmate window; exits non-zero when Enter is positively swallowed |
 | `fm-herdr-lib.sh`        | Shared herdr pane primitives for busy detection, dim-ghost-aware and border-aware composer detection, and verified submit retry |
 | `fm-identity-lib.sh`     | Sourced library: derives supervisor name/role/parent, worker tab labels, and task slugs from `config/identity` for consistent naming across spawn and brief scaffolding |
 | `fm-peek.sh`             | Print a bounded tail of a crewmate pane                                                                             |

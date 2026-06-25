@@ -429,6 +429,20 @@ test_guard_rearms_after_draining_pending_queue() {
   pass "guard orders watcher re-arm after queued wake drain"
 }
 
+test_guard_warns_on_rearm_marker_when_beacon_stale() {
+  local dir state err
+  dir=$(make_case guard-rearm-marker)
+  state="$dir/state"
+  err="$dir/guard.err"
+  printf 'project=x\n' > "$state/task.meta"
+  printf 'signal: %s/task.status\n' "$state" > "$state/.watch-rearm-needed"
+  touch -t 200001010000 "$state/.last-watcher-beat"
+  FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=1 "$ROOT/bin/fm-guard.sh" 2> "$err" >/dev/null || fail "guard failed"
+  grep -F 'watcher exited for a wake and still needs re-arm' "$err" >/dev/null || fail "guard did not warn about re-arm marker: $(cat "$err")"
+  grep -F 'Last wake needing re-arm: signal:' "$err" >/dev/null || fail "guard did not include wake reason: $(cat "$err")"
+  pass "guard warns on stale beacon with re-arm marker"
+}
+
 test_status_classifier_script_contract() {
   local out
   out=$("$CLASSIFY" "done: PR https://x/y/pull/1") || fail "done status should classify as captain"
@@ -439,6 +453,7 @@ test_status_classifier_script_contract() {
   [ "$out" = internal ] || fail "internal output mismatch: $out"
   pass "status classifier script contract"
 }
+
 
 test_classify_routine_signal_self() {
   local dir state out
@@ -1296,6 +1311,26 @@ test_fm_send_exits_nonzero_on_confirmed_swallow() {
   pass "fm-send exits non-zero on a confirmed swallow, zero on a clean submit"
 }
 
+test_fm_send_drains_wakes_to_stderr_before_text() {
+  local dir fakebin err status_file pane_file
+  dir=$(make_supercase send-drain)
+  fakebin="$dir/fakebin"; err="$dir/send.err"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
+  append_wake "$dir/state" heartbeat heartbeat heartbeat || fail "send drain wake append failed"
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_STATE_OVERRIDE="$dir/state" \
+    FM_SEND_SLEEP=0.05 "$ROOT/bin/fm-send.sh" w1:p1 'route this work' >/dev/null 2>"$err" \
+    || fail "fm-send failed while draining wakes: $(cat "$err")"
+  [ ! -s "$dir/state/.wake-queue" ] || fail "fm-send did not drain wake queue"
+  grep -F 'WARNING: drained queued wakes before send' "$err" >/dev/null || fail "fm-send did not log drained wakes to stderr: $(cat "$err")"
+  grep "$(printf '\theartbeat\t')" "$err" >/dev/null || fail "fm-send stderr did not include drained wake record: $(cat "$err")"
+  pass "fm-send drains queued wakes to stderr before sending text"
+}
+
 test_fm_send_exits_nonzero_on_initial_send_failure() {
   local dir fakebin err status_file pane_file
   dir=$(make_supercase send-type-failure)
@@ -1327,6 +1362,7 @@ test_stale_watch_lock_reclaimed
 test_live_stale_watch_lock_is_actionable
 test_guard_warns_on_pending_queue
 test_guard_rearms_after_draining_pending_queue
+test_guard_warns_on_rearm_marker_when_beacon_stale
 test_status_classifier_script_contract
 # Sub-supervisor (fm-supervise-daemon.sh) classifier + batching + housekeeping.
 test_classify_routine_signal_self
@@ -1361,6 +1397,9 @@ test_pane_input_pending_idle_prompt_not_pending
 test_pane_input_pending_honors_idle_override_after_border_strip
 test_composer_guard_defers_on_partial_input
 test_inject_detects_swallowed_submit
+test_fm_send_exits_nonzero_on_confirmed_swallow
+test_fm_send_drains_wakes_to_stderr_before_text
+test_fm_send_exits_nonzero_on_initial_send_failure
 test_inject_no_duplicate_on_success
 test_classify_signal_dedup_against_scan
 test_classify_stale_dedup_against_signal
@@ -1375,5 +1414,3 @@ test_max_defer_pending_composer_alarms_without_typing
 test_normal_flush_clears_stale_wedge_marker
 test_below_max_defer_does_nothing
 test_max_defer_afk_inactive_does_not_flush_or_alarm
-test_fm_send_exits_nonzero_on_confirmed_swallow
-test_fm_send_exits_nonzero_on_initial_send_failure

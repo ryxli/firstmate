@@ -11,6 +11,8 @@
 # composer after all retries), fm-send exits NON-ZERO. The compose/submit
 # logic lives in bin/fm-herdr-lib.sh. Tune with FM_SEND_RETRIES (default 3)
 # and FM_SEND_SLEEP (0.4).
+# Before submitting text, drains state/.wake-queue and logs any records to
+# stderr so a send cannot silently skip the drain step.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,6 +46,17 @@ resolve() {
       ;;
   esac
 }
+drain_pending_wakes() {
+  local drained
+  drained=$("$SCRIPT_DIR/fm-wake-drain.sh") || {
+    echo "warning: failed to drain queued wakes before send" >&2
+    return 0
+  }
+  [ -n "$drained" ] || return 0
+  echo "WARNING: drained queued wakes before send:" >&2
+  printf '%s\n' "$drained" >&2
+}
+
 
 P=$(resolve "$1")
 shift
@@ -51,6 +64,7 @@ shift
 if [ "${1:-}" = "--key" ]; then
   herdr pane send-keys "$P" "$2"
 else
+  drain_pending_wakes
   # Slash commands open a completion popup in some TUIs; give them more time.
   case "$*" in /*) settle=1.2 ;; *) settle=0.3 ;; esac
   retries=${FM_SEND_RETRIES:-3}
@@ -58,11 +72,15 @@ else
   verdict=$(fm_herdr_submit_core "$P" "$*" "$retries" "$sleep_s" "$settle")
   case "$verdict" in
     pending)
-      echo "error: text not submitted to $P (Enter swallowed; text left in composer)" >&2
+      echo "error: text not submitted to $P (Enter swallowed; text landed in composer and remains queued; retrying the same send will duplicate it)" >&2
       exit 1
       ;;
     send-failed)
-      echo "error: text not sent to $P (herdr pane run failed)" >&2
+      if fm_pane_input_pending "$P"; then
+        echo "error: text not submitted to $P (herdr pane run failed after text landed in composer; retrying the same send may duplicate it)" >&2
+      else
+        echo "error: text not sent to $P (herdr pane run failed; composer does not show queued text)" >&2
+      fi
       exit 1
       ;;
   esac

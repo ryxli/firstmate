@@ -93,6 +93,7 @@ state/               volatile runtime signals; gitignored
   .herdr-prev-status-* .herdr-idle-count-* .herdr-turn-*   watcher herdr status tracking; never touch
   .stale-* .seen-* .last-* .heartbeat-streak   watcher internals; never touch
   .last-watcher-beat watcher liveness beacon, touched every poll; fm-guard.sh reads it
+  .watch-rearm-needed watcher re-arm marker; written by fm-watch.sh before each wake exit, cleared on successful re-arm; fm-guard.sh reads it to distinguish "needs re-arm" from "watcher never ran"
   .status-internal.log   rolling log of non-captain-relevant status lines suppressed by the watcher; capped at FM_STATUS_INTERNAL_LOG_MAX lines (default 500); never touch
   .subsuper-* .supervise-daemon.*   sub-supervisor internals (stale markers, escalation buffer, inject-wedged marker, seen-status dedup, log, lock, pid); never touch
 .no-mistakes/        local validation state and evidence; gitignored
@@ -550,11 +551,11 @@ A `done` task with no recorded `pr=`, and every blocked, failed, or active task,
 **Watcher liveness is guarded, not just disciplined.**
 Arming the watcher is the last action of every wake-handling turn - but the protocol no longer relies on remembering that.
 While running, `fm-watch.sh` touches `state/.last-watcher-beat` every poll cycle.
-The supervision scripts (`fm-peek`, `fm-send`, `fm-spawn`, `fm-teardown`, `fm-pr-check`, `fm-promote`, `fm-review-diff`, `fm-fleet-sync`, `fm-update`) call `bin/fm-guard.sh` first, which warns to stderr when any task is in flight (`state/*.meta` exists) but queued wakes are pending, or that beacon is missing or older than `FM_GUARD_GRACE` (default 300s).
-So the next time you touch the fleet with queued wakes or no watcher alive, the tool output itself tells you what to do - a pull-based guard that works on any harness, since it rides the script output you already read rather than a harness-specific hook.
+The supervision scripts (`fm-peek`, `fm-send`, `fm-spawn`, `fm-teardown`, `fm-pr-check`, `fm-promote`, `fm-review-diff`, `fm-fleet-sync`, `fm-update`) call `bin/fm-guard.sh` first, which warns to stderr when any task is in flight (`state/*.meta` exists) but queued wakes are pending, when `state/.watch-rearm-needed` is present and the watcher beacon is stale, or when that beacon is missing or older than `FM_GUARD_GRACE` (default 300s).
+`fm-watch.sh` writes `state/.watch-rearm-needed` before every wake exit and clears it when it is successfully re-armed, so a missed re-arm becomes self-announcing the next time a fleet tool runs.
+`fm-send.sh` also drains queued wakes before submitting text and logs any drained records to stderr, so sending an instruction cannot silently skip the drain step.
+So the next time you touch the fleet with queued wakes, a missed re-arm, or no watcher alive, the tool output itself tells you what to do - a pull-based guard that works on any harness, since it rides the script output you already read rather than a harness-specific hook.
 The grace window keeps normal handling (watcher briefly down between a wake and its re-arm) silent.
-If a guard warning says queued wakes are pending, drain them before doing anything else.
-If a guard warning says watcher liveness is stale, arm `bin/fm-watch.sh` after draining any queued wakes.
 Watcher liveness is not enough if you are foreground-blocked.
 Whenever one or more tasks are in flight, do not run long foreground-blocking operations in your own session.
 This includes your own no-mistakes pipeline, long builds, and any other multi-minute command.
