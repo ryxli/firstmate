@@ -158,6 +158,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-guard.sh`            | Warn when tasks are in flight but queued wakes are pending or the watcher liveness beacon is stale or missing      |
 | `fm-home-seed.sh`        | Lease/provision a secondmate home transactionally, clone projects, initialize gates, and maintain `data/secondmates.md` |
 | `fm-spawn.sh`            | Spawn one task, several `id=repo` pairs, or a persistent secondmate with `--secondmate`                            |
+| `fm-resolve-spawn.sh`    | Preflight check called by `fm-spawn.sh`: verifies harness binary is on PATH, warns if project is unregistered, and confirms worktree base is writable before any git or herdr state is created |
 | `fm-project-mode.sh`     | Resolve a project's delivery mode and `+yolo` flag from `data/projects.md`                                          |
 | `fm-merge-local.sh`      | Fast-forward a `local-only` project's local default branch after approval                                           |
 | `fm-review-diff.sh`      | Review a crewmate branch against the authoritative base, with optional `--stat` output                              |
@@ -250,6 +251,7 @@ tests/fm-update.test.sh                   # fast-forward-only self-update, rerea
 tests/fm-secondmate.test.sh               # persistent secondmate routing, seeding, idle charter, backlog handoff, spawn, recovery, teardown, and FM_HOME tests
 tests/fm-teardown.test.sh                 # fm-teardown.sh safety and reminder checks: local-only fork-remote allow, truly-unpushed refuse, merged-to-main allow, no-mistakes regression, tasks-axi reminder, --force override
 tests/fm-watch-stale.test.sh              # watcher stale-skip behavior: PR-ready tasks awaiting merge, ordinary idle panes, done tasks without pr=, secondmate panes, and merge-poll continuity
+tests/fm-resolve-spawn.test.sh            # spawn resolver preflight: harness binary check, unregistered-project warn, worktree base check, and abort-before-worktree integration with fm-spawn
 [ "$(readlink CLAUDE.md)" = "AGENTS.md" ]
 [ "$(readlink .claude/skills)" = "../.agents/skills" ]
 FM_HEARTBEAT=2 FM_POLL=1 bin/fm-watch.sh  # watcher smoke test (prints "heartbeat")
