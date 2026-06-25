@@ -93,6 +93,7 @@ state/               volatile runtime signals; gitignored
   .herdr-prev-status-* .herdr-idle-count-* .herdr-turn-*   watcher herdr status tracking; never touch
   .stale-* .seen-* .last-* .heartbeat-streak   watcher internals; never touch
   .last-watcher-beat watcher liveness beacon, touched every poll; fm-guard.sh reads it
+  .status-internal.log   rolling log of non-captain-relevant status lines suppressed by the watcher; capped at FM_STATUS_INTERNAL_LOG_MAX lines (default 500); never touch
   .subsuper-* .supervise-daemon.*   sub-supervisor internals (stale markers, escalation buffer, inject-wedged marker, seen-status dedup, log, lock, pid); never touch
 .no-mistakes/        local validation state and evidence; gitignored
 ```
@@ -526,6 +527,7 @@ On wake, in order of cheapness:
 
 1. Read the reason line and drain queued wake records with `bin/fm-wake-drain.sh`.
 2. `signal:` read the listed status files first; a wake lists every signal that landed within the coalescing grace window (e.g. a status write plus a herdr `working→idle` transition), and each is ~30 tokens and usually sufficient.
+   Only captain-relevant status lines (containing `done:`, `blocked:`, `failed:`, `needs-decision:`, `PR ready`, `checks green`, `ready in branch`, or `merged`) generate a signal wake; non-relevant lines are absorbed and appended to `state/.status-internal.log` without waking the supervisor.
 3. `stale:` the crewmate's pane has been idle without a status update; peek the pane (`bin/fm-peek.sh <pane_id>`) to diagnose.
 4. `check:` a per-task poll fired (usually a merge); act on it.
 5. `heartbeat:` review the whole fleet: skim each window's status file, peek panes that look off, check PR-ready tasks for merge, reconcile data/backlog.md, then re-arm the watcher.
@@ -591,7 +593,7 @@ The marker travels with the message text; it does not rely on harness-level type
 **Orthogonal to yolo.** afk changes how aggressively firstmate surfaces things, not who approves what. "Away" never means "approves more" — a PR, a needs-decision finding, or anything destructive still waits for the captain's explicit word.
 
 **Classification policy (per wake):**
-- `signal` whose status content has no captain-relevant verb (`done:|needs-decision:|blocked:|failed:|PR ready|checks green|ready in branch|merged`) → **self-handle**. Captain-relevant verb → escalate.
+- `signal` → always escalate; the watcher pre-filters using `bin/fm-classify-status.sh` and only queues signal wakes for captain-relevant status lines (`done:|needs-decision:|blocked:|failed:|PR ready|checks green|ready in branch|merged`). Non-relevant status writes are absorbed and logged to `state/.status-internal.log` without generating a wake, so the daemon never receives a non-captain-relevant signal.
 - `check` → always escalate (check scripts print only when firstmate should wake).
 - `stale` with a terminal status → escalate. Non-terminal stale is transient: the daemon records a marker and self-handles; if the pane is still idle past `FM_STALE_ESCALATE_SECS` (default 240s), housekeeping escalates it as a possible wedge. This bounds wedge-detection latency to the threshold plus a tick - a delay, never a loss, and healthy crewmates (which are autonomous and do not wait on firstmate mid-task) are unaffected.
 - `heartbeat` → self-handle; the daemon runs its own cheap bash fleet scan every `FM_HEARTBEAT_SCAN_SECS` (default 300s) as the catch-all for a captain-relevant status line the per-wake classifier might miss.
