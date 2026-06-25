@@ -175,7 +175,7 @@ test_spawn_clears_broken_symlinks() {
 #   This covers the "old home upgraded in-place" scenario.
 # -----------------------------------------------------------------------
 test_seed_home_creates_claude_md() {
-  local home subhome out fakeherdr fakebin fakeherdr_bin
+  local home subhome out fakebin fakeherdr_bin
   home="$TMP_ROOT/seed-claude-home"
   subhome="$TMP_ROOT/seed-claude-subhome"
   mkdir -p "$home/projects" "$home/data" "$home/state"
@@ -204,8 +204,7 @@ test_seed_home_creates_claude_md() {
   printf '# Firstmate\n' > "$subhome/AGENTS.md"
 
   fakebin=$(make_fake_no_mistakes "$TMP_ROOT/seed-nm-fake")
-  fakeherdr=$(make_fake_herdr "$TMP_ROOT/seed-herdr-fake")
-  fakeherdr_bin="$TMP_ROOT/seed-herdr-fake/fakebin"
+  fakeherdr_bin=$(make_fake_herdr "$TMP_ROOT/seed-herdr-fake")
 
   PATH="$fakeherdr_bin:$fakebin:$PATH" \
     FM_HOME="$home" \
@@ -226,7 +225,7 @@ test_seed_home_creates_claude_md() {
 # Test 3b: fm-home-seed.sh seed_home fixes a broken CLAUDE.md symlink
 # -----------------------------------------------------------------------
 test_seed_home_fixes_broken_claude_md() {
-  local home subhome fakeherdr fakebin fakeherdr_bin proj_dir proj_remote remote_abs
+  local home subhome fakebin fakeherdr_bin proj_dir proj_remote remote_abs
   home="$TMP_ROOT/seed-broken-home"
   subhome="$TMP_ROOT/seed-broken-subhome"
   mkdir -p "$home/projects" "$home/data" "$home/state"
@@ -255,8 +254,7 @@ test_seed_home_fixes_broken_claude_md() {
     || fail "precondition: CLAUDE.md should be a broken symlink before seeding"
 
   fakebin=$(make_fake_no_mistakes "$TMP_ROOT/seed-broken-nm-fake")
-  fakeherdr=$(make_fake_herdr "$TMP_ROOT/seed-broken-herdr-fake")
-  fakeherdr_bin="$TMP_ROOT/seed-broken-herdr-fake/fakebin"
+  fakeherdr_bin=$(make_fake_herdr "$TMP_ROOT/seed-broken-herdr-fake")
 
   PATH="$fakeherdr_bin:$fakebin:$PATH" \
     FM_HOME="$home" \
@@ -278,7 +276,7 @@ test_seed_home_fixes_broken_claude_md() {
 #   (AGENTS.md also missing so both auto-links fail)
 # -----------------------------------------------------------------------
 test_spawn_rejects_when_autolink_impossible() {
-  local home fakebin smhome out err_out
+  local home fakebin smhome out
   home=$(make_fm_home claude-fail)
   fakebin=$(make_fake_herdr "$home")
   # Build a home that has neither AGENTS.md nor bin - auto-link will create them
