@@ -77,7 +77,7 @@ else
       ;;
     send-failed)
       if fm_pane_input_pending "$P"; then
-        echo "error: text not submitted to $P (herdr pane run failed after text landed in composer; retrying the same send may duplicate it)" >&2
+        echo "error: text not submitted to $P (herdr pane run failed after text landed in composer; retrying the same send will duplicate it)" >&2
       else
         echo "error: text not sent to $P (herdr pane run failed; composer does not show queued text)" >&2
       fi

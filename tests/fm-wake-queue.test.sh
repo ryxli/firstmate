@@ -75,7 +75,8 @@ SH
 #   FM_FAKE_HERDR_PANE_ALIVE    "1" (default) means herdr pane get succeeds; "0" = exit 1
 #   FM_FAKE_HERDR_SWALLOW_FILE  path to a flag file; when present, pane run is swallowed
 #   FM_FAKE_HERDR_PERSIST_SWALLOW  "1" = keep swallow flag (persistent); default one-shot
-#   FM_FAKE_HERDR_SEND_FAIL     "1" = herdr pane run exits 1 (send failure)
+#   FM_FAKE_HERDR_SEND_FAIL     "1" = herdr pane run exits 1 before text lands
+#   FM_FAKE_HERDR_SEND_FAIL_AFTER_LAND  "1" = herdr pane run exits 1 after text lands in composer
 #   FM_FAKE_HERDR_CURRENT_PANE  pane id returned by herdr pane current (default "fakepane")
 make_supercase() {
   local name=$1 dir fakebin
@@ -110,6 +111,10 @@ case "${1:-}" in
       run)
         # herdr pane run <pane> <text>
         pane="${3:-}"; shift 3 2>/dev/null || true; text="$*"
+        if [ "${FM_FAKE_HERDR_SEND_FAIL_AFTER_LAND:-0}" = "1" ]; then
+          [ -n "${FM_FAKE_HERDR_PANE_FILE:-}" ] && printf '%s\n' "$text" > "${FM_FAKE_HERDR_PANE_FILE}"
+          exit 1
+        fi
         [ "${FM_FAKE_HERDR_SEND_FAIL:-0}" = "1" ] && exit 1
         sw="${FM_FAKE_HERDR_SWALLOW_FILE:-}"
         if [ -n "$sw" ] && [ -f "$sw" ]; then
@@ -441,6 +446,18 @@ test_guard_warns_on_rearm_marker_when_beacon_stale() {
   grep -F 'watcher exited for a wake and still needs re-arm' "$err" >/dev/null || fail "guard did not warn about re-arm marker: $(cat "$err")"
   grep -F 'Last wake needing re-arm: signal:' "$err" >/dev/null || fail "guard did not include wake reason: $(cat "$err")"
   pass "guard warns on stale beacon with re-arm marker"
+}
+
+test_guard_warns_on_rearm_marker_without_meta() {
+  local dir state err
+  dir=$(make_case guard-rearm-no-meta)
+  state="$dir/state"
+  err="$dir/guard.err"
+  printf 'signal: %s/task.status\n' "$state" > "$state/.watch-rearm-needed"
+  touch -t 200001010000 "$state/.last-watcher-beat"
+  FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=1 "$ROOT/bin/fm-guard.sh" 2> "$err" >/dev/null || fail "guard failed"
+  grep -F 'watcher exited for a wake and still needs re-arm' "$err" >/dev/null || fail "guard skipped marker-only warning: $(cat "$err")"
+  pass "guard warns on stale re-arm marker without task metadata"
 }
 
 test_status_classifier_script_contract() {
@@ -1350,6 +1367,26 @@ test_fm_send_exits_nonzero_on_initial_send_failure() {
   pass "fm-send exits non-zero when initial text send fails"
 }
 
+test_fm_send_exits_nonzero_when_failed_send_left_text_queued() {
+  local dir fakebin err status_file pane_file
+  dir=$(make_supercase send-fail-after-land)
+  fakebin="$dir/fakebin"; err="$dir/send.err"
+  status_file="$dir/herdr-status"; printf 'idle' > "$status_file"
+  pane_file="$dir/herdr-pane"; : > "$pane_file"
+  if PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_STATUS_FILE="$status_file" \
+    FM_FAKE_HERDR_PANE_FILE="$pane_file" \
+    FM_FAKE_HERDR_PANE_ALIVE=1 \
+    FM_FAKE_HERDR_SEND_FAIL_AFTER_LAND=1 \
+    FM_STATE_OVERRIDE="$dir/state" \
+    FM_SEND_SLEEP=0.05 "$ROOT/bin/fm-send.sh" w1:p1 'route this work' >/dev/null 2>"$err"; then
+    fail "fm-send exited zero despite a failed send leaving queued text"
+  fi
+  grep -F 'text landed in composer' "$err" >/dev/null || fail "fm-send did not explain queued text after failed send: $(cat "$err")"
+  grep -F 'will duplicate it' "$err" >/dev/null || fail "fm-send did not warn that retry duplicates queued text: $(cat "$err")"
+  pass "fm-send reports queued text after a failed send"
+}
+
 test_daemon_state_root_uses_fm_home
 test_concurrent_append_and_drain
 test_signal_catchup_without_running_watcher
@@ -1363,6 +1400,7 @@ test_live_stale_watch_lock_is_actionable
 test_guard_warns_on_pending_queue
 test_guard_rearms_after_draining_pending_queue
 test_guard_warns_on_rearm_marker_when_beacon_stale
+test_guard_warns_on_rearm_marker_without_meta
 test_status_classifier_script_contract
 # Sub-supervisor (fm-supervise-daemon.sh) classifier + batching + housekeeping.
 test_classify_routine_signal_self
@@ -1400,6 +1438,7 @@ test_inject_detects_swallowed_submit
 test_fm_send_exits_nonzero_on_confirmed_swallow
 test_fm_send_drains_wakes_to_stderr_before_text
 test_fm_send_exits_nonzero_on_initial_send_failure
+test_fm_send_exits_nonzero_when_failed_send_left_text_queued
 test_inject_no_duplicate_on_success
 test_classify_signal_dedup_against_scan
 test_classify_stale_dedup_against_signal

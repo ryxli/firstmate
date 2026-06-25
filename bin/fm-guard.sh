@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Watcher liveness guard, called at the top of the supervision scripts.
-# If any task is in flight (a state/<id>.meta exists) and the watcher's
-# liveness beacon (state/.last-watcher-beat, touched every poll cycle) is
-# missing or older than FM_GUARD_GRACE seconds, prints a loud warning so the
-# agent sees it in the tool output of whatever it was doing - the one channel
-# every harness has. A watcher that exited for a wake also leaves
-# state/.watch-rearm-needed; once its beacon is stale, pane-touching tools warn
-# that the previous wake still needs a re-arm.
+# Warns to stderr about three independent conditions:
+#   1. Pending wakes in state/.wake-queue (drain with fm-wake-drain.sh).
+#   2. state/.watch-rearm-needed present with a stale or missing liveness
+#      beacon (state/.last-watcher-beat) - previous wake still needs re-arm.
+#   3. Beacon missing or older than FM_GUARD_GRACE seconds with no re-arm
+#      marker - watcher has not run recently.
+# Conditions 1 and 2 fire regardless of whether tasks are in flight; condition
+# 3 drops the "tasks are in flight but" prefix when no state/*.meta exists.
+# Exits immediately (no warning) only when all three conditions are absent.
 # Always exits 0: the guard warns, it never blocks.
 set -u
 
@@ -33,7 +35,10 @@ for meta in "$STATE"/*.meta; do
   has_meta=true
   break
 done
-"$has_meta" || exit 0
+
+if ! "$has_meta" && [ ! -s "$FM_WAKE_QUEUE" ] && [ ! -e "$STATE/.watch-rearm-needed" ]; then
+  exit 0
+fi
 
 if [ -s "$FM_WAKE_QUEUE" ]; then
   queue_pending=true
@@ -51,7 +56,11 @@ if [ -e "$BEAT" ]; then
     echo "WARNING: watcher exited for a wake and still needs re-arm; beacon is stale for ${age}s (>${GRACE}s)." >&2
     [ -n "$reason" ] && echo "Last wake needing re-arm: $reason" >&2
   else
-    echo "WARNING: tasks are in flight but no watcher has been alive for ${age}s (>${GRACE}s)." >&2
+    if "$has_meta"; then
+      echo "WARNING: tasks are in flight but no watcher has been alive for ${age}s (>${GRACE}s)." >&2
+    else
+      echo "WARNING: no watcher has been alive for ${age}s (>${GRACE}s)." >&2
+    fi
   fi
 else
   if [ -e "$REARM" ]; then
@@ -59,7 +68,11 @@ else
     echo "WARNING: watcher exited for a wake and still needs re-arm; no liveness beacon exists." >&2
     [ -n "$reason" ] && echo "Last wake needing re-arm: $reason" >&2
   else
-    echo "WARNING: tasks are in flight but no watcher has ever run (no liveness beacon)." >&2
+    if "$has_meta"; then
+      echo "WARNING: tasks are in flight but no watcher has ever run (no liveness beacon)." >&2
+    else
+      echo "WARNING: no watcher has ever run (no liveness beacon)." >&2
+    fi
   fi
 fi
 if "$queue_pending"; then
