@@ -140,9 +140,15 @@ last_status_line() {
   grep -v '^[[:space:]]*$' "$f" 2>/dev/null | tail -n1
 }
 
+STATUS_INTERNAL_LOG_MAX=${FM_STATUS_INTERNAL_LOG_MAX:-500}
+
 log_internal_status() {
-  local f=$1 line=$2
+  local f=$1 line=$2 tmp
   printf '[%s] %s: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$(basename "$f")" "$line" >> "$STATUS_INTERNAL_LOG"
+  if [ "$(wc -l < "$STATUS_INTERNAL_LOG" 2>/dev/null)" -gt "$STATUS_INTERNAL_LOG_MAX" ] 2>/dev/null; then
+    tmp="${STATUS_INTERNAL_LOG}.tmp"
+    tail -n "$STATUS_INTERNAL_LOG_MAX" "$STATUS_INTERNAL_LOG" > "$tmp" && mv "$tmp" "$STATUS_INTERNAL_LOG"
+  fi
 }
 
 captain_status_files() {
