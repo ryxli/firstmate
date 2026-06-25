@@ -93,7 +93,7 @@ test_fm_home_scopes_projects_path() {
   home="$TMP_ROOT/home path"
   mkdir -p "$home/data" "$home/projects/alpha"
   out=$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' \
-    FM_HOME="$home" FM_SPAWN_NO_GUARD=1 "$SPAWN" nope-home-z7 projects/alpha codex 2>&1)
+    FM_HOME="$home" FM_SPAWN_NO_GUARD=1 "$SPAWN" nope-home-z7 projects/alpha omp 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn with missing brief should fail"
   expected="error: no brief at $home/data/nope-home-z7/brief.md"
@@ -111,7 +111,7 @@ test_fm_projects_override_scopes_projects_path() {
   projects="$TMP_ROOT/override projects"
   mkdir -p "$home/data" "$projects/alpha"
   out=$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_CONFIG_OVERRIDE='' \
-    FM_HOME="$home" FM_PROJECTS_OVERRIDE="$projects" FM_SPAWN_NO_GUARD=1 "$SPAWN" nope-override-z8 projects/alpha codex 2>&1)
+    FM_HOME="$home" FM_PROJECTS_OVERRIDE="$projects" FM_SPAWN_NO_GUARD=1 "$SPAWN" nope-override-z8 projects/alpha omp 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn with missing brief should fail"
   expected="error: no brief at $home/data/nope-override-z8/brief.md"

@@ -100,6 +100,10 @@ else
   ARG3=${POS[2]:-}
 fi
 
+if [ "$KIND" != secondmate ]; then
+  "$FM_ROOT/bin/fm-resolve-spawn.sh" "$PROJ" "$ARG3"
+fi
+
 # Launch templates per adapter. No turn-end hook placeholders needed since
 # herdr tracks agent status natively. __BRIEF__ is still used.
 launch_template() {
