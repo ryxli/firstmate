@@ -538,6 +538,10 @@ For `kind=secondmate`, an idle pane is healthy.
 A secondmate may be sitting on its own watcher with no herdr status changes, so parent supervision uses status writes plus heartbeat review, not pane-staleness.
 `fm-watch.sh` therefore skips stale-pane wakes for panes whose meta records `kind=secondmate`.
 This exception is narrow: ordinary crewmates still trip stale detection when their herdr status remains idle without a status update after the expected working period.
+There is a second, equally narrow stale-skip: a ship task parked on a green PR.
+Once a crewmate reports `done: PR ...` its pane stays idle until the PR merges and teardown runs, so `fm-watch.sh` also skips stale-pane wakes for any task whose meta records a `pr=` and whose status file ends in a terminal `done: PR ...`/PR-ready line.
+That parked task is still fully supervised by the other channels - its `*.check.sh` merge poll, the heartbeat review, and the status-file signal scan all keep running - so the skip suppresses only the useless repeated stale wake, never the merge detection.
+A `done` task with no recorded `pr=`, and every blocked, failed, or active task, trips stale detection exactly as before.
 
 **Watcher liveness is guarded, not just disciplined.**
 Arming the watcher is the last action of every wake-handling turn - but the protocol no longer relies on remembering that.

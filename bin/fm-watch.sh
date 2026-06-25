@@ -84,6 +84,27 @@ pane_key() { printf '%s' "$1" | tr ':' '_'; }
 # Retrieve the pane id recorded in a meta file.
 meta_pane() { grep '^pane=' "$1" | cut -d= -f2- || true; }
 meta_kind() { grep '^kind=' "$1" | cut -d= -f2- || true; }
+meta_pr()   { grep '^pr=' "$1" | cut -d= -f2- || true; }
+
+# awaiting_merge <meta-file>: 0 (true) when a ship task is parked waiting for
+# its PR to merge — it has a recorded pr= and its status file's last non-empty
+# line is a terminal PR-ready/done-PR state. Such a pane is idle by design
+# (the crewmate finished and is waiting on merge), so stale-pane detection must
+# skip it. The merge poll (*.check.sh), heartbeat review, and status-file
+# signal scan are all independent of this and keep running.
+awaiting_merge() {
+  local meta=$1 pr id statusf last
+  pr=$(meta_pr "$meta")
+  [ -n "$pr" ] || return 1
+  id=$(basename "$meta" .meta)
+  statusf="$STATE/$id.status"
+  [ -e "$statusf" ] || return 1
+  last=$(grep -v '^[[:space:]]*$' "$statusf" | tail -n1)
+  case "$last" in
+    done:*" PR "*|*"PR ready"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 recorded_panes() {
   local meta pane seen=""
@@ -176,17 +197,24 @@ EOF
   # Secondmates manage themselves; only ship/scout panes are polled here.
   turn_end_files=""
   while IFS= read -r pane; do
-    # Find this pane's kind from its meta.
+    # Find this pane's kind and meta from its meta file.
     kind=ship
+    meta_for_pane=""
     for meta in "$STATE"/*.meta; do
       [ -e "$meta" ] || continue
       mp=$(meta_pane "$meta")
       [ "$mp" = "$pane" ] || continue
+      meta_for_pane="$meta"
       k=$(meta_kind "$meta")
       [ -n "$k" ] && kind=$k
       break
     done
     [ "$kind" = secondmate ] && continue
+    # A ship task parked on a green PR keeps its pane idle while waiting for
+    # merge; skip stale detection for it (merge poll + heartbeat still cover it).
+    if [ -n "$meta_for_pane" ] && awaiting_merge "$meta_for_pane"; then
+      continue
+    fi
 
     key=$(pane_key "$pane")
     prev_sf="$STATE/.herdr-prev-status-$key"
