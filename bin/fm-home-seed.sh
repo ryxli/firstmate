@@ -892,17 +892,20 @@ seed_home() {
   validate_registry_home_text "$home" || return 1
   validate_home_assignment "$id" "$home"
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
+  [ -L "$home/AGENTS.md" ] && [ ! -e "$home/AGENTS.md" ] && rm -f "$home/AGENTS.md" 2>/dev/null || true
   if [ ! -e "$home/AGENTS.md" ] && [ -f "$FM_ROOT/AGENTS.md" ]; then
-    ln -s "$FM_ROOT/AGENTS.md" "$home/AGENTS.md"
+    ln -s "$FM_ROOT/AGENTS.md" "$home/AGENTS.md" 2>/dev/null || true
   fi
+  [ -L "$home/bin" ] && [ ! -e "$home/bin" ] && rm -f "$home/bin" 2>/dev/null || true
   if [ ! -e "$home/bin" ] && [ -d "$FM_ROOT/bin" ]; then
-    ln -s "$FM_ROOT/bin" "$home/bin"
+    ln -s "$FM_ROOT/bin" "$home/bin" 2>/dev/null || true
   fi
   if [ -f "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] && [ ! -s "$home/CLAUDE.md" ]; then
     rm -f "$home/CLAUDE.md"
   fi
+  [ -L "$home/CLAUDE.md" ] && [ ! -e "$home/CLAUDE.md" ] && rm -f "$home/CLAUDE.md" 2>/dev/null || true
   if [ ! -e "$home/CLAUDE.md" ] && [ -e "$home/AGENTS.md" ]; then
-    ln -s "AGENTS.md" "$home/CLAUDE.md"
+    ln -s "AGENTS.md" "$home/CLAUDE.md" 2>/dev/null || true
   fi
   validate_operational_dirs "$home" || return 1
   validate_seed_leaf_files "$home" || return 1
