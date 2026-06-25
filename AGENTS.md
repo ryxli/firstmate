@@ -93,6 +93,7 @@ state/               volatile runtime signals; gitignored
   .herdr-prev-status-* .herdr-idle-count-* .herdr-turn-*   watcher herdr status tracking; never touch
   .stale-* .seen-* .last-* .heartbeat-streak   watcher internals; never touch
   .last-watcher-beat watcher liveness beacon, touched every poll; fm-guard.sh reads it
+  .watch-rearm-needed watcher re-arm marker; written by fm-watch.sh before each wake exit, cleared on successful re-arm; fm-guard.sh reads it to distinguish "needs re-arm" from "watcher never ran"
   .status-internal.log   rolling log of non-captain-relevant status lines suppressed by the watcher; capped at FM_STATUS_INTERNAL_LOG_MAX lines (default 500); never touch
   .subsuper-* .supervise-daemon.*   sub-supervisor internals (stale markers, escalation buffer, inject-wedged marker, seen-status dedup, log, lock, pid); never touch
 .no-mistakes/        local validation state and evidence; gitignored

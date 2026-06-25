@@ -11,6 +11,8 @@
 # composer after all retries), fm-send exits NON-ZERO. The compose/submit
 # logic lives in bin/fm-herdr-lib.sh. Tune with FM_SEND_RETRIES (default 3)
 # and FM_SEND_SLEEP (0.4).
+# Before submitting text, drains state/.wake-queue and logs any records to
+# stderr so a send cannot silently skip the drain step.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
