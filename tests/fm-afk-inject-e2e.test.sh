@@ -76,9 +76,13 @@ case "\${1:-}" in
           exit 0  # silently drop; no status change
         fi
         printf '%s\n' "\$text" >> "\$LOG"
-        # A real submission to an idle agent makes it start working; this is
-        # the transition fm-herdr-lib uses to confirm delivery.
-        printf 'working' > "\$FAKE_ROOT/.herdr-agent-status"
+        if [ -f "\$FAKE_ROOT/.herdr-fast-idle" ]; then
+          printf 'idle' > "\$FAKE_ROOT/.herdr-agent-status"
+        else
+          # A real submission to an idle agent makes it start working; this is
+          # the transition fm-herdr-lib uses to confirm delivery.
+          printf 'working' > "\$FAKE_ROOT/.herdr-agent-status"
+        fi
         exit 0 ;;
       get)
         status=\$(cat "\$FAKE_ROOT/.herdr-agent-status" 2>/dev/null || printf 'idle')
@@ -106,6 +110,7 @@ reset_state() {
   printf 'idle' > "$TMP_ROOT/.herdr-agent-status"
   printf '' > "$TMP_ROOT/.herdr-pane-lines"
   rm -f "$TMP_ROOT/.herdr-run-swallow"
+  rm -f "$TMP_ROOT/.herdr-fast-idle"
   # inject_msg only fires while away-mode is active; these tests exercise the
   # inject path, so the afk flag must be present.
   : > "$STATE_DIR/.afk"
@@ -142,7 +147,7 @@ test_inject_delivers_on_idle_pane() {
   pass "inject_msg: delivers exactly once on idle pane"
 }
 
-test_inject_retries_on_swallowed_enter() {
+test_inject_preserves_buffer_on_swallowed_submit() {
   reset_state
   printf 'idle' > "$TMP_ROOT/.herdr-agent-status"
   printf '' > "$TMP_ROOT/.herdr-pane-lines"
@@ -157,8 +162,27 @@ test_inject_retries_on_swallowed_enter() {
 
   local count
   count=$(grep -c 'DIGEST: retry test' "$LOG_FILE" 2>/dev/null | head -1); count=${count:-0}
-  [ "$count" -eq 1 ] || fail "expected 1 delivery after retry, got $count (log: $(cat "$LOG_FILE"))"
-  pass "inject_msg: retries on swallowed submission, delivers exactly once"
+  [ "$count" -eq 0 ] || fail "expected swallowed submit to avoid duplicate delivery, got $count (log: $(cat "$LOG_FILE"))"
+  pass "inject_msg: swallowed submit stays undelivered instead of duplicating"
+}
+
+test_inject_does_not_repeat_fast_idle_delivery() {
+  reset_state
+  printf 'idle' > "$TMP_ROOT/.herdr-agent-status"
+  printf '' > "$TMP_ROOT/.herdr-pane-lines"
+  printf '1' > "$TMP_ROOT/.herdr-fast-idle"
+
+  PATH="$FAKE_HERDR_DIR:$PATH" \
+  FM_STATE_OVERRIDE="$STATE_DIR" \
+  FM_SUPERVISOR_TARGET="test:p1" \
+  FM_ESCALATE_BATCH_SECS=0 \
+  FM_INJECT_CONFIRM_RETRIES=5 \
+    inject_msg "${FM_INJECT_MARK}DIGEST: fast idle" 2>/dev/null || true
+
+  local count
+  count=$(grep -c 'DIGEST: fast idle' "$LOG_FILE" 2>/dev/null | head -1); count=${count:-0}
+  [ "$count" -eq 1 ] || fail "expected 1 delivery for fast-idle agent, got $count (log: $(cat "$LOG_FILE"))"
+  pass "inject_msg: fast-idle delivery is not repeated"
 }
 
 test_inject_defers_on_pending_input() {
@@ -185,5 +209,6 @@ test_inject_defers_on_pending_input() {
 }
 
 test_inject_delivers_on_idle_pane
-test_inject_retries_on_swallowed_enter
+test_inject_preserves_buffer_on_swallowed_submit
+test_inject_does_not_repeat_fast_idle_delivery
 test_inject_defers_on_pending_input

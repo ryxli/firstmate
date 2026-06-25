@@ -112,11 +112,11 @@ fm_pane_input_pending() {
 # Delivery is confirmed by the agent transitioning to working/done. After each
 # attempt, while the agent is still idle:
 #   - composer holds our text (Enter swallowed): re-send Enter only.
-#   - composer is empty (submission never landed): re-issue "herdr pane run".
-# Confirming via the working/done transition keeps delivery idempotent: once the
-# agent reacts we stop, so a swallowed first attempt still yields exactly one
-# landed submission. Slash commands open a completion popup; <settle> lets it
-# close before we judge the result.
+#   - composer is empty: do NOT re-send the whole text, because a fast-turn
+#     agent may have already accepted it and finished before herdr reported
+#     a working transition.
+# This biases toward avoiding duplicate messages. Slash commands open a
+# completion popup; <settle> lets it close before we judge the result.
 fm_herdr_submit_core() {
   local pane=$1 text=$2 retries=${3:-3} sleep_s=${4:-0.4} settle=${5:-0.3}
   local status i=0
@@ -125,14 +125,18 @@ fm_herdr_submit_core() {
     sleep "$settle"
     status=$(fm_herdr_agent_status "$pane")
     case "$status" in working|done) printf 'empty'; return 0 ;; esac
+    if [ "$status" = idle ] && ! fm_pane_input_pending "$pane"; then
+      # Fast-turn agents can accept and finish before herdr ever reports
+      # a working transition. A clear idle composer means the message is
+      # gone, so treat it as delivered instead of re-sending duplicates.
+      printf 'empty'
+      return 0
+    fi
     i=$((i + 1))
     [ "$i" -lt "$retries" ] || break
     if fm_pane_input_pending "$pane"; then
       # Text landed but was not submitted: re-send Enter only.
       herdr pane send-keys "$pane" enter 2>/dev/null || true
-    else
-      # Idle with a clear composer: the submission never landed; re-issue it.
-      herdr pane run "$pane" "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
     fi
     sleep "$sleep_s"
   done
