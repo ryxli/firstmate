@@ -44,6 +44,7 @@ if ! fm_lock_try_acquire "$WATCH_LOCK"; then
   exit 0
 fi
 trap 'fm_lock_release "$WATCH_LOCK"' EXIT
+rm -f "$STATE/.watch-rearm-needed"
 
 if [ "$(uname)" = Darwin ]; then
   stat_mtime() { stat -f %m "$1" 2>/dev/null; }
@@ -68,6 +69,7 @@ wake() {
     heartbeat*) echo $(( $(cat "$STATE/.heartbeat-streak" 2>/dev/null || echo 0) + 1 )) > "$STATE/.heartbeat-streak" ;;
     *) echo 0 > "$STATE/.heartbeat-streak" ;;
   esac
+  printf '%s\n' "$1" > "$STATE/.watch-rearm-needed"
   echo "$1"
   exit 0
 }

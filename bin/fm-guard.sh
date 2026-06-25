@@ -4,8 +4,9 @@
 # liveness beacon (state/.last-watcher-beat, touched every poll cycle) is
 # missing or older than FM_GUARD_GRACE seconds, prints a loud warning so the
 # agent sees it in the tool output of whatever it was doing - the one channel
-# every harness has. Normal wake handling (watcher briefly down between a wake
-# and its restart) stays inside the grace window and stays silent.
+# every harness has. A watcher that exited for a wake also leaves
+# state/.watch-rearm-needed; once its beacon is stale, pane-touching tools warn
+# that the previous wake still needs a re-arm.
 # Always exits 0: the guard warns, it never blocks.
 set -u
 
@@ -38,15 +39,28 @@ if [ -s "$FM_WAKE_QUEUE" ]; then
   queue_pending=true
   echo "WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else." >&2
 fi
-
 BEAT="$STATE/.last-watcher-beat"
+REARM="$STATE/.watch-rearm-needed"
 if [ -e "$BEAT" ]; then
   m=$(stat_mtime "$BEAT") || exit 0
   age=$(( $(date +%s) - m ))
-  [ "$age" -lt "$GRACE" ] && exit 0
-  echo "WARNING: tasks are in flight but no watcher has been alive for ${age}s (>${GRACE}s)." >&2
+  if [ "$age" -lt "$GRACE" ]; then
+    exit 0
+  elif [ -e "$REARM" ]; then
+    reason=$(cat "$REARM" 2>/dev/null || true)
+    echo "WARNING: watcher exited for a wake and still needs re-arm; beacon is stale for ${age}s (>${GRACE}s)." >&2
+    [ -n "$reason" ] && echo "Last wake needing re-arm: $reason" >&2
+  else
+    echo "WARNING: tasks are in flight but no watcher has been alive for ${age}s (>${GRACE}s)." >&2
+  fi
 else
-  echo "WARNING: tasks are in flight but no watcher has ever run (no liveness beacon)." >&2
+  if [ -e "$REARM" ]; then
+    reason=$(cat "$REARM" 2>/dev/null || true)
+    echo "WARNING: watcher exited for a wake and still needs re-arm; no liveness beacon exists." >&2
+    [ -n "$reason" ] && echo "Last wake needing re-arm: $reason" >&2
+  else
+    echo "WARNING: tasks are in flight but no watcher has ever run (no liveness beacon)." >&2
+  fi
 fi
 if "$queue_pending"; then
   echo "After draining queued wakes, re-arm the watcher: run bin/fm-watch.sh as a background task." >&2
