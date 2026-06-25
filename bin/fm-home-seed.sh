@@ -892,6 +892,18 @@ seed_home() {
   validate_registry_home_text "$home" || return 1
   validate_home_assignment "$id" "$home"
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
+  if [ ! -e "$home/AGENTS.md" ] && [ -f "$FM_ROOT/AGENTS.md" ]; then
+    ln -s "$FM_ROOT/AGENTS.md" "$home/AGENTS.md"
+  fi
+  if [ ! -e "$home/bin" ] && [ -d "$FM_ROOT/bin" ]; then
+    ln -s "$FM_ROOT/bin" "$home/bin"
+  fi
+  if [ -f "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] && [ ! -s "$home/CLAUDE.md" ]; then
+    rm -f "$home/CLAUDE.md"
+  fi
+  if [ ! -e "$home/CLAUDE.md" ] && [ -e "$home/AGENTS.md" ]; then
+    ln -s "AGENTS.md" "$home/CLAUDE.md"
+  fi
   validate_operational_dirs "$home" || return 1
   validate_seed_leaf_files "$home" || return 1
   if [ -f "$home/data/projects.md" ]; then

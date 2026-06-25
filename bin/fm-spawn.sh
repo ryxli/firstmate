@@ -312,20 +312,29 @@ validate_firstmate_home_for_spawn() {
     echo "error: firstmate home $home is marked for secondmate ${marker_id:-unknown}, expected $id" >&2; return 1
   fi
   # Valid by construction: a seeded home that is missing the shared firstmate
-  # AGENTS.md or bin/ is auto-repaired by symlinking them from the firstmate
-  # repo rather than forcing a manual fix. Safe here because the marker check
-  # above already confirmed this is the seeded home for exactly this id.
+  # AGENTS.md, CLAUDE.md, or bin/ is auto-repaired rather than forcing a
+  # manual fix. Safe here because the marker check above already confirmed
+  # this is the seeded home for exactly this id.
   if [ ! -e "$abs_home/AGENTS.md" ] && [ -f "$abs_root/AGENTS.md" ]; then
     ln -s "$abs_root/AGENTS.md" "$abs_home/AGENTS.md" 2>/dev/null || true
   fi
   if [ ! -e "$abs_home/bin" ] && [ -d "$abs_root/bin" ]; then
     ln -s "$abs_root/bin" "$abs_home/bin" 2>/dev/null || true
   fi
+  if [ -f "$abs_home/CLAUDE.md" ] && [ ! -L "$abs_home/CLAUDE.md" ] && [ ! -s "$abs_home/CLAUDE.md" ]; then
+    rm -f "$abs_home/CLAUDE.md"
+  fi
+  if [ ! -e "$abs_home/CLAUDE.md" ] && [ -e "$abs_home/AGENTS.md" ]; then
+    ln -s "AGENTS.md" "$abs_home/CLAUDE.md" 2>/dev/null || true
+  fi
   if [ ! -e "$abs_home/AGENTS.md" ]; then
     echo "error: $home is not a firstmate home (missing AGENTS.md, auto-link failed)" >&2; return 1
   fi
   if [ ! -e "$abs_home/bin" ]; then
     echo "error: $home is not a firstmate home (missing bin/, auto-link failed)" >&2; return 1
+  fi
+  if [ ! -e "$abs_home/CLAUDE.md" ]; then
+    echo "error: $home is not a firstmate home (missing CLAUDE.md, auto-link failed)" >&2; return 1
   fi
   printf '%s\n' "$abs_home"
 }
