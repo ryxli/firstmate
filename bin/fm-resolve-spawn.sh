@@ -49,7 +49,7 @@ project_name=${project%/}
 project_name=${project_name##*/}
 registry="$DATA/projects.md"
 if [ -f "$registry" ]; then
-  if ! grep -F -e "- ${project_name} " -e "- ${project_name} [" "$registry" >/dev/null 2>&1; then
+  if ! grep -F -e "- ${project_name} " "$registry" >/dev/null 2>&1; then
     echo "warn: project '$project_name' does not appear in $registry; continuing because direct paths are allowed" >&2
   fi
 else
