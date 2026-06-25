@@ -71,9 +71,10 @@ README.md            public overview and development notes
 .claude/skills       symlink to .agents/skills for claude compatibility
 bin/                 helper scripts, committed, including fm-fleet-sync.sh for clean default-branch refreshes and gone-branch pruning, and fm-update.sh for fast-forward-only self-updates; read each script's header before first use
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate
-config/identity      this instance's identity: name= and role= lines; LOCAL, gitignored;
+config/identity      this instance's identity: name=, role=, and parent= lines; LOCAL, gitignored;
                      read at bootstrap before captain.md; written by fm-home-seed.sh for
-                     secondmates, set manually for Keel
+                     secondmates, set manually for Keel; sourced by fm-identity-lib.sh to
+                     derive worker labels and supervision-chain context in briefs
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
   captain.md         captain's curated personal preferences and working style - approval posture, communication style, release habits; LOCAL, gitignored; compact rewrite-and-prune counterpart to shared AGENTS.md; canonical harness-portable home, even if harness memory mirrors it as a recall cache
@@ -84,7 +85,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
 projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by crewmates: "<state>: <note>" lines
-  <id>.meta          written by fm-spawn: pane=, worktree=, project=, harness=, kind=, mode=, yolo=, workspace_id= (herdr workspace for crewmate tasks; absent for secondmates and old-style tasks); kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
+  <id>.meta          written by fm-spawn: pane=, worktree=, project=, harness=, kind=, mode=, yolo=, domain=, workspace= (the domain/project herdr workspace label, shared by every task of that domain), worker= (the visible <supervisor>/<task> tab+agent label); kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
   <id>.check.sh      optional slow poll you write per task (e.g. merged-PR check)
   .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
   .afk               durable away-mode flag; present = sub-supervisor may inject escalations (set by /afk, cleared on user return)
@@ -97,11 +98,11 @@ state/               volatile runtime signals; gitignored
 ```
 
 Task ids are short kebab slugs with a random suffix, e.g. `fix-login-k3`.
-The herdr pane for a task is named `fm-<id>` (via `herdr agent start "fm-<id>"`); the pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
+Each task gets its OWN herdr tab inside the domain/project workspace; that tab and its agent are labelled `<supervisor>/<task-slug>` (e.g. `keel/fix-login`) while the random task id stays in meta/backlog/status. The pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
 
 ## 3. Bootstrap (run at every session start)
 
-Read `config/identity` if present to learn this instance's own name and role (key=value format, e.g. `name=Keel`).
+Read `config/identity` if present to learn this instance's own name, role, and parent in the supervision chain (key=value format, e.g. `name=Keel`, `role=Main firstmate crew supervisor`, `parent=captain`).
 Then self-register in herdr so the pane is addressable by name for the session:
 
   herdr agent rename $(herdr pane current) <name>
@@ -234,7 +235,7 @@ Reconcile reality with your records before doing anything else:
 2. Drain queued wakes with `bin/fm-wake-drain.sh` and keep the printed records as the first work queue for this recovery turn.
 3. Read `data/backlog.md`, `data/secondmates.md` if present, every `state/*.meta`, and every `state/*.status`.
 4. Use the `pane=` values from this home's `state/*.meta` files as the live direct-report set, then check those herdr panes via `herdr pane get <pane_id>`.
-   Do not sweep every `fm-*` herdr pane across all workspaces during recovery; another firstmate home's child panes may share that namespace and are not this home's orphans.
+   Do not sweep herdr panes by name pattern during recovery; another firstmate home's child panes may share the same supervisor-slug prefix and are not this home's orphans.
 5. If a recorded direct-report pane is missing or unreachable, reconcile it through its meta as described below.
 6. For meta with no pane, reconcile by kind.
    For ordinary crewmates, check whether the worktree still exists under `$FM_WORKTREE_BASE/<id>`, salvage or report.
@@ -278,7 +279,7 @@ Every persistent secondmate has one line:
 The optional `name:` field holds the human-readable name (e.g. `Harbour`); lines without it default to the capitalized ID for display.
 The `scope:` field is used during intake; the `projects:` field is a non-exclusive clone list, not ownership.
 Use `bin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the charter to provision the persistent home and registry entry; `-` creates a herdr-managed git worktree of the firstmate repo at `<parent-of-repo>/fm-sm-<id>` and records the herdr workspace ID in the registry.
-Set `FM_SECONDMATE_NAME=<human-name>` before seeding to assign a human-readable name; it is written to `config/identity` in the secondmate home and added to the registry line.
+Set `FM_SECONDMATE_NAME=<human-name>` before seeding to assign a human-readable name; it is written to `config/identity` in the secondmate home, added to the registry line, and used as the herdr tab/agent label at spawn time.
 The workspace ID is the durable handle for the home: teardown calls `herdr worktree remove --workspace <id>` to release the slot cleanly; a home without a workspace ID in the registry is a plain clone and is removed with `rm -rf`.
 The home persists with no live process and is never recycled by herdr until explicitly released; that release happens only on explicit retirement or seed rollback, never on a routine restart or recovery.
 The charter must be filled before seeding; direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.
@@ -408,11 +409,11 @@ bin/fm-spawn.sh <id1>=projects/<repo1> <id2>=projects/<repo2> [--scout]   # batc
 Dispatch several tasks in one call by passing `id=repo` pairs instead of a single `<id> <project>`; each pair is spawned through the same single-task path, a shared `--scout` applies to all, and the looping happens inside the script so you never hand-write a multi-task shell loop.
 If one pair fails, the rest still run and the batch exits non-zero.
 
-The script resolves the harness (`fm-harness.sh crew`), owns the verified launch templates, resolves the project's delivery mode (`fm-project-mode.sh`) for ship/scout tasks, and records `harness=`, `kind=`, `mode=`, `yolo=`, and `pane=` in the task's meta; a non-flag third argument containing whitespace is treated as a raw launch command (only for verifying new adapters).
+The script resolves the harness (`fm-harness.sh crew`), owns the verified launch templates, resolves the project's delivery mode (`fm-project-mode.sh`) for ship/scout tasks, and records `harness=`, `kind=`, `mode=`, `yolo=`, `pane=`, `domain=`, `workspace=`, and `worker=` in the task's meta; a non-flag third argument containing whitespace is treated as a raw launch command (only for verifying new adapters).
 For `kind=secondmate`, the same script launches in the registered or explicit firstmate home instead of creating a project worktree, records `home=` and `projects=`, and uses the charter brief as the launch prompt.
 
-For ship and scout tasks, the script creates a git worktree via `git worktree add -b "fm/<id>" "$FM_WORKTREE_BASE/<id>" HEAD`, launches the agent with `herdr agent start "fm-<id>" --cwd <worktree>`, parses the returned `pane_id`, records `state/<id>.meta`, and submits the brief.
-For `kind=secondmate`, the script launches directly in the persistent home instead.
+For ship and scout tasks, the script creates a git worktree via `git worktree add -b "fm/<id>" "$FM_WORKTREE_BASE/<id>" HEAD`, resolves the domain/project herdr workspace (label = the project; created when absent, reused when it already exists), starts the agent in its OWN tab inside that workspace labelled `<supervisor>/<task-slug>`, closes the tab's leftover root shell so the tab is a single agent pane, parses the returned `pane_id`, records `state/<id>.meta`, and submits the brief. No `workspace_id` is recorded: the workspace is shared across the domain's tasks, so teardown cleans up only this task's pane and git worktree, never the whole workspace.
+For `kind=secondmate`, the script launches in the persistent home, placed as its own tab inside the single `ship` workspace (never a split of the focused tab) and labelled by the mate's name. If the seeded home is missing the shared `AGENTS.md` or `bin/`, fm-spawn auto-links them from the firstmate repo so the home is valid by construction.
 Project worktrees start on a fresh branch off the default; ship briefs tell the crewmate to use that branch, while scout briefs keep the worktree scratch.
 After spawning, peek the pane to confirm the crewmate is processing the brief (and handle any trust dialog per section 4).
 Add the task to `data/backlog.md` under In flight.
@@ -691,6 +692,7 @@ Secondmates contribute their segment on firstmate's request or at week close; fo
 ## 11. Crewmate briefs
 
 Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
+Identity context (supervisor name, role, parent in the supervision chain, the crewmate's visible tab/agent label, its domain/project workspace, and its status-reporting path) is injected automatically via `fm-identity-lib.sh`; override the worker label with `FM_TASK_LABEL` or the domain with `FM_TASK_DOMAIN`.
 For a ship task the definition of done is shaped by the project's delivery mode (section 6): `no-mistakes` ends in the harness-appropriate no-mistakes validation pipeline, `direct-PR` has the crewmate push and open the PR itself, `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
 The scaffold reads the mode via `fm-project-mode.sh`, so you do not pass it.
 Ship briefs also include the project-memory contract: run `bin/fm-ensure-agents-md.sh` when the project already has agent-memory files or when the task produced durable project-intrinsic knowledge, then record proportionate learnings in `AGENTS.md`.

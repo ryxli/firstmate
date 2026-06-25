@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Tear down a finished task: close the herdr pane, remove the herdr
-# workspace/worktree or retire a secondmate home, clear volatile state,
-# refresh/prune the project's clone for PR-based ship tasks, then print a
-# backlog-refresh reminder.
-# The pane is always closed before any workspace or worktree removal because
-# "herdr worktree remove --workspace" alone is unreliable: it can leave the
-# agent pane alive when the workspace has non-agent panes or the agent still
-# holds the directory as its cwd.
+# Tear down a finished task: close the herdr pane, remove the git worktree
+# (and, for old-style workspace_id= tasks, the herdr workspace), or retire a
+# secondmate home, clear volatile state, refresh/prune the project's clone for
+# PR-based ship tasks, then print a backlog-refresh reminder.
+# New-style tasks (spawned after the shared-workspace refactor) record
+# workspace= and worker= but no workspace_id=; for them the herdr workspace is
+# shared across the project's tasks and is NOT removed - only the pane and git
+# worktree are cleaned up. Old-style tasks still have workspace_id= and get the
+# workspace closed via "herdr worktree remove --workspace" as well.
+# The pane is always closed first because "herdr worktree remove --workspace"
+# alone can leave the agent alive when the workspace has non-agent panes or the
+# agent still holds the directory as its cwd.
 # REFUSES if the worktree holds work not on any remote. A fork counts as a
 # remote, so upstream-contribution PRs pushed to a fork satisfy this in any mode.
 # local-only projects additionally accept work merged into the local default
@@ -485,10 +489,12 @@ fi
 [ -n "$PANE" ] && herdr pane close "$PANE" 2>/dev/null || true
 
 if [ "$KIND" != secondmate ]; then
-  # New-style crewmates record workspace_id: ask herdr to close the workspace
-  # and prune the git worktree. That can be partial (the workspace has non-agent
-  # panes, or the agent still holds the dir as cwd), so the directory removal
-  # below is the single backstop for both new-style and old-style tasks.
+  # Tasks spawned before the shared-workspace refactor record workspace_id= in
+  # meta; for those, ask herdr to close the workspace and prune the git worktree
+  # (though that can be partial, so the directory removal below is still the
+  # backstop). Tasks spawned after the refactor record workspace= (label),
+  # domain=, and worker= but deliberately omit workspace_id, so WORKSPACE_ID is
+  # empty for them and the plain git worktree remove below is the normal cleanup.
   [ -n "$WORKSPACE_ID" ] && herdr worktree remove --workspace "$WORKSPACE_ID" --force 2>/dev/null || true
   if [ -d "$WT" ]; then
     if [ -n "$PROJ" ] && [ -d "$PROJ" ]; then

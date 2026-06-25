@@ -117,7 +117,7 @@ discover_supervisor_target() {
   # Ask herdr which pane is current (the pane that launched the daemon).
   local pane_json pane
   pane_json=$(herdr pane current 2>/dev/null || true)
-  pane=$(printf '%s\n' "$pane_json" | grep -o '"pane_id":"[^"]*"' | cut -d'"' -f4 | head -1 || true)
+  pane=$(printf '%s\n' "$pane_json" | herdr_json_get result pane pane_id)
   if [ -n "$pane" ]; then
     printf '%s' "$pane"
     return 0

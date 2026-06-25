@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Send one line of literal text to a crewmate pane, then Enter.
 # Usage: fm-send.sh <pane> <text...>
-#   <pane> may be a bare firstmate pane name (fm-xyz), resolved through
-#   this home's state/<id>.meta, or an explicit herdr pane id (e.g. w8:p3).
+#   <pane> may be a task-id shorthand (fm-<id>) that looks up the pane via
+#   this home's state/<id>.meta, a worker label (e.g. keel/fix-login) resolved
+#   via herdr agent get, or an explicit herdr pane id (e.g. w8:p3).
 # Special keys instead of text: fm-send.sh <pane> --key Escape   (or Enter, ...)
 #
 # Text submission uses herdr pane run (text+Enter atomically) and verifies
@@ -37,7 +38,7 @@ resolve() {
       echo "$pane"
       ;;
     *)
-      pane=$(herdr agent get "$1" 2>/dev/null | grep -o '"pane_id":"[^"]*"' | cut -d'"' -f4 | head -1 || true)
+      pane=$(herdr agent get "$1" 2>/dev/null | herdr_json_get result agent pane_id)
       [ -n "$pane" ] || { echo "error: no pane found for $1" >&2; exit 1; }
       echo "$pane"
       ;;

@@ -99,9 +99,25 @@ case "${1:-}" in
         fi
         exit 0 ;;
     esac ;;
+  workspace)
+    case "${2:-}" in
+      list)
+        # No pre-existing workspaces: spawn will create the ship workspace.
+        printf '{"result":{"type":"workspace_list","workspaces":[]}}\n'
+        exit 0 ;;
+      create)
+        printf '{"result":{"workspace":{"workspace_id":"%s"}}}\n' "${FM_FAKE_HERDR_SHIP_WS:-wSHIP}"
+        exit 0 ;;
+    esac ;;
+  tab)
+    case "${2:-}" in
+      create)
+        printf '{"result":{"tab":{"tab_id":"wSHIP:t2"},"root_pane":{"pane_id":"wSHIP:p2"}}}\n'
+        exit 0 ;;
+    esac ;;
   pane)
     case "${2:-}" in
-      current) printf '{"pane_id":"w0:p0"}\n'; exit 0 ;;
+      current) printf '{"result":{"pane":{"pane_id":"w0:p0"}}}\n'; exit 0 ;;
       read) printf 'idle prompt\n'; exit 0 ;;
       close|run) exit 0 ;;
       get) printf '{"pane_id":"w1:p1"}\n'; exit 0 ;;
@@ -475,7 +491,7 @@ test_home_seed_warns_when_herdr_workspace_remove_fails() {
 }
 
 test_home_seed_does_not_remove_herdr_workspace_for_unsafe_home() {
-  local home home_abs sm_base_eq sm_base_inside fakebin log err
+  local home sm_base_eq sm_base_inside fakebin log err
   # Case 1: auto_path equals FM_HOME (sm_base set so fm-sm-dash = FM_HOME).
   # FM_HOME must end with /fm-sm-dash for auto_path to equal it.
   mkdir -p "$TMP_ROOT/dash-active-sm-base/fm-sm-dash/projects" \
@@ -1134,20 +1150,18 @@ SH
   fi
   grep -F 'marked for secondmate other, expected domain' "$err" >/dev/null || fail "spawn did not explain marker mismatch"
 
+  # A marked home missing the shared AGENTS.md / bin is auto-linked (valid by
+  # construction), not rejected: the links point at the firstmate repo so the
+  # home becomes a usable firstmate home without a manual repair step.
   printf 'domain\n' > "$marker_only/.fm-secondmate-home"
   printf 'charter\n' > "$marker_only/data/charter.md"
-  if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
+  if ! PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
     "$ROOT/bin/fm-spawn.sh" domain "$marker_only" codex --secondmate >/dev/null 2>"$err"; then
-    fail "secondmate spawn accepted a marked home missing AGENTS.md"
+    fail "secondmate spawn rejected a marked home that should auto-link: $(cat "$err")"
   fi
-  grep -F 'not a firstmate home (missing AGENTS.md)' "$err" >/dev/null || fail "spawn did not explain missing AGENTS.md"
-
-  printf '# Firstmate\n' > "$marker_only/AGENTS.md"
-  if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
-    "$ROOT/bin/fm-spawn.sh" domain "$marker_only" codex --secondmate >/dev/null 2>"$err"; then
-    fail "secondmate spawn accepted a marked home missing bin"
-  fi
-  grep -F 'not a firstmate home (missing bin/)' "$err" >/dev/null || fail "spawn did not explain missing bin"
+  [ -L "$marker_only/AGENTS.md" ] || fail "spawn did not auto-link AGENTS.md into the marked home"
+  [ -L "$marker_only/bin" ] || fail "spawn did not auto-link bin into the marked home"
+  rm -f "$home/state/domain.meta"
 
   printf 'domain\n' > "$home/.fm-secondmate-home"
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \

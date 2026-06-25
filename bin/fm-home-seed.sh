@@ -36,6 +36,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 REG="$DATA/secondmates.md"
+# shellcheck source=bin/fm-herdr-lib.sh
+. "$SCRIPT_DIR/fm-herdr-lib.sh"
 SUB_HOME_MARKER=".fm-secondmate-home"
 
 usage() {
@@ -475,9 +477,9 @@ acquire_herdr_home() {
     echo "error: herdr worktree create failed for secondmate home $auto_path" >&2
     return 1
   }
-  workspace_id=$(printf '%s' "$json" | grep -o '"workspace_id":"[^"]*"' | head -1 | sed 's/"workspace_id":"//;s/"//')
+  workspace_id=$(printf '%s' "$json" | herdr_json_get result workspace workspace_id)
   [ -n "$workspace_id" ] || { echo "error: herdr worktree create did not return a workspace_id" >&2; return 1; }
-  home=$(printf '%s' "$json" | grep -o '"checkout_path":"[^"]*"' | head -1 | sed 's/"checkout_path":"//;s/"//')
+  home=$(printf '%s' "$json" | herdr_json_get result workspace worktree checkout_path)
   [ -n "$home" ] || home="$auto_path"
   # Print workspace_id on line 1, home path on line 2.
   # Caller must split; using a subshell means SEED_HERDR_WORKSPACE_ID cannot be
