@@ -33,7 +33,10 @@ for meta in "$STATE"/*.meta; do
   has_meta=true
   break
 done
-"$has_meta" || exit 0
+
+if ! "$has_meta" && [ ! -s "$FM_WAKE_QUEUE" ] && [ ! -e "$STATE/.watch-rearm-needed" ]; then
+  exit 0
+fi
 
 if [ -s "$FM_WAKE_QUEUE" ]; then
   queue_pending=true
