@@ -133,13 +133,6 @@ scan_signals() {
 
 CLASSIFY_STATUS="$SCRIPT_DIR/fm-classify-status.sh"
 STATUS_INTERNAL_LOG="${FM_STATUS_INTERNAL_LOG:-$STATE/.status-internal.log}"
-
-last_status_line() {
-  local f=$1
-  [ -e "$f" ] || return 0
-  grep -v '^[[:space:]]*$' "$f" 2>/dev/null | tail -n1
-}
-
 STATUS_INTERNAL_LOG_MAX=${FM_STATUS_INTERNAL_LOG_MAX:-500}
 
 log_internal_status() {
@@ -225,11 +218,13 @@ while :; do
     sleep "$SIGNAL_GRACE"
     pending=$(printf '%s\n%s' "$pending" "$(scan_signals)")
     files=$(captain_status_files "$pending")
-    mark_signal_seen "$pending"
     if [ -n "$files" ]; then
       reason="signal:$files"
       append_signal_wakes "$reason" "$files"
+      mark_signal_seen "$pending"
       wake "$reason"
+    else
+      mark_signal_seen "$pending"
     fi
   fi
 
@@ -307,11 +302,11 @@ while :; do
           case " $turn_end_files " in *" $f "*) ;; *) turn_end_files="$turn_end_files $f" ;; esac
         done
       fi
-      mark_signal_seen "$extra_pending"
     fi
     reason="signal:$turn_end_files"
     fm_wake_append signal "herdr-turn-end" "$reason" || exit 1
     append_signal_wakes "$reason" "${status_files:-}"
+    [ -n "$extra_pending" ] && mark_signal_seen "$extra_pending"
     wake "$reason"
   fi
 

@@ -103,6 +103,12 @@ fm_pane_input_pending() {
   return 0
 }
 
+last_status_line() {
+  local f=$1
+  [ -e "$f" ] || return 0
+  grep -v '^[[:space:]]*$' "$f" 2>/dev/null | tail -n1
+}
+
 # fm_herdr_submit_core: submit <text> to <pane> and verify delivery, retrying
 # the submission when it cannot be confirmed. Returns a verdict string:
 #   empty       - delivered (agent accepted the message)

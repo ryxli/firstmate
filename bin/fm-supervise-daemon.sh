@@ -128,12 +128,6 @@ discover_supervisor_target() {
 }
 
 # --- classification helpers -------------------------------------------------
-last_status_line() {
-  local f=$1
-  [ -e "$f" ] || return 0
-  grep -v '^[[:space:]]*$' "$f" 2>/dev/null | tail -1
-}
-
 status_is_captain_relevant() {
   local line=$1
   [ -n "$line" ] || return 1
