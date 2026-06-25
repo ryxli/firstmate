@@ -6,6 +6,7 @@ WATCH="$ROOT/bin/fm-watch.sh"
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
 LIB="$ROOT/bin/fm-wake-lib.sh"
 DAEMON="$ROOT/bin/fm-supervise-daemon.sh"
+CLASSIFY="$ROOT/bin/fm-classify-status.sh"
 # Source the daemon's pure classifiers once. The daemon's main loop is skipped
 # under sourcing via its BASH_SOURCE guard, so only the testable functions
 # (classify_*, housekeeping, escalate_*, stale_marker_*) become defined.
@@ -222,26 +223,29 @@ test_concurrent_append_and_drain() {
 }
 
 test_signal_catchup_without_running_watcher() {
-  local dir state fakebin out drain_out status_file
+  local dir state fakebin out drain_out status_file rc
   dir=$(make_case signal)
   state="$dir/state"
   fakebin="$dir/fakebin"
   out="$dir/watch.out"
   drain_out="$dir/drain.out"
   status_file="$state/task.status"
+
   printf 'working: first\n' > "$status_file"
   PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
-  wait_for_exit "$!" 40 || fail "watcher did not exit for first signal"
-  grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print first signal"
-  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after first signal failed"
-  grep "$(printf '\tsignal\t')" "$drain_out" | grep -F "$status_file" >/dev/null || fail "first signal was not queued"
+  wait_for_exit "$!" 15; rc=$?
+  [ "$rc" -eq 124 ] || fail "internal status unexpectedly woke supervisor (rc=$rc): $(cat "$out")"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after internal signal failed"
+  [ ! -s "$drain_out" ] || fail "internal signal was queued: $(cat "$drain_out")"
+  grep -F "task.status: working: first" "$state/.status-internal.log" >/dev/null \
+    || fail "internal status was not logged"
 
   printf 'done: second\n' >> "$status_file"
   : > "$out"
   PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
-  wait_for_exit "$!" 40 || fail "watcher did not exit for second signal"
-  grep -F "signal: $status_file" "$out" >/dev/null || fail "signal written with no watcher was not caught"
-  pass "signal written while no watcher runs is caught on next run"
+  wait_for_exit "$!" 40 || fail "watcher did not exit for captain signal"
+  grep -F "signal: $status_file" "$out" >/dev/null || fail "captain signal written with no watcher was not caught"
+  pass "internal status is skipped and later captain status wakes"
 }
 
 test_stale_enqueue_before_suppressor() {
@@ -423,6 +427,17 @@ test_guard_rearms_after_draining_pending_queue() {
   grep -F 'After draining queued wakes, re-arm the watcher' "$err" >/dev/null || fail "guard did not order re-arm after drain"
   ! grep -F 'Restart it NOW, before anything else' "$err" >/dev/null || fail "guard still gave conflicting restart-first instruction"
   pass "guard orders watcher re-arm after queued wake drain"
+}
+
+test_status_classifier_script_contract() {
+  local out
+  out=$("$CLASSIFY" "done: PR https://x/y/pull/1") || fail "done status should classify as captain"
+  [ "$out" = captain ] || fail "captain output mismatch: $out"
+  if out=$("$CLASSIFY" "working: building"); then
+    fail "working status should classify as internal but exited 0: $out"
+  fi
+  [ "$out" = internal ] || fail "internal output mismatch: $out"
+  pass "status classifier script contract"
 }
 
 test_classify_routine_signal_self() {
@@ -1312,6 +1327,7 @@ test_stale_watch_lock_reclaimed
 test_live_stale_watch_lock_is_actionable
 test_guard_warns_on_pending_queue
 test_guard_rearms_after_draining_pending_queue
+test_status_classifier_script_contract
 # Sub-supervisor (fm-supervise-daemon.sh) classifier + batching + housekeeping.
 test_classify_routine_signal_self
 test_classify_terminal_signal_escalates

@@ -131,6 +131,56 @@ scan_signals() {
   done
 }
 
+CLASSIFY_STATUS="$SCRIPT_DIR/fm-classify-status.sh"
+STATUS_INTERNAL_LOG="${FM_STATUS_INTERNAL_LOG:-$STATE/.status-internal.log}"
+
+last_status_line() {
+  local f=$1
+  [ -e "$f" ] || return 0
+  grep -v '^[[:space:]]*$' "$f" 2>/dev/null | tail -n1
+}
+
+log_internal_status() {
+  local f=$1 line=$2
+  printf '[%s] %s: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$(basename "$f")" "$line" >> "$STATUS_INTERNAL_LOG"
+}
+
+captain_status_files() {
+  local pending=$1 files="" seen="" sf sig f last
+  while IFS=$(printf '\t') read -r sf sig f; do
+    [ -n "$sf" ] || continue
+    [ -e "$f" ] || continue
+    case " $seen " in *" $f "*) continue ;; esac
+    seen="$seen $f"
+    last=$(last_status_line "$f")
+    if "$CLASSIFY_STATUS" "$last" >/dev/null 2>&1; then
+      files="$files $f"
+    else
+      log_internal_status "$f" "$last"
+    fi
+  done <<EOF
+$pending
+EOF
+  printf '%s' "$files"
+}
+
+mark_signal_seen() {
+  local pending=$1 sf sig f
+  while IFS=$(printf '\t') read -r sf sig f; do
+    [ -n "$sf" ] || continue
+    printf '%s' "$sig" > "$sf"
+  done <<EOF
+$pending
+EOF
+}
+
+append_signal_wakes() {
+  local reason=$1 files=$2 f
+  for f in $files; do
+    fm_wake_append signal "$(basename "$f")" "$reason" || exit 1
+  done
+}
+
 run_check() {
   local c=$1
   if command -v timeout >/dev/null 2>&1; then
@@ -168,27 +218,13 @@ while :; do
   if [ -n "$pending" ]; then
     sleep "$SIGNAL_GRACE"
     pending=$(printf '%s\n%s' "$pending" "$(scan_signals)")
-    files=""
-    while IFS=$(printf '\t') read -r sf sig f; do
-      [ -n "$sf" ] || continue
-      case " $files " in *" $f "*) ;; *) files="$files $f" ;; esac
-    done <<EOF
-$pending
-EOF
-    reason="signal:$files"
-    while IFS=$(printf '\t') read -r sf sig f; do
-      [ -n "$sf" ] || continue
-      fm_wake_append signal "$(basename "$f")" "$reason" || exit 1
-    done <<EOF
-$pending
-EOF
-    while IFS=$(printf '\t') read -r sf sig f; do
-      [ -n "$sf" ] || continue
-      printf '%s' "$sig" > "$sf"
-    done <<EOF
-$pending
-EOF
-    wake "$reason"
+    files=$(captain_status_files "$pending")
+    mark_signal_seen "$pending"
+    if [ -n "$files" ]; then
+      reason="signal:$files"
+      append_signal_wakes "$reason" "$files"
+      wake "$reason"
+    fi
   fi
 
   # herdr agent status scan: detect working->idle transitions (replaces the
@@ -256,29 +292,20 @@ EOF
     # Linger one grace period then re-scan so status writes that follow a
     # turn-end coalesce into the same wake.
     sleep "$SIGNAL_GRACE"
+    status_files=""
     extra_pending=$(scan_signals)
     if [ -n "$extra_pending" ]; then
-      while IFS=$(printf '\t') read -r sf sig f; do
-        [ -n "$sf" ] || continue
-        case " ${files:-} " in *" $f "*) ;; *) turn_end_files="$turn_end_files $f" ;; esac
-      done <<EOF
-$extra_pending
-EOF
-      while IFS=$(printf '\t') read -r sf sig f; do
-        [ -n "$sf" ] || continue
-        fm_wake_append signal "$(basename "$f")" "signal:$turn_end_files" || exit 1
-      done <<EOF
-$extra_pending
-EOF
-      while IFS=$(printf '\t') read -r sf sig f; do
-        [ -n "$sf" ] || continue
-        printf '%s' "$sig" > "$sf"
-      done <<EOF
-$extra_pending
-EOF
+      status_files=$(captain_status_files "$extra_pending")
+      if [ -n "$status_files" ]; then
+        for f in $status_files; do
+          case " $turn_end_files " in *" $f "*) ;; *) turn_end_files="$turn_end_files $f" ;; esac
+        done
+      fi
+      mark_signal_seen "$extra_pending"
     fi
     reason="signal:$turn_end_files"
     fm_wake_append signal "herdr-turn-end" "$reason" || exit 1
+    append_signal_wakes "$reason" "${status_files:-}"
     wake "$reason"
   fi
 

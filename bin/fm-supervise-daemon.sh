@@ -38,6 +38,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-herdr-lib.sh
 . "$FM_DAEMON_DIR/fm-herdr-lib.sh"
 
+CLASSIFY_STATUS="$FM_DAEMON_DIR/fm-classify-status.sh"
+
 # --- tunables ---------------------------------------------------------------
 FM_SUPERVISOR_TARGET_DEFAULT=""
 INJECT_SKIP_DEFAULT="heartbeat"
@@ -46,7 +48,6 @@ ESCALATE_BATCH_SECS_DEFAULT=90
 HEARTBEAT_SCAN_SECS_DEFAULT=300
 HOUSEKEEPING_TICK_DEFAULT=15
 MAX_DEFER_SECS_DEFAULT=300
-CAPTAIN_RE_DEFAULT='done:|needs-decision:|blocked:|failed:|PR ready|checks green|ready in branch|merged'
 INJECT_FAIL_SLEEP_DEFAULT=30
 INJECT_CONFIRM_RETRIES_DEFAULT=3
 INJECT_CONFIRM_SLEEP_DEFAULT=0.5
@@ -136,7 +137,7 @@ last_status_line() {
 status_is_captain_relevant() {
   local line=$1
   [ -n "$line" ] || return 1
-  printf '%s' "$line" | grep -qiE "${FM_CAPTAIN_RE:-$CAPTAIN_RE_DEFAULT}"
+  "$CLASSIFY_STATUS" "$line" >/dev/null 2>&1
 }
 
 window_to_task() {
