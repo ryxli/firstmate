@@ -154,6 +154,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-update.sh`           | Self-update the running firstmate repo and registered secondmate homes with fast-forward-only pulls from origin     |
 | `fm-backlog-handoff.sh`  | Move already-judged in-scope queued backlog items from the main home into a seeded secondmate home                 |
 | `fm-brief.sh`            | Scaffold a ship brief, a report-only scout brief with `--scout`, or a secondmate charter with `--secondmate`      |
+| `fm-classify-status.sh`  | Classify one status line as `captain` (exit 0) or `internal` (exit 1); shared by the watcher and sub-supervisor   |
 | `fm-ensure-agents-md.sh` | Ensure project `AGENTS.md` is the real memory file and `CLAUDE.md` symlinks to it                                   |
 | `fm-guard.sh`            | Warn when tasks are in flight but queued wakes are pending or the watcher liveness beacon is stale or missing      |
 | `fm-home-seed.sh`        | Lease/provision a secondmate home transactionally, clone projects, initialize gates, and maintain `data/secondmates.md` |
@@ -207,6 +208,8 @@ FM_CHECK_INTERVAL=300   # seconds between slow checks (merged-PR polls)
 FM_CHECK_TIMEOUT=30     # seconds allowed per slow check script
 FM_GUARD_GRACE=300      # seconds a stale watcher beacon may age before guard warnings
 FM_SIGNAL_GRACE=30      # seconds to coalesce nearby status and turn-end signals into one wake
+FM_STATUS_INTERNAL_LOG=state/.status-internal.log   # rolling log path for suppressed non-captain status lines
+FM_STATUS_INTERNAL_LOG_MAX=500  # max lines kept in FM_STATUS_INTERNAL_LOG before tail-trim
 FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT=20   # seconds allowed for bootstrap's best-effort clone refresh
 FM_FLEET_PRUNE=1        # set to 0 to skip pruning local branches whose upstream is gone
 FM_BUSY_REGEX='esc (to )?interrupt|Working\.\.\.'   # busy-pane signatures, shared by watcher and tmux helper
