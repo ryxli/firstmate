@@ -54,7 +54,11 @@ if [ -e "$BEAT" ]; then
     echo "WARNING: watcher exited for a wake and still needs re-arm; beacon is stale for ${age}s (>${GRACE}s)." >&2
     [ -n "$reason" ] && echo "Last wake needing re-arm: $reason" >&2
   else
-    echo "WARNING: tasks are in flight but no watcher has been alive for ${age}s (>${GRACE}s)." >&2
+    if "$has_meta"; then
+      echo "WARNING: tasks are in flight but no watcher has been alive for ${age}s (>${GRACE}s)." >&2
+    else
+      echo "WARNING: no watcher has been alive for ${age}s (>${GRACE}s)." >&2
+    fi
   fi
 else
   if [ -e "$REARM" ]; then
@@ -62,7 +66,11 @@ else
     echo "WARNING: watcher exited for a wake and still needs re-arm; no liveness beacon exists." >&2
     [ -n "$reason" ] && echo "Last wake needing re-arm: $reason" >&2
   else
-    echo "WARNING: tasks are in flight but no watcher has ever run (no liveness beacon)." >&2
+    if "$has_meta"; then
+      echo "WARNING: tasks are in flight but no watcher has ever run (no liveness beacon)." >&2
+    else
+      echo "WARNING: no watcher has ever run (no liveness beacon)." >&2
+    fi
   fi
 fi
 if "$queue_pending"; then
