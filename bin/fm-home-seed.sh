@@ -2,13 +2,16 @@
 # Provision and route persistent secondmate homes.
 #
 # Usage:
-#   fm-home-seed.sh <id> <home|-> <project>...
+#   fm-home-seed.sh <id> <home|-> [<project>...]
 #       Provision <home> as an isolated firstmate home. If <home> is "-", create
 #       a fresh herdr-managed git worktree of the firstmate repo alongside the
 #       repo (at <parent-of-repo>/fm-sm-<id>). The herdr workspace ID is stored
 #       in data/secondmates.md so teardown can remove the workspace cleanly.
 #       Projects are cloned from the active home into the secondmate home's
-#       projects/ directory. That project list is non-exclusive provisioning data.
+#       projects/ directory. That project list is non-exclusive provisioning data
+#       and MAY be empty: a pure-domain secondmate (e.g. a quality/eval
+#       supervisor) has zero clones and works the firstmate home itself; its
+#       registry line records projects: (none).
 #       The charter brief is copied to data/charter.md, newly cloned no-mistakes
 #       projects are initialized, a .fm-secondmate-home marker is written, and
 #       data/secondmates.md is updated.
@@ -41,7 +44,7 @@ REG="$DATA/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
 
 usage() {
-  echo "usage: fm-home-seed.sh <id> <home|-> <project>..." >&2
+  echo "usage: fm-home-seed.sh <id> <home|-> [<project>...]" >&2
   echo "       fm-home-seed.sh validate" >&2
 }
 
@@ -830,7 +833,6 @@ write_registry() {
 seed_home() {
   local id=$1 requested_home=$2 requested_abs home projects_csv project project_dst charter_summary charter_scope sm_name
   shift 2
-  [ $# -gt 0 ] || { echo "error: secondmate needs at least one project" >&2; return 1; }
 
   mkdir -p "$DATA"
   validate_registry
@@ -978,6 +980,7 @@ seed_home() {
   printf 'name=%s\nrole=Secondmate - %s\n' "$sm_name" "$charter_scope" > "$home/config/identity"
 
   projects_csv=$(join_projects "$@")
+  [ -n "$projects_csv" ] || projects_csv="(none)"
   printf '%s\n' "$id" > "$home/$SUB_HOME_MARKER"
   write_registry "$id" "$home" "$projects_csv" "$SEED_PARENT_BRIEF" "${SEED_HERDR_WORKSPACE_ID:-}" "$sm_name"
   validate_registry
@@ -997,7 +1000,7 @@ case "${1:-}" in
     exit 0
     ;;
   *)
-    [ $# -ge 3 ] || { usage; exit 1; }
+    [ $# -ge 2 ] || { usage; exit 1; }
     seed_home "$@"
     ;;
 esac

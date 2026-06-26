@@ -332,6 +332,41 @@ test_home_seed_registry_reads_scope_from_filled_brief() {
   pass "home seeding records routing scope from filled charter briefs"
 }
 
+test_home_seed_pure_domain_zero_projects() {
+  local home subhome subhome_abs out
+  home="$TMP_ROOT/pure-domain-home"
+  subhome="$TMP_ROOT/pure-domain-subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  out=$(FM_HOME="$home" \
+    FM_SECONDMATE_CHARTER='self-improvement evaluation of firstmate itself' \
+    FM_SECONDMATE_NAME='Evaluator' \
+    "$ROOT/bin/fm-home-seed.sh" evalbot "$subhome") \
+    || fail "pure-domain seed (zero projects) failed"
+  subhome_abs=$(cd "$subhome" && pwd -P)
+  printf '%s\n' "$out" | grep -F "home=$subhome_abs" >/dev/null \
+    || fail "pure-domain seed did not report subhome"
+  [ -f "$subhome/.fm-secondmate-home" ] || fail "pure-domain seed did not mark subhome as seeded"
+  [ "$(cat "$subhome/.fm-secondmate-home")" = evalbot ] || fail "pure-domain seed wrote wrong home marker"
+  [ -f "$subhome/data/charter.md" ] || fail "pure-domain seed did not write charter into subhome"
+  grep -F 'self-improvement evaluation of firstmate itself' "$subhome/data/charter.md" >/dev/null \
+    || fail "pure-domain charter did not record charter text"
+  grep -F 'pure-domain secondmate' "$subhome/data/charter.md" >/dev/null \
+    || fail "pure-domain charter did not render the zero-project note"
+  [ -z "$(ls -A "$subhome/projects" 2>/dev/null)" ] \
+    || fail "pure-domain seed unexpectedly cloned a project into the home"
+  grep -F -- '- evalbot - self-improvement evaluation of firstmate itself' "$home/data/secondmates.md" >/dev/null \
+    || fail "pure-domain registry line was not written"
+  grep -F 'name: Evaluator' "$home/data/secondmates.md" >/dev/null \
+    || fail "pure-domain registry did not record name"
+  grep -F 'scope: self-improvement evaluation of firstmate itself' "$home/data/secondmates.md" >/dev/null \
+    || fail "pure-domain registry did not record scope"
+  grep -F 'projects: (none)' "$home/data/secondmates.md" >/dev/null \
+    || fail "pure-domain registry did not render projects: (none)"
+  FM_HOME="$home" "$ROOT/bin/fm-home-seed.sh" validate >/dev/null \
+    || fail "pure-domain registry validation failed"
+  pass "home seeding provisions a pure-domain secondmate with zero projects"
+}
+
 test_home_seed_validate_rejects_duplicate_homes() {
   local home subhome subhome_abs err
   home="$TMP_ROOT/duplicate-home"
@@ -2097,6 +2132,7 @@ test_fm_home_parameterization
 test_lock_status_is_per_home
 test_home_seed_registry_scope_and_overlapping_projects
 test_home_seed_registry_reads_scope_from_filled_brief
+test_home_seed_pure_domain_zero_projects
 test_home_seed_validate_rejects_duplicate_homes
 test_home_seed_validate_rejects_duplicate_ids
 test_home_seed_validate_rejects_nested_homes

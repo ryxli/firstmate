@@ -7,11 +7,13 @@
 # when the task genuinely deviates (e.g. working an existing external PR instead
 # of shipping a new one).
 # Usage: fm-brief.sh <task-id> <repo-name> [--scout]
-#        fm-brief.sh <task-id> --secondmate <project>...
+#        fm-brief.sh <task-id> --secondmate [<project>...]
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no branch, no push, no PR) and the worktree is scratch.
 #   --secondmate writes a persistent secondmate charter. The project list
-#   is cloned into the secondmate home, while the natural-language scope
+#   is a non-exclusive set of clones for the secondmate home; it may be empty for
+#   a pure-domain secondmate (a quality/eval supervisor whose surface is its own
+#   home). The natural-language scope
 #   tells the main firstmate when to route work there; routine churn stays in its own home;
 #   only captain-relevant escalations append to this home's status file.
 #   Set FM_SECONDMATE_CHARTER='<charter>' to fill the charter text.
@@ -69,10 +71,13 @@ while [ "$idx" -lt "${#POS[@]}" ]; do
   SECONDMATE_PROJECTS="${SECONDMATE_PROJECTS}${SECONDMATE_PROJECTS:+ }${POS[$idx]}"
   idx=$((idx + 1))
 done
-[ -n "$SECONDMATE_PROJECTS" ] || { echo "error: --secondmate requires at least one project" >&2; exit 1; }
 SECONDMATE_CHARTER=${FM_SECONDMATE_CHARTER:-"{TASK}"}
 SECONDMATE_SCOPE=${FM_SECONDMATE_SCOPE:-${FM_SECONDMATE_CHARTER:-"{TASK}"}}
-PROJECT_LIST=$(printf '%s\n' "$SECONDMATE_PROJECTS" | tr ' ' '\n' | sed 's/^/- /')
+if [ -n "$SECONDMATE_PROJECTS" ]; then
+  PROJECT_LIST=$(printf '%s\n' "$SECONDMATE_PROJECTS" | tr ' ' '\n' | sed 's/^/- /')
+else
+  PROJECT_LIST="(none) - pure-domain secondmate; your work surface is this firstmate home."
+fi
 cat > "$BRIEF" <<EOF
 You are a secondmate: a persistent domain supervisor managed by the main firstmate. Work on your own; do not wait for a human.
 
