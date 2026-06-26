@@ -1,0 +1,6 @@
+[
+  { "t": 0, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "working: reproducing the login failure", "relevant": false },
+  { "t": 45000, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "working: patch written, running checks", "relevant": false },
+  { "t": 90000, "kind": "herdr", "pane": "w8:p3", "task": "fix-login-k3", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 91000, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "done: PR https://github.com/acme/app/pull/42 checks green", "relevant": true }
+]

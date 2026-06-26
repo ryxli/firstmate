@@ -15,15 +15,32 @@
 #   (f) local-only + truly unpushed + --force                  -> ALLOW  (escape hatch)
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
-TMP_ROOT=$(fm_test_tmproot fm-teardown-tests)
+TMP_ROOT=
+
+fail() {
+  printf 'not ok - %s\n' "$1" >&2
+  exit 1
+}
+
+pass() {
+  printf 'ok - %s\n' "$1"
+}
+
+cleanup() {
+  if [ -n "${TMP_ROOT:-}" ]; then
+    rm -rf "$TMP_ROOT"
+  fi
+}
+
+trap cleanup EXIT
+
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-teardown-tests.XXXXXX")
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)
-#   $CASE/fakebin/      - mocks for treehouse, tmux (PATH-prepended by caller)
+#   $CASE/fakebin/      - mocks for herdr (PATH-prepended by caller)
 #   $CASE/origin.git/   - bare upstream repo (so the project clone has origin)
 #   $CASE/project/      - clone of origin; acts as the firstmate project dir
 #   $CASE/wt/           - a worktree of the project (the task worktree)
@@ -36,17 +53,14 @@ make_case() {
 
   # Mocks for the post-check teardown steps. Refuse logic exits before these
   # run; the ALLOW cases need them so the script can complete cleanly.
-  cat > "$fakebin/treehouse" <<'SH'
+  cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
-# `treehouse return --force <wt>`: succeed silently.
+# Log all calls for inspection; succeed silently.
+log="${HERDR_LOG:-}"
+[ -z "$log" ] || printf '%s\n' "$*" >> "$log"
 exit 0
 SH
-  cat > "$fakebin/tmux" <<'SH'
-#!/usr/bin/env bash
-# tmux kill-window etc.: succeed silently.
-exit 0
-SH
-  chmod +x "$fakebin/treehouse" "$fakebin/tmux"
+  chmod +x "$fakebin/herdr"
 
   # Bare origin so the clone has an `origin` remote and origin/HEAD.
   git init -q --bare "$case_dir/origin.git"
@@ -84,12 +98,26 @@ SH
 # Write a meta file for the task. Args: case_dir mode kind
 write_meta() {
   local case_dir=$1 mode=$2 kind=$3
-  fm_write_meta "$case_dir/state/task-x1.meta" \
-    "window=fm-task-x1" \
-    "worktree=$case_dir/wt" \
-    "project=$case_dir/project" \
-    "kind=$kind" \
-    "mode=$mode"
+  cat > "$case_dir/state/task-x1.meta" <<EOF
+pane=w1:p1
+worktree=$case_dir/wt
+project=$case_dir/project
+kind=$kind
+mode=$mode
+EOF
+}
+
+# Write a meta file that includes a workspace_id (new-style herdr crewmate). Args: case_dir mode kind
+write_meta_with_workspace() {
+  local case_dir=$1 mode=$2 kind=$3
+  cat > "$case_dir/state/task-x1.meta" <<EOF
+pane=w1:p1
+workspace_id=wTEST
+worktree=$case_dir/wt
+project=$case_dir/project
+kind=$kind
+mode=$mode
+EOF
 }
 
 # Commit something on the worktree's task branch. Args: case_dir [message]
@@ -119,6 +147,12 @@ run_teardown() {
   FM_STATE_OVERRIDE="$case_dir/state" \
   PATH="$case_dir/fakebin:$PATH" \
     "$TEARDOWN" task-x1 "$@"
+}
+
+# Exit code expectation. Args: expected actual label
+expect_code() {
+  local expected=$1 actual=$2 label=$3
+  [ "$actual" = "$expected" ] || fail "$label: expected exit $expected, got $actual"
 }
 
 test_local_only_fork_remote_allows() {
@@ -249,6 +283,80 @@ test_local_only_force_overrides_unpushed() {
   pass "local-only worktree with unpushed work is torn down under --force (escape hatch)"
 }
 
+test_teardown_with_workspace_id_closes_pane_before_worktree_remove() {
+  local case_dir rc
+  case_dir=$(make_case workspace-remove)
+  write_meta_with_workspace "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "shippable work"
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin
+
+  set +e
+  HERDR_LOG="$case_dir/herdr.log" run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "workspace-remove: teardown should succeed"
+  grep -qF 'worktree remove' "$case_dir/herdr.log" \
+    || fail "teardown did not call herdr worktree remove: $(cat "$case_dir/herdr.log" 2>/dev/null)"
+  grep -qF 'wTEST' "$case_dir/herdr.log" \
+    || fail "teardown did not pass workspace_id wTEST to herdr: $(cat "$case_dir/herdr.log" 2>/dev/null)"
+  # The bug: a workspace_id meta relied on "herdr worktree remove" alone and
+  # never closed the recorded agent pane, leaving it alive. The fix closes the
+  # recorded pane explicitly, before worktree/workspace removal.
+  grep -qF 'pane close w1:p1' "$case_dir/herdr.log" \
+    || fail "teardown with workspace_id did not close the recorded agent pane: $(cat "$case_dir/herdr.log" 2>/dev/null)"
+  local close_line remove_line
+  close_line=$(grep -nF 'pane close' "$case_dir/herdr.log" | head -1 | cut -d: -f1)
+  remove_line=$(grep -nF 'worktree remove' "$case_dir/herdr.log" | head -1 | cut -d: -f1)
+  [ -n "$close_line" ] && [ -n "$remove_line" ] && [ "$close_line" -lt "$remove_line" ] \
+    || fail "teardown closed the pane after worktree removal (should be before): $(cat "$case_dir/herdr.log" 2>/dev/null)"
+  pass "teardown with workspace_id closes recorded pane before worktree remove"
+}
+
+test_teardown_with_workspace_id_removes_surviving_worktree_dir() {
+  local case_dir rc
+  case_dir=$(make_case workspace-survive)
+  write_meta_with_workspace "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "shippable work"
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin
+
+  # The mock herdr is a no-op, so "herdr worktree remove --workspace" never
+  # actually removes the worktree directory - exactly the failure mode the fix
+  # guards against. The defensive cleanup must remove the surviving directory.
+  [ -d "$case_dir/wt" ] || fail "precondition: worktree dir should exist before teardown"
+
+  set +e
+  HERDR_LOG="$case_dir/herdr.log" run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "workspace-survive: teardown should succeed"
+  [ ! -d "$case_dir/wt" ] \
+    || fail "teardown left the worktree directory behind: $case_dir/wt"
+  pass "teardown defensively removes a surviving worktree directory"
+}
+
+test_teardown_without_workspace_id_uses_pane_close() {
+  local case_dir rc
+  case_dir=$(make_case no-workspace-compat)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "shippable work"
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin
+
+  set +e
+  HERDR_LOG="$case_dir/herdr.log" run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "no-workspace-compat: teardown should succeed"
+  grep -qF 'pane close' "$case_dir/herdr.log" \
+    || fail "teardown without workspace_id should still call herdr pane close: $(cat "$case_dir/herdr.log" 2>/dev/null)"
+  pass "teardown without workspace_id falls back to pane close (backward compat)"
+}
+
 test_local_only_fork_remote_allows
 test_teardown_prompts_tasks_axi_done_when_compatible
 test_local_only_truly_unpushed_refuses
@@ -256,3 +364,6 @@ test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows
 test_no_mistakes_truly_unpushed_refuses
 test_local_only_force_overrides_unpushed
+test_teardown_with_workspace_id_closes_pane_before_worktree_remove
+test_teardown_with_workspace_id_removes_surviving_worktree_dir
+test_teardown_without_workspace_id_uses_pane_close

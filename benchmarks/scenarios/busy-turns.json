@@ -1,0 +1,11 @@
+[
+  { "t": 0, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "working: reading the auth module", "relevant": false },
+  { "t": 40000, "kind": "herdr", "pane": "w8:p3", "task": "fix-login-k3", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 50000, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "working: tracing the session bug", "relevant": false },
+  { "t": 90000, "kind": "herdr", "pane": "w8:p3", "task": "fix-login-k3", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 140000, "kind": "herdr", "pane": "w8:p3", "task": "fix-login-k3", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 150000, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "working: drafting the fix", "relevant": false },
+  { "t": 190000, "kind": "herdr", "pane": "w8:p3", "task": "fix-login-k3", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 240000, "kind": "herdr", "pane": "w8:p3", "task": "fix-login-k3", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 241000, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "done: PR https://github.com/acme/app/pull/63 checks green", "relevant": true }
+]

@@ -1,0 +1,218 @@
+{
+  "run": "2026-06-25T12:03:00.258Z",
+  "tokenizer": "js-tiktoken/cl100k_base",
+  "scenarios": [
+    {
+      "scenario": "normal-lifecycle",
+      "feature": "turn-end + done/PR signal wake",
+      "old": {
+        "system": "old",
+        "scenario": "normal-lifecycle",
+        "wakes": 1,
+        "interface_tokens": 125,
+        "false_wakes": 0,
+        "detected_relevant": 1,
+        "missed_relevant": 0
+      },
+      "new": {
+        "system": "new",
+        "scenario": "normal-lifecycle",
+        "wakes": 1,
+        "interface_tokens": 35,
+        "false_wakes": 0,
+        "detected_relevant": 1,
+        "missed_relevant": 0
+      },
+      "oldComponents": {
+        "reason": 13,
+        "queue": 51,
+        "status_files": 32,
+        "ritual": 29
+      },
+      "newComponents": {
+        "digest": 35
+      }
+    },
+    {
+      "scenario": "stale",
+      "feature": "stale-pane diagnosis (peek)",
+      "old": {
+        "system": "old",
+        "scenario": "stale",
+        "wakes": 1,
+        "interface_tokens": 604,
+        "false_wakes": 1,
+        "detected_relevant": 0,
+        "missed_relevant": 0
+      },
+      "new": {
+        "system": "new",
+        "scenario": "stale",
+        "wakes": 1,
+        "interface_tokens": 572,
+        "false_wakes": 1,
+        "detected_relevant": 0,
+        "missed_relevant": 0
+      },
+      "oldComponents": {
+        "reason": 7,
+        "queue": 19,
+        "peek": 549,
+        "ritual": 29
+      },
+      "newComponents": {
+        "digest": 0,
+        "stale_digest": 23,
+        "peek": 549
+      }
+    },
+    {
+      "scenario": "noisy-fleet",
+      "feature": "noise suppression + needs-decision",
+      "old": {
+        "system": "old",
+        "scenario": "noisy-fleet",
+        "wakes": 4,
+        "interface_tokens": 266,
+        "false_wakes": 3,
+        "detected_relevant": 1,
+        "missed_relevant": 0
+      },
+      "new": {
+        "system": "new",
+        "scenario": "noisy-fleet",
+        "wakes": 1,
+        "interface_tokens": 29,
+        "false_wakes": 0,
+        "detected_relevant": 1,
+        "missed_relevant": 0
+      },
+      "oldComponents": {
+        "reason": 27,
+        "queue": 76,
+        "ritual": 116,
+        "status_files": 47
+      },
+      "newComponents": {
+        "digest": 29
+      }
+    },
+    {
+      "scenario": "pr-merge",
+      "feature": "parked-PR skip + merge check",
+      "old": {
+        "system": "old",
+        "scenario": "pr-merge",
+        "wakes": 2,
+        "interface_tokens": 221,
+        "false_wakes": 0,
+        "detected_relevant": 2,
+        "missed_relevant": 0
+      },
+      "new": {
+        "system": "new",
+        "scenario": "pr-merge",
+        "wakes": 2,
+        "interface_tokens": 72,
+        "false_wakes": 0,
+        "detected_relevant": 2,
+        "missed_relevant": 0
+      },
+      "oldComponents": {
+        "reason": 42,
+        "queue": 98,
+        "status_files": 23,
+        "ritual": 58
+      },
+      "newComponents": {
+        "digest": 72
+      }
+    },
+    {
+      "scenario": "blocked",
+      "feature": "herdr-native blocked detection",
+      "old": {
+        "system": "old",
+        "scenario": "blocked",
+        "wakes": 0,
+        "interface_tokens": 0,
+        "false_wakes": 0,
+        "detected_relevant": 0,
+        "missed_relevant": 1
+      },
+      "new": {
+        "system": "new",
+        "scenario": "blocked",
+        "wakes": 1,
+        "interface_tokens": 23,
+        "false_wakes": 0,
+        "detected_relevant": 1,
+        "missed_relevant": 0
+      },
+      "oldComponents": {},
+      "newComponents": {
+        "digest": 23
+      }
+    },
+    {
+      "scenario": "afk-batch",
+      "feature": "away-mode batched escalation",
+      "old": {
+        "system": "old",
+        "scenario": "afk-batch",
+        "wakes": 1,
+        "interface_tokens": 198,
+        "false_wakes": 0,
+        "detected_relevant": 3,
+        "missed_relevant": 0
+      },
+      "new": {
+        "system": "new",
+        "scenario": "afk-batch",
+        "wakes": 1,
+        "interface_tokens": 95,
+        "false_wakes": 0,
+        "detected_relevant": 3,
+        "missed_relevant": 0
+      },
+      "oldComponents": {
+        "queue": 121,
+        "afk_flush": 77
+      },
+      "newComponents": {
+        "digest": 95
+      }
+    },
+    {
+      "scenario": "busy-turns",
+      "feature": "per-turn-end over-waking",
+      "old": {
+        "system": "old",
+        "scenario": "busy-turns",
+        "wakes": 5,
+        "interface_tokens": 341,
+        "false_wakes": 4,
+        "detected_relevant": 1,
+        "missed_relevant": 0
+      },
+      "new": {
+        "system": "new",
+        "scenario": "busy-turns",
+        "wakes": 1,
+        "interface_tokens": 35,
+        "false_wakes": 0,
+        "detected_relevant": 1,
+        "missed_relevant": 0
+      },
+      "oldComponents": {
+        "reason": 37,
+        "queue": 123,
+        "ritual": 145,
+        "status_files": 36
+      },
+      "newComponents": {
+        "digest": 35
+      }
+    }
+  ]
+}

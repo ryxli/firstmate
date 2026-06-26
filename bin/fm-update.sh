@@ -3,8 +3,8 @@
 #
 # Mechanical half of the /updatefirstmate skill. Fast-forwards the running
 # firstmate repo's default branch from origin, then fast-forwards every
-# registered secondmate home (each a treehouse worktree of this same repo, or
-# a standalone clone) the same way. FAST-FORWARD ONLY, exactly like
+# registered secondmate home (each a herdr-managed git worktree of this repo,
+# or a standalone clone) the same way. FAST-FORWARD ONLY, exactly like
 # fm-fleet-sync.sh: never force, never create a merge commit, never stash;
 # advance a target only when it is a clean fast-forward, otherwise skip and
 # report. A tracked-files fast-forward never touches the gitignored operational
@@ -31,8 +31,6 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 SECONDMATES_MD="$FM_HOME/data/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
-
-"$SCRIPT_DIR/fm-guard.sh" || true
 
 usage() { echo "usage: fm-update.sh [--help]" >&2; }
 
@@ -336,7 +334,7 @@ seen_homes=""
 fm_root_real=$(resolve_path "$FM_ROOT")
 
 process_secondmate() {
-  local id=$1 home=$2 window=${3:-} home_real
+  local id=$1 home=$2 pane=${3:-} home_real
   [ -n "$id" ] || return 0
   [ -n "$home" ] || return 0
   home_real=$(resolve_path "$home")
@@ -352,8 +350,8 @@ process_secondmate() {
   seen_homes="$seen_homes $home_real"
 
   ff_target "$home_real" "secondmate $id" yes yes
-  if [ "$FF_STATUS" = "updated" ] && [ -n "$window" ]; then
-    nudge_windows="$nudge_windows $window"
+  if [ "$FF_STATUS" = "updated" ] && [ -n "$pane" ]; then
+    nudge_windows="$nudge_windows $pane"
   fi
 }
 
@@ -365,8 +363,8 @@ if [ -d "$STATE" ]; then
     grep -q '^kind=secondmate' "$meta" 2>/dev/null || continue
     id=$(basename "$meta" .meta)
     home=$(grep '^home=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-    window=$(grep '^window=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-    process_secondmate "$id" "$home" "$window"
+    pane=$(grep '^pane=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+    process_secondmate "$id" "$home" "$pane"
   done
 fi
 

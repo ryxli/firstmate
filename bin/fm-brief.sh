@@ -25,6 +25,9 @@
 # Scout tasks ignore mode - their deliverable is a report, not a merge.
 # Ship tasks include a project-memory section so durable project-intrinsic
 # learnings can be committed to AGENTS.md through the project's delivery path.
+# Identity context (supervisor name/role/parent, worker label, domain, status
+# path) is injected automatically from config/identity via fm-identity-lib.sh.
+# Override the worker label with FM_TASK_LABEL or the domain with FM_TASK_DOMAIN.
 # Refuses to overwrite an existing brief.
 set -eu
 
@@ -33,6 +36,9 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+# shellcheck source=bin/fm-identity-lib.sh
+. "$SCRIPT_DIR/fm-identity-lib.sh"
 KIND=ship
 POS=()
 for a in "$@"; do
@@ -84,6 +90,12 @@ You are in an isolated firstmate home. The local \`AGENTS.md\` is your job descr
 The projects above are local clones for work you supervise; they are not an exclusive ownership claim.
 Delegate project work to your own crewmates with the normal firstmate lifecycle: brief, spawn, status, watcher, steer, teardown, and recovery.
 Do not invent a second delegation system.
+
+# Manager mode (default)
+You are a manager, not a hands-on worker. By default you delegate execution to disposable crewmates and stay responsive as a supervisor; do not sink your own context into editing or long investigations.
+Spawn a disposable crewmate for any real editing or investigation: implementing a change, reproducing a bug, auditing code, or any multi-step dig.
+Do the work in your own pane ONLY when it is genuinely cheaper than delegating: short routing or integration glue (relaying, deciding, wiring two crewmate outputs together), or a single serialized lane on a shared resource that cannot safely be split across parallel crewmates.
+When in doubt, delegate and supervise.
 You do not generate your own work.
 Act only on tasks the main firstmate routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
@@ -113,12 +125,27 @@ fi
 
 REPO=${POS[1]}
 
+# Identity context propagated into the brief so the worker knows who spawned it,
+# where it lives in herdr, what its visible label is, and where to report back.
+SUP_NAME=$(fm_supervisor_name "$CONFIG")
+SUP_ROLE=$(fm_supervisor_role "$CONFIG")
+SUP_PARENT=$(fm_supervisor_parent "$CONFIG")
+WORKER_LABEL=$(fm_worker_label "$CONFIG" "$ID" "${FM_TASK_LABEL:-}")
+DOMAIN="${FM_TASK_DOMAIN:-$REPO}"
+IDENTITY_CONTEXT="# Identity context
+- Supervisor: $SUP_NAME ($SUP_ROLE)
+- Supervision chain: $SUP_PARENT > $SUP_NAME > $WORKER_LABEL
+- Domain/project workspace: $DOMAIN
+- Your visible herdr tab and pane label: $WORKER_LABEL (the random task id stays in firstmate's records, not on your tab)
+- Report status back to: $STATE/$ID.status"
 if [ "$KIND" = scout ]; then
 cat > "$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.
 
 # Task
 {TASK}
+
+$IDENTITY_CONTEXT
 
 # Setup
 You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.
@@ -210,8 +237,11 @@ You are a crewmate: an autonomous worker agent managed by firstmate. Work on you
 # Task
 {TASK}
 
+$IDENTITY_CONTEXT
+
 # Setup
 You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.
+Verify isolation before anything else. Run \`pwd -P\` and \`git rev-parse --show-toplevel\`; both must resolve to your disposable worktree, not the primary project checkout (projects/$REPO). If the top-level path is the primary checkout, STOP - do not branch or commit here; append \`blocked: not in my isolated worktree\` to the status file below and report.
 1. First action: create your branch: \`git checkout -b fm/$ID\`$SETUP2
 
 # Rules

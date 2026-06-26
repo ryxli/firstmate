@@ -16,9 +16,12 @@
 #   - remote-backed projects are cloned with their origin URL preserved
 #   - a no-mistakes project is initialized (init + doctor) in the NEW subhome clone
 #     and the parent project clone is never mutated (no write through a project)
-#   - spawn meta records kind=secondmate, home=, and the project list; launch runs
-#     in the subhome with the persistent charter and cleared operational overrides
-#   - a bare `fm-<id>` send targets the window recorded in THIS home's meta
+#   - spawn meta records kind=secondmate, home=, the project list, the shared
+#     workspace + worker display labels, the herdr pane + tab, supervisor lineage,
+#     and agent_identity (the integration key, never the human label); launch runs
+#     in the subhome via `herdr agent start` with the persistent charter + cleared
+#     overrides, and the herdr agent identity is never renamed
+#   - a bare `fm-<id>` send targets the pane recorded in THIS home's meta
 #   - backlog items move verbatim into the subhome and leave the main backlog
 #   - recovery respawns from the durable registry + persistent home
 #   - teardown removes meta and the registry route only after removing the home
@@ -33,10 +36,64 @@ HOME_DIR="$TMP_ROOT/main home"
 SUB="$TMP_ROOT/design-home"
 SUB_ABS=
 FAKEBIN=
-LOG="$TMP_ROOT/tmux.log"
-PANE="$TMP_ROOT/pane.txt"
+LOG="$TMP_ROOT/herdr.log"
+# Stable ids the fake herdr below returns, mirrored here for assertions.
+HERDR_WS=wSHIP
+HERDR_TAB=wSHIP:t2
+HERDR_ROOT_PANE=wSHIP:p2
+HERDR_AGENT_PANE=wSHIP:p3
 ALPHA_ORIGIN=
 BETA_ORIGIN=
+
+# --- local herdr stub -------------------------------------------------------
+#
+# fm-spawn/fm-send/fm-teardown drive crewmate panes through `herdr`, not tmux,
+# so the lifecycle runs against a fake `herdr` on PATH that emits the JSON
+# shapes fm-spawn parses (workspace_id, tab_id, root_pane.pane_id,
+# result.agent.pane_id) and logs every call to FM_FAKE_HERDR_LOG. Same stubbing
+# convention as fm-spawn-placement and fm-secondmate-safety; the agent get
+# response models the idle->working transition fm-herdr-lib uses to confirm a
+# send. no-mistakes (seed's gamma init) is stubbed separately via the shared helper.
+make_fake_herdr() {
+  local dir=$1 fakebin
+  fakebin=$(fm_fakebin "$dir")
+  cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf 'herdr %s\n' "$*" >> "${FM_FAKE_HERDR_LOG:-/dev/null}"
+case "${1:-}" in
+  workspace)
+    case "${2:-}" in
+      list)   printf '{"result":{"type":"workspace_list","workspaces":[]}}\n'; exit 0 ;;
+      create) printf '{"result":{"workspace":{"workspace_id":"wSHIP"}}}\n'; exit 0 ;;
+    esac ;;
+  tab)
+    case "${2:-}" in
+      create) printf '{"result":{"tab":{"tab_id":"wSHIP:t2"},"root_pane":{"pane_id":"wSHIP:p2"}}}\n'; exit 0 ;;
+    esac ;;
+  agent)
+    case "${2:-}" in
+      start) printf '{"result":{"agent":{"pane_id":"wSHIP:p3"}}}\n'; exit 0 ;;
+      get)
+        if grep -q 'pane run' "${FM_FAKE_HERDR_LOG:-/dev/null}" 2>/dev/null; then
+          printf '{"agent_status":"working"}\n'
+        else
+          printf '{"agent_status":"idle"}\n'
+        fi
+        exit 0 ;;
+    esac ;;
+  pane)
+    case "${2:-}" in
+      close|run|rename|send-keys) exit 0 ;;
+      read) printf 'idle prompt\n'; exit 0 ;;
+      get) printf '{"pane_id":"wSHIP:p3"}\n'; exit 0 ;;
+    esac ;;
+esac
+exit 0
+SH
+  chmod +x "$fakebin/herdr"
+  printf '%s\n' "$fakebin"
+}
 
 # --- shared world + seed ----------------------------------------------------
 setup_world() {
@@ -55,9 +112,9 @@ EOF
   ALPHA_ORIGIN=$(git -C "$HOME_DIR/projects/alpha" remote get-url origin)
   BETA_ORIGIN=$(git -C "$HOME_DIR/projects/beta" remote get-url origin)
 
-  # One combined fakebin: tmux + treehouse (spawn/send/teardown) and no-mistakes
-  # (gamma initialization during seed).
-  FAKEBIN=$(make_fake_tmux "$TMP_ROOT/fake")
+  # One combined fakebin: the fake herdr (the workspace/tab/agent/pane ops that
+  # spawn/send/teardown drive) plus no-mistakes (gamma init during seed).
+  FAKEBIN=$(make_fake_herdr "$TMP_ROOT/fake")
   make_fake_no_mistakes "$TMP_ROOT/fake" >/dev/null
 
   # A filled charter brief whose routing scope differs from the charter summary,
@@ -112,37 +169,59 @@ phase_seed() {
 phase_spawn() {
   : > "$LOG"
   PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_CONFIG_OVERRIDE="$HOME_DIR/parent-config" \
-    FM_FAKE_TMUX_LOG="$LOG" FM_FAKE_TMUX_CAPTURE="$PANE" \
+    FM_FAKE_HERDR_LOG="$LOG" \
     "$ROOT/bin/fm-spawn.sh" design "$SUB" codex --secondmate >/dev/null \
     || fail "secondmate spawn failed"
 
   local meta="$HOME_DIR/state/design.meta"
+  local pane
+  pane=$(grep '^pane=' "$meta" | cut -d= -f2-)
   assert_grep 'kind=secondmate' "$meta" "spawn meta did not record kind=secondmate"
   assert_grep "home=$SUB_ABS" "$meta" "spawn meta did not record the subhome"
   assert_grep 'projects=alpha, beta, gamma' "$meta" "spawn meta did not record the project list"
-  # Launch ran in the subhome, with the persistent charter and cleared overrides,
-  # and never ran a project-style treehouse get.
+  assert_grep 'workspace=ship' "$meta" "spawn meta did not record the shared ship workspace label"
+  assert_grep 'worker=Design' "$meta" "spawn meta did not record the secondmate worker display label"
+  assert_grep "tab=$HERDR_TAB" "$meta" "spawn meta did not record the herdr tab id"
+  assert_grep 'supervisor=firstmate' "$meta" "spawn meta did not record the supervisor name"
+  assert_grep 'agent_identity=codex' "$meta" "spawn meta did not record the codex integration identity"
+  [ "$pane" = "$HERDR_AGENT_PANE" ] || fail "spawn meta did not record the herdr agent pane (got '$pane')"
+
+  # Placement: the secondmate lands in its own tab inside the shared ship
+  # workspace, with the human name on the tab + pane DISPLAY labels. The herdr
+  # agent SLOT is the unique task id (here `design`), never the harness name, so
+  # concurrent secondmates do not collide on the agent name; agent_identity=codex
+  # is recorded in meta (the integration key status binds to), and the leftover
+  # root shell is closed.
+  assert_grep "tab create --workspace $HERDR_WS --label Design" "$LOG" "spawn did not create the secondmate's own tab in the ship workspace"
+  assert_grep "agent start design --tab $HERDR_TAB" "$LOG" "spawn did not start the agent in its own tab under the unique task-id slot"
+  assert_grep "pane close $HERDR_ROOT_PANE" "$LOG" "spawn did not close the tab's leftover root shell"
+  assert_grep "pane rename $HERDR_AGENT_PANE Design" "$LOG" "spawn did not apply the display-only pane label"
+  # The agent identity must survive (it binds the omp<->herdr status integration);
+  # only the pane gets a display label, and the agent's own pane is never closed.
+  assert_no_grep 'agent rename' "$LOG" "spawn renamed the herdr agent, which breaks the omp<->herdr status binding"
+  assert_no_grep "pane close $HERDR_AGENT_PANE" "$LOG" "spawn closed the agent's own pane"
+
+  # Launch ran in the subhome, with the persistent charter and cleared overrides.
   assert_grep "FM_HOME='$SUB_ABS'" "$LOG" "secondmate launch did not set FM_HOME to the subhome"
   assert_grep 'FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE=' "$LOG" "launch did not clear operational overrides"
   assert_grep 'FM_CONFIG_OVERRIDE=' "$LOG" "launch did not clear the config override"
   assert_grep "$SUB_ABS/data/charter.md" "$LOG" "launch did not use the persistent charter"
-  assert_no_grep 'notify=' "$LOG" "secondmate codex launch included the parent turn-end notify hook"
-  assert_no_grep 'turn-ended' "$LOG" "secondmate codex launch referenced a parent turn-ended signal"
-  assert_no_grep 'treehouse get' "$LOG" "secondmate spawn ran a project treehouse get"
-  pass "spawn: launches in the subhome with persistent charter, records routing meta"
+  pass "spawn: own tab in the ship workspace via herdr agent start, persistent charter, routing meta"
 }
 
 phase_send() {
   : > "$LOG"
-  # The meta window (firstmate:fm-design) must win over a foreign same-named
-  # window returned by list-windows.
-  PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_TMUX_WINDOW="other-session:fm-design" \
-    FM_FAKE_TMUX_LOG="$LOG" FM_FAKE_TMUX_CAPTURE="$PANE" \
+  local pane
+  pane=$(grep '^pane=' "$HOME_DIR/state/design.meta" | cut -d= -f2-)
+  # A bare fm-<id> resolves the target PANE from THIS home's meta, then submits
+  # via `herdr pane run` (text+Enter) - it never re-resolves the shorthand as a
+  # herdr agent label.
+  PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_HERDR_LOG="$LOG" \
     "$ROOT/bin/fm-send.sh" fm-design 'route this work' >/dev/null 2>&1 \
-    || fail "fm-send failed for a bare firstmate window with home metadata"
-  assert_grep 'send-keys -t firstmate:fm-design -l route this work' "$LOG" "send did not use the window recorded in this home's meta"
-  assert_no_grep 'send-keys -t other-session:fm-design' "$LOG" "send targeted a foreign same-named window"
-  pass "send: a bare fm-<id> routes to the window recorded in this home's meta"
+    || fail "fm-send failed for a bare firstmate id with home metadata"
+  assert_grep "pane run $pane route this work" "$LOG" "send did not run the text on the pane recorded in this home's meta"
+  assert_no_grep 'agent get fm-design' "$LOG" "bare fm-<id> was resolved as a herdr agent label instead of via this home's meta"
+  pass "send: a bare fm-<id> routes to the pane recorded in this home's meta"
 }
 
 phase_handoff() {
@@ -187,27 +266,34 @@ phase_recovery() {
   # Simulate a restart: drop the live meta, then respawn from the registry +
   # persistent home (no explicit home argument).
   rm -f "$HOME_DIR/state/design.meta"
-  PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_TMUX_LOG="$LOG" FM_FAKE_TMUX_CAPTURE="$PANE" \
+  PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_HERDR_LOG="$LOG" \
     "$ROOT/bin/fm-spawn.sh" design "echo relaunch" --secondmate >/dev/null 2>&1 \
     || fail "recovery respawn failed"
   local meta="$HOME_DIR/state/design.meta"
   assert_grep "home=$SUB_ABS" "$meta" "respawn did not preserve the persistent home from the registry"
   assert_grep 'projects=alpha, beta, gamma' "$meta" "respawn did not preserve the project list from the registry"
-  assert_grep 'window=firstmate:fm-design' "$meta" "respawn did not reconstruct the direct-report window"
+  # The herdr placement is reconstructed: shared ship workspace, the secondmate's
+  # worker label, and a fresh agent pane recorded for routing.
+  assert_grep 'workspace=ship' "$meta" "respawn did not reconstruct the ship workspace placement"
+  assert_grep 'worker=Design' "$meta" "respawn did not reconstruct the worker label"
+  assert_grep "pane=$HERDR_AGENT_PANE" "$meta" "respawn did not record a herdr pane for the relaunched agent"
   pass "recovery: respawns from the durable registry and persistent home"
 }
 
 phase_teardown() {
   : > "$LOG"
-  PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_TMUX_LOG="$LOG" FM_FAKE_TMUX_CAPTURE="$PANE" \
+  local pane
+  pane=$(grep '^pane=' "$HOME_DIR/state/design.meta" | cut -d= -f2-)
+  PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_HERDR_LOG="$LOG" \
     "$ROOT/bin/fm-teardown.sh" design >/dev/null 2>&1 \
     || fail "teardown failed for the empty secondmate home"
+  assert_grep "pane close $pane" "$LOG" "teardown did not close the recorded agent pane before removing the home"
   assert_absent "$SUB" "teardown did not remove the retired secondmate home"
   assert_absent "$HOME_DIR/state/design.meta" "teardown did not clear the parent meta"
   assert_no_grep '- design ' "$HOME_DIR/data/secondmates.md" "teardown did not remove the registry route"
   # The parent's source projects are untouched (no write through a parent home).
   assert_present "$HOME_DIR/projects/alpha" "teardown disturbed a parent project"
-  pass "teardown: removes the home, then clears meta and the registry route"
+  pass "teardown: closes the pane, removes the home, then clears meta and the registry route"
 }
 
 setup_world
