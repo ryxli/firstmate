@@ -100,7 +100,44 @@ test_charter_has_manager_mode_defaults() {
   pass "secondmate charter encodes manager-mode delegation defaults"
 }
 
+test_briefs_report_status_via_helper() {
+  # The status-append idiom must be the fm-report.sh helper invocation, never a
+  # raw `echo ... >> <status file>` redirect: the omp bash tool blocks an
+  # agent's own redirection, so the brief routes status through the helper.
+  local home out brief
+
+  home=$(make_home report-ship)
+  out=$(run_brief "$home" rep-ship-k1 myproj) || fail "ship scaffold failed: $out"
+  brief="$home/data/rep-ship-k1/brief.md"
+  [ -f "$brief" ] || fail "no ship brief written"
+  grep -qF 'bin/fm-report.sh' "$brief" \
+    || fail "ship brief does not instruct status via fm-report.sh"
+  grep -qF '"{state}: {one short line}"' "$brief" \
+    || fail "ship brief lost the {state}: {one short line} status idiom"
+  grep -qF '>> ' "$brief" \
+    && fail "ship brief still contains a raw >> status redirect"
+
+  home=$(make_home report-scout)
+  out=$(run_brief "$home" rep-scout-z1 myproj --scout) || fail "scout scaffold failed: $out"
+  brief="$home/data/rep-scout-z1/brief.md"
+  grep -qF 'bin/fm-report.sh' "$brief" \
+    || fail "scout brief does not instruct status via fm-report.sh"
+  grep -qF '>> ' "$brief" && fail "scout brief still contains a raw >> status redirect"
+
+  home=$(make_home report-secondmate)
+  out=$(FM_SECONDMATE_CHARTER='Own the dashboard domain.' \
+        run_brief "$home" rep-anchor --secondmate dashboard) \
+    || fail "secondmate scaffold failed: $out"
+  brief="$home/data/rep-anchor/brief.md"
+  grep -qF 'bin/fm-report.sh' "$brief" \
+    || fail "secondmate charter does not instruct status via fm-report.sh"
+  grep -qF '>> ' "$brief" && fail "secondmate charter still contains a raw >> status redirect"
+
+  pass "ship/scout/secondmate briefs report status via fm-report.sh, not a raw >> redirect"
+}
+
 test_ship_brief_has_identity_context
 test_scout_brief_has_identity_context
 test_brief_identity_defaults_without_config
 test_charter_has_manager_mode_defaults
+test_briefs_report_status_via_helper
