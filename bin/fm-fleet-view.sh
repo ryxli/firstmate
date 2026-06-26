@@ -45,11 +45,18 @@ This tool never mutates herdr, omp, git, data, or state.
 EOF
 }
 
+# need_value <flag> <value>: require a value-flag argument. Under set -u a
+# missing "$2" would otherwise abort with an unbound-variable error, so callers
+# pass "${2:-}" and this exits cleanly with usage when the value is absent.
+need_value() {
+  [ -n "$2" ] || { printf 'fm-fleet-view: %s requires a value\n' "$1" >&2; usage >&2; exit 2; }
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --output|-o) OUT="$2"; shift 2 ;;
-    --input|-i)  INPUT="$2"; shift 2 ;;
-    --home)      HOME_OVERRIDE="$2"; shift 2 ;;
+    --output|-o) need_value "$1" "${2:-}"; OUT="$2"; shift 2 ;;
+    --input|-i)  need_value "$1" "${2:-}"; INPUT="$2"; shift 2 ;;
+    --home)      need_value "$1" "${2:-}"; HOME_OVERRIDE="$2"; shift 2 ;;
     --no-recursive) RECURSE=0; shift ;;
     --no-open)   OPEN=0; shift ;;
     -h|--help)   usage; exit 0 ;;

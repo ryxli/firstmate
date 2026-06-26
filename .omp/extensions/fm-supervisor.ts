@@ -1,9 +1,10 @@
 /**
  * fm-supervisor.ts - in-process omp supervision extension for firstmate.
  *
- * Replaces the bash supervision stack (fm-watch.sh + fm-supervise-daemon.sh +
- * wake-queue + fm-guard.sh) with ONE in-process extension that blocks on herdr
- * fleet events and injects ONE dense, self-contained wake digest per relevant
+ * Replaces the retired bash supervision stack (a polling watcher, a background
+ * supervise daemon, a wake-queue, and a busy guard) with ONE in-process
+ * extension that blocks on herdr fleet events and injects ONE dense,
+ * self-contained wake digest per relevant
  * event. Higher signal-per-token at the LLM interface, and no per-turn
  * drain -> handle -> re-arm ritual: the supervision driver lives for the whole
  * session and never needs re-arming.
@@ -76,7 +77,7 @@
  *     wake (trimmed to the last STATUS_INTERNAL_LOG_MAX lines like bash).
  *   - stale wakes are SKIPPED for kind=secondmate panes and for ship tasks
  *     parked on a green PR (pr= set AND last status line is a terminal
- *     done-PR / PR-ready line), matching bin/fm-watch.sh awaiting_merge().
+ *     done-PR / PR-ready line); see benchmarks/model-lib.ts isParkedOnGreenPR.
  *
  * The PURE export `classifyAndDigest` below is the single source of truth for
  * relevance + digest building (mirrors bin/fm-classify-status.sh and
@@ -791,7 +792,8 @@ async function isAwaitingMerge(sup: Supervisor, crew: Crewmate): Promise<boolean
 	if (!crew.pr) return false;
 	const last = await lastStatusLine(sup, crew.task);
 	if (!last) return false;
-	// matches bin/fm-watch.sh awaiting_merge(): done:...<space>PR<space> | "PR ready"
+	// awaiting-merge rule (see benchmarks/model-lib.ts isParkedOnGreenPR):
+	// terminal "done:...<space>PR<space>" line, or a "PR ready" line.
 	return /^done:.*\bPR\b/i.test(last) || /PR ready/i.test(last);
 }
 

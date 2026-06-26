@@ -302,7 +302,7 @@
       ? h("div", { class: "fv-mono text-xs text-base-content/40 fv-truncate mt-1", title: cwd, text: cwd })
       : null;
 
-    var degradedTag = degraded
+    var degradedTag = (degraded && degraded !== 'live')
       ? h("span", { class: "badge badge-sm badge-soft badge-error gap-1", title: "herdr could not confirm this pane live" },
           "stale: " + degraded)
       : null;

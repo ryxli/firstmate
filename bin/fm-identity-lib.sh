@@ -82,36 +82,3 @@ fm_worker_label() {
   fi
   printf '%s/%s\n' "$(fm_supervisor_slug "$cfg")" "$(fm_task_slug "$id")"
 }
-
-# --- Display-label helpers --------------------------------------------------
-# These produce herdr workspace, tab, and pane DISPLAY labels only. They are
-# never an agent identity: the herdr agent identity is the integration key that
-# herdr binds agent_status to (omp for OMP panes) and must stay stable, so it is
-# never derived from a human name. Call sites use these aliases so display
-# labelling reads distinctly from the integration identity.
-
-# fm_supervisor_display_label <config-dir>
-# The supervisor's human display label (e.g. "Keel") for its own herdr tab/pane
-# display label. Same value as fm_supervisor_name; the alias names the intent.
-fm_supervisor_display_label() {
-  fm_supervisor_name "$1"
-}
-
-# fm_worker_display_label <config-dir> <task-id> [explicit-label]
-# The worker's human display label "<supervisor>/<task-slug>" for its herdr tab
-# and pane. Thin alias around fm_worker_label; the random task id stays in meta.
-fm_worker_display_label() {
-  fm_worker_label "$@"
-}
-
-# fm_worker_supervisor_from_label <worker-label>
-# The supervisor slug encoded in a worker display label: the prefix before "/"
-# (e.g. "keel" from "keel/fix-login"). A label without "/" (a named secondmate's
-# own display label such as "Anchor") is returned whole.
-fm_worker_supervisor_from_label() {
-  local label=$1
-  case "$label" in
-    */*) printf '%s\n' "${label%%/*}" ;;
-    *)   printf '%s\n' "$label" ;;
-  esac
-}

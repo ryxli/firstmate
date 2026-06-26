@@ -78,20 +78,6 @@ test_worker_label_explicit_override() {
   pass "explicit worker label overrides derivation"
 }
 
-test_display_label_aliases() {
-  eq "supervisor display label" "Keel" "$(fm_supervisor_display_label "$CFG_KEEL")"
-  eq "supervisor display label default" "firstmate" "$(fm_supervisor_display_label "$CFG_EMPTY")"
-  eq "worker display label" "keel/fix-login" "$(fm_worker_display_label "$CFG_KEEL" fix-login-k3)"
-  eq "worker display label explicit override" "keel/custom-name" "$(fm_worker_display_label "$CFG_KEEL" fix-login-k3 keel/custom-name)"
-  pass "display-label aliases mirror the underlying identity helpers"
-}
-
-test_worker_supervisor_from_label() {
-  eq "prefix before slash" "keel" "$(fm_worker_supervisor_from_label keel/fix-login)"
-  eq "named mate label returned whole" "Anchor" "$(fm_worker_supervisor_from_label Anchor)"
-  pass "fm_worker_supervisor_from_label recovers the supervisor prefix from a worker label"
-}
-
 test_identity_values
 test_identity_whitespace_trimmed
 test_identity_defaults
@@ -99,5 +85,3 @@ test_task_slug_strips_random_suffix
 test_task_slug_preserves_non_suffix_ids
 test_worker_label_composition
 test_worker_label_explicit_override
-test_display_label_aliases
-test_worker_supervisor_from_label

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm-herdr-lib.sh — shared herdr pane primitives for firstmate.
+# fm-herdr-lib.sh - shared herdr pane primitives for firstmate.
 #
 # Replaces fm-tmux-lib.sh. All functions operate on herdr pane IDs
 # (e.g. "w8:p3") rather than tmux targets. Sourced by fm-send.sh so compose/submit
@@ -14,7 +14,7 @@
 #      half-typed human line in the composer; same semantics as before but
 #      simpler implementation (no ANSI parsing, no SGR stripping).
 #   3. fm_herdr_submit_core: sends text+Enter via "herdr pane run" and
-#      verifies the agent received it by waiting briefly for a working→idle
+#      verifies the agent received it by waiting briefly for a working->idle
 #      transition or a clean idle state; returns a verdict string the caller
 #      can act on.
 #
@@ -27,9 +27,9 @@
 # line and breaks on multi-object payloads (e.g. `workspace list`).
 #
 # Exception: fm_herdr_agent_status below stays on grep deliberately. It is the
-# hot-path supervision poll (called per agent, every watcher cycle), where a
-# python3 startup per call would be a real cost; a single-field grep is correct
-# and ~30x cheaper there.
+# hot-path submit-verification poll (called per agent), where a python3 startup
+# per call would be a real cost; a single-field grep is correct and ~30x cheaper
+# there.
 herdr_json_get() {
   python3 -c '
 import sys, json
@@ -75,7 +75,7 @@ fm_pane_input_pending() {
     | grep -v '^[[:space:]]*$' | tail -1 || true)
   [ -n "$line" ] || return 1
   # Strip composer box-drawing chrome. Real composers are full boxes whose
-  # last visible line is the bottom border (e.g. omp/opus draw "╰── … ──╯"),
+  # last visible line is the bottom border (a horizontal rule capped by corners),
   # so stripping only the light/heavy verticals leaves a border-only line that
   # reads as pending input. Strip the verticals, horizontals, and corners so a
   # border-only line collapses to whitespace and is treated as an empty composer.
