@@ -407,14 +407,14 @@ fi
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
 # Resolve identity-driven placement labels.
-#   workspace label = the domain/project (shared by every task of that domain)
+#   workspace label = the domain/project for crew (shared per domain), or the secondmate's own name (its home space) for a secondmate
 #   worker label    = "<supervisor>/<task>" for a crewmate, the mate's own name
 #                     for a named mate; the random task id stays in meta only.
 if [ "$KIND" = secondmate ]; then
   WORKER_LABEL=$(fm_identity_value "$PROJ_ABS/config" name 2>/dev/null || true)
   [ -n "$WORKER_LABEL" ] || WORKER_LABEL=$ID
-  WORKSPACE_LABEL="${FM_SHIP_WORKSPACE_LABEL:-ship}"
-  WORKSPACE_CWD="$FM_HOME"
+  WORKSPACE_LABEL="$WORKER_LABEL"
+  WORKSPACE_CWD="$PROJ_ABS"
   DOMAIN="$WORKSPACE_LABEL"
 else
   DOMAIN="${FM_TASK_DOMAIN:-$(basename "$PROJ_ABS")}"

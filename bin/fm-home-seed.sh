@@ -978,6 +978,13 @@ seed_home() {
   fi
   # Write config/identity so the secondmate can self-register at bootstrap.
   printf 'name=%s\nrole=Secondmate - %s\n' "$sm_name" "$charter_scope" > "$home/config/identity"
+  # Label the home's herdr workspace after the secondmate so the agent - which
+  # fm-spawn places into a workspace resolved by that same name - lands in its
+  # own home space rather than a separate shared/duplicate workspace. Best-effort
+  # (display label only; the registry workspace id is unchanged for teardown).
+  if [ -n "${SEED_HERDR_WORKSPACE_ID:-}" ]; then
+    herdr workspace rename "$SEED_HERDR_WORKSPACE_ID" "$sm_name" >/dev/null 2>&1 || true
+  fi
 
   projects_csv=$(join_projects "$@")
   [ -n "$projects_csv" ] || projects_csv="(none)"

@@ -179,7 +179,7 @@ phase_spawn() {
   assert_grep 'kind=secondmate' "$meta" "spawn meta did not record kind=secondmate"
   assert_grep "home=$SUB_ABS" "$meta" "spawn meta did not record the subhome"
   assert_grep 'projects=alpha, beta, gamma' "$meta" "spawn meta did not record the project list"
-  assert_grep 'workspace=ship' "$meta" "spawn meta did not record the shared ship workspace label"
+  assert_grep 'workspace=Design' "$meta" "spawn meta did not record the secondmate's own named workspace"
   assert_grep 'worker=Design' "$meta" "spawn meta did not record the secondmate worker display label"
   assert_grep "tab=$HERDR_TAB" "$meta" "spawn meta did not record the herdr tab id"
   assert_grep 'supervisor=firstmate' "$meta" "spawn meta did not record the supervisor name"
@@ -192,7 +192,7 @@ phase_spawn() {
   # concurrent secondmates do not collide on the agent name; agent_identity=codex
   # is recorded in meta (the integration key status binds to), and the leftover
   # root shell is closed.
-  assert_grep "tab create --workspace $HERDR_WS --label Design" "$LOG" "spawn did not create the secondmate's own tab in the ship workspace"
+  assert_grep "tab create --workspace $HERDR_WS --label Design" "$LOG" "spawn did not create the secondmate's own tab in its own named workspace"
   assert_grep "agent start design --tab $HERDR_TAB" "$LOG" "spawn did not start the agent in its own tab under the unique task-id slot"
   assert_grep "pane close $HERDR_ROOT_PANE" "$LOG" "spawn did not close the tab's leftover root shell"
   assert_grep "pane rename $HERDR_AGENT_PANE Design" "$LOG" "spawn did not apply the display-only pane label"
@@ -206,7 +206,7 @@ phase_spawn() {
   assert_grep 'FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE=' "$LOG" "launch did not clear operational overrides"
   assert_grep 'FM_CONFIG_OVERRIDE=' "$LOG" "launch did not clear the config override"
   assert_grep "$SUB_ABS/data/charter.md" "$LOG" "launch did not use the persistent charter"
-  pass "spawn: own tab in the ship workspace via herdr agent start, persistent charter, routing meta"
+  pass "spawn: own tab in its own named workspace via herdr agent start, persistent charter, routing meta"
 }
 
 phase_send() {
@@ -272,9 +272,9 @@ phase_recovery() {
   local meta="$HOME_DIR/state/design.meta"
   assert_grep "home=$SUB_ABS" "$meta" "respawn did not preserve the persistent home from the registry"
   assert_grep 'projects=alpha, beta, gamma' "$meta" "respawn did not preserve the project list from the registry"
-  # The herdr placement is reconstructed: shared ship workspace, the secondmate's
-  # worker label, and a fresh agent pane recorded for routing.
-  assert_grep 'workspace=ship' "$meta" "respawn did not reconstruct the ship workspace placement"
+  # The herdr placement is reconstructed: the secondmate's own named workspace,
+  # its worker label, and a fresh agent pane recorded for routing.
+  assert_grep 'workspace=Design' "$meta" "respawn did not reconstruct the named-workspace placement"
   assert_grep 'worker=Design' "$meta" "respawn did not reconstruct the worker label"
   assert_grep "pane=$HERDR_AGENT_PANE" "$meta" "respawn did not record a herdr pane for the relaunched agent"
   pass "recovery: respawns from the durable registry and persistent home"

@@ -105,6 +105,9 @@ Use `herdr pane rename` (sets the pane's display label), NOT `herdr agent rename
   herdr pane rename "$(herdr pane current 2>/dev/null | sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p')" <name>
 
 This is idempotent and non-fatal if herdr is unavailable or the pane cannot be identified.
+Also label the first mate's OWN herdr workspace `firstmate` so the space reads clearly and stays distinct from the per-secondmate and per-project spaces (best-effort, idempotent; a label only, never `herdr agent rename`):
+
+  herdr workspace rename "$(herdr pane current 2>/dev/null | sed -n 's/.*"workspace_id":"\([^"]*\)".*/\1/p')" firstmate
 
 Bootstrap is detect, then consent, then install.
 Never install anything the captain has not approved in this session.
@@ -414,7 +417,7 @@ For `kind=secondmate`, the same script launches in the registered or explicit fi
 
 For ship and scout tasks, `bin/fm-resolve-spawn.sh` runs a preflight check before any git or herdr state is created: it verifies the harness binary is on PATH, warns if the project is not in the registry, and confirms the worktree base is writable; a failure aborts the spawn immediately.
 The script then creates a git worktree via `git worktree add -b "fm/<id>" "$FM_WORKTREE_BASE/<id>" HEAD`, resolves the domain/project herdr workspace (label = the project; created when absent, reused when it already exists), starts the agent in its OWN tab inside that workspace labelled `<supervisor>/<task-slug>`, closes the tab's leftover root shell so the tab is a single agent pane, parses the returned `pane_id`, records `state/<id>.meta`, and submits the brief. No `workspace_id` is recorded: the workspace is shared across the domain's tasks, so teardown cleans up only this task's pane and git worktree, never the whole workspace.
-For `kind=secondmate`, the script launches in the persistent home, placed as its own tab inside the single `ship` workspace (never a split of the focused tab) and labelled by the mate's name. If the seeded home is missing the shared `AGENTS.md`, `CLAUDE.md`, or `bin/`, fm-spawn auto-links them from the firstmate repo (clearing any broken symlinks first) so the home is valid by construction.
+For `kind=secondmate`, the script launches in the persistent home, placed in its own herdr workspace named after the secondmate - its home space, the same workspace `fm-home-seed` labelled by the mate's name - rather than a shared workspace, with its agent in its own tab (never a split of the focused tab) labelled by the mate's name. If the seeded home is missing the shared `AGENTS.md`, `CLAUDE.md`, or `bin/`, fm-spawn auto-links them from the firstmate repo (clearing any broken symlinks first) so the home is valid by construction.
 Project worktrees start on a fresh branch off the default; ship briefs tell the crewmate to use that branch, while scout briefs keep the worktree scratch.
 After spawning, peek the pane to confirm the crewmate is processing the brief (and handle any trust dialog per section 4).
 Add the task to `data/backlog.md` under In flight.

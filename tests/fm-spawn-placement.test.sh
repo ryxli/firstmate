@@ -16,7 +16,7 @@
 #   - the meta records tab=, supervisor lineage, and agent_identity=omp, but no
 #     workspace_id (so teardown does per-task cleanup, never destroying the shared
 #     domain workspace);
-#   - a --secondmate lands in its own tab inside the single `ship` workspace;
+#   - a --secondmate lands in its own workspace named after the secondmate (its home);
 #   - a secondmate home missing AGENTS.md/bin is auto-linked, not rejected.
 set -u
 
@@ -229,7 +229,7 @@ make_secondmate_home() {
   printf '%s\n' "$home"
 }
 
-test_secondmate_lands_in_ship_workspace_own_tab() {
+test_secondmate_lands_in_own_named_workspace() {
   local home fakebin smhome out
   home=$(make_case sm-ship shipproj Mate)
   fakebin=$(make_fake_herdr "$home")
@@ -239,10 +239,10 @@ test_secondmate_lands_in_ship_workspace_own_tab() {
   out=$(run_spawn "$home" "$fakebin" anchor "$smhome" omp --secondmate) \
     || fail "secondmate spawn failed: $out"
 
-  grep -qF 'workspace create --label ship' "$home/herdr.log" \
-    || fail "secondmate did not target the ship workspace: $(cat "$home/herdr.log")"
+  grep -qF 'workspace create --label Anchor' "$home/herdr.log" \
+    || fail "secondmate did not create its own named workspace: $(cat "$home/herdr.log")"
   grep -qF 'tab create --workspace wNEW --label Anchor' "$home/herdr.log" \
-    || fail "secondmate did not get its own ship tab labeled by name: $(cat "$home/herdr.log")"
+    || fail "secondmate did not get its own tab labeled by name: $(cat "$home/herdr.log")"
   # The secondmate's display label (its own name) goes on the tab + pane; the herdr
   # agent SLOT is the unique task id (here `anchor`), never the harness name, so
   # concurrent secondmates do not collide. agent_identity=omp is recorded in meta.
@@ -258,7 +258,7 @@ test_secondmate_lands_in_ship_workspace_own_tab() {
     || fail "secondmate meta missing agent_identity=omp"
   grep -qF 'tab=wX:t9' "$home/state/anchor.meta" \
     || fail "secondmate meta missing herdr tab id"
-  pass "secondmate lands in its own tab inside the ship workspace with omp identity"
+  pass "secondmate lands in its own named workspace (its home) with omp identity"
 }
 
 test_secondmate_home_autolinks_missing_files() {
@@ -313,6 +313,6 @@ test_spawn_refuses_when_worktree_resolves_to_primary_checkout() {
 test_crewmate_creates_domain_workspace_and_own_tab
 test_crewmate_single_agent_pane
 test_crewmate_reuses_existing_domain_workspace
-test_secondmate_lands_in_ship_workspace_own_tab
+test_secondmate_lands_in_own_named_workspace
 test_secondmate_home_autolinks_missing_files
 test_spawn_refuses_when_worktree_resolves_to_primary_checkout
