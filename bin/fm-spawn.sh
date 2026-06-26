@@ -37,6 +37,8 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-identity-lib.sh"
 # shellcheck source=bin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
+# shellcheck source=bin/fm-spawn-lib.sh
+. "$SCRIPT_DIR/fm-spawn-lib.sh"
 
 KIND=ship
 POS=()
@@ -121,10 +123,7 @@ launch_template() {
 case "$ARG3" in
   *' '*)
     LAUNCH=$ARG3
-    HARNESS=""
-    for word in $LAUNCH; do
-      case "$word" in [A-Za-z_]*=*) continue ;; *) HARNESS=$(basename "$word"); break ;; esac
-    done
+    HARNESS=$(fm_first_command_word "$LAUNCH" || true)
     ;;
   '')
     HARNESS=$("$FM_ROOT/bin/fm-harness.sh" crew)
@@ -150,12 +149,6 @@ secondmate_registry_value() {
   esac
   [ -n "$value" ] || return 1
   printf '%s\n' "$value"
-}
-
-shell_quote() {
-  printf "'"
-  printf '%s' "$1" | sed "s/'/'\\\\''/g"
-  printf "'"
 }
 
 resolved_existing_dir() {
@@ -462,11 +455,11 @@ EOF
 fi
 
 # Build the launch command with placeholders filled.
-sq_brief=$(shell_quote "$BRIEF")
+sq_brief=$(fm_shell_quote "$BRIEF")
 LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
 
 if [ "$KIND" = secondmate ]; then
-  sq_home=$(shell_quote "$PROJ_ABS")
+  sq_home=$(fm_shell_quote "$PROJ_ABS")
   LAUNCH_CMD="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH_CMD"
 fi
 
@@ -534,9 +527,6 @@ mkdir -p "$STATE"
   echo "workspace=$WORKSPACE_LABEL"
   echo "worker=$WORKER_LABEL"
   echo "supervisor=$(fm_supervisor_name "$CONFIG")"
-  echo "supervisor_slug=$(fm_supervisor_slug "$CONFIG")"
-  echo "supervisor_role=$(fm_supervisor_role "$CONFIG")"
-  echo "supervisor_parent=$(fm_supervisor_parent "$CONFIG")"
   echo "agent_identity=$AGENT_IDENTITY"
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"

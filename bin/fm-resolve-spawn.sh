@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
+# shellcheck source=bin/fm-spawn-lib.sh
+. "$SCRIPT_DIR/fm-spawn-lib.sh"
 
 project=${1:-}
 harness_arg=${2:-}
@@ -16,21 +18,10 @@ if [ -z "$project" ]; then
   exit 2
 fi
 
-first_command_word() {
-  local launch=$1 word
-  for word in $launch; do
-    case "$word" in
-      [A-Za-z_]*=*) continue ;;
-      *) basename "$word"; return 0 ;;
-    esac
-  done
-  return 1
-}
-
 if [ -z "$harness_arg" ]; then
   harness=$("$FM_ROOT/bin/fm-harness.sh" crew)
 elif printf '%s' "$harness_arg" | grep '[[:space:]]' >/dev/null; then
-  harness=$(first_command_word "$harness_arg" || true)
+  harness=$(fm_first_command_word "$harness_arg" || true)
 else
   harness=$harness_arg
 fi

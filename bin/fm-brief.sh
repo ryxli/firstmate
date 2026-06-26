@@ -41,6 +41,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # shellcheck source=bin/fm-identity-lib.sh
 . "$SCRIPT_DIR/fm-identity-lib.sh"
+# shellcheck source=bin/fm-spawn-lib.sh
+. "$SCRIPT_DIR/fm-spawn-lib.sh"
 KIND=ship
 POS=()
 for a in "$@"; do
@@ -56,19 +58,13 @@ BRIEF="$DATA/$ID/brief.md"
 [ -e "$BRIEF" ] && { echo "error: $BRIEF already exists" >&2; exit 1; }
 mkdir -p "$DATA/$ID"
 
-shell_quote() {
-  printf "'"
-  printf '%s' "$1" | sed "s/'/'\\\\''/g"
-  printf "'"
-}
-
-STATUS_FILE=$(shell_quote "$STATE/$ID.status")
+STATUS_FILE=$(fm_shell_quote "$STATE/$ID.status")
 # Absolute path to the status-append helper. Agents invoke it instead of running
 # `echo "<line>" >> $STATUS_FILE` directly, because the omp bash tool blocks a
 # direct echo/cat redirection but allows invoking a script that redirects
 # internally. Absolute so a project crewmate in its own worktree (which lacks
 # firstmate's bin/) can still invoke it; a secondmate whose home has bin/ can too.
-REPORT=$(shell_quote "$FM_ROOT/bin/fm-report.sh")
+REPORT=$(fm_shell_quote "$FM_ROOT/bin/fm-report.sh")
 
 if [ "$KIND" = secondmate ]; then
 SECONDMATE_PROJECTS=""

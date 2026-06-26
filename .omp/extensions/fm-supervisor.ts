@@ -293,21 +293,8 @@ interface Crewmate {
 	pane: string;
 	kind: "ship" | "scout" | "secondmate";
 	pr?: string;
-	tab?: string;
 	worker?: string;
-	workspace?: string;
-	domain?: string;
-	project?: string;
-	worktree?: string;
 	harness?: string;
-	mode?: string;
-	yolo?: "on" | "off";
-	home?: string;
-	projects?: string;
-	supervisor?: string;
-	supervisor_slug?: string;
-	supervisor_role?: string;
-	supervisor_parent?: string;
 	agent_identity?: string;
 }
 
@@ -315,21 +302,8 @@ interface MetaFields {
 	pane?: string;
 	kind: Crewmate["kind"];
 	pr?: string;
-	tab?: string;
 	worker?: string;
-	workspace?: string;
-	domain?: string;
-	project?: string;
-	worktree?: string;
 	harness?: string;
-	mode?: string;
-	yolo?: "on" | "off";
-	home?: string;
-	projects?: string;
-	supervisor?: string;
-	supervisor_slug?: string;
-	supervisor_role?: string;
-	supervisor_parent?: string;
 	agent_identity?: string;
 }
 
@@ -491,50 +465,11 @@ async function parseMeta(path: string): Promise<MetaFields> {
 				case "pr":
 					if (value) meta.pr = value; // last pr= wins (bash tail -1)
 					break;
-				case "tab":
-					meta.tab = value;
-					break;
 				case "worker":
 					meta.worker = value;
 					break;
-				case "workspace":
-					meta.workspace = value;
-					break;
-				case "domain":
-					meta.domain = value;
-					break;
-				case "project":
-					meta.project = value;
-					break;
-				case "worktree":
-					meta.worktree = value;
-					break;
 				case "harness":
 					meta.harness = value;
-					break;
-				case "mode":
-					meta.mode = value;
-					break;
-				case "yolo":
-					if (value === "on" || value === "off") meta.yolo = value;
-					break;
-				case "home":
-					meta.home = value;
-					break;
-				case "projects":
-					meta.projects = value;
-					break;
-				case "supervisor":
-					meta.supervisor = value;
-					break;
-				case "supervisor_slug":
-					meta.supervisor_slug = value;
-					break;
-				case "supervisor_role":
-					meta.supervisor_role = value;
-					break;
-				case "supervisor_parent":
-					meta.supervisor_parent = value;
 					break;
 				case "agent_identity":
 					meta.agent_identity = value;

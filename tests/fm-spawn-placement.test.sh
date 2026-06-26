@@ -171,7 +171,6 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
   grep -qF 'worker=keel/fix-login' "$meta" || fail "meta missing worker label"
   grep -qF 'domain=myproj' "$meta" || fail "meta missing domain"
   grep -qF 'supervisor=Keel' "$meta" || fail "meta missing supervisor name"
-  grep -qF 'supervisor_slug=keel' "$meta" || fail "meta missing supervisor slug"
   grep -qF 'agent_identity=omp' "$meta" || fail "meta missing agent_identity=omp"
   ! grep -q '^workspace_id=' "$meta" \
     || fail "meta recorded workspace_id; teardown would destroy the shared workspace"

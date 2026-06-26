@@ -246,9 +246,6 @@ while [ "$i" -le "$WORKERS" ]; do
     printf 'workspace=%s\n' "$WS_LABEL"
     printf 'worker=%s\n' "$LABEL"
     printf 'supervisor=%s\n' "$SUPNAME"
-    printf 'supervisor_slug=demo\n'
-    printf 'supervisor_role=%s\n' "$SUP_ROLE"
-    printf 'supervisor_parent=captain\n'
     printf 'agent_identity=omp\n'
   } > "$HOME_DIR/state/$TASK.meta"
   printf 'task %s -> pane %s tab %s (label %s)\n' "$TASK" "$PANE" "$TAB" "$LABEL"
