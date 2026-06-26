@@ -42,9 +42,9 @@ Provision the persistent home and registry entry after the charter is filled:
 bin/fm-home-seed.sh <id> <home|-> <project>...
 ```
 
-`-` durably leases a fresh firstmate worktree via `treehouse get --lease` under the secondmate id.
-The lease survives with no live process and is never recycled by later `treehouse get` or `prune`.
-The slot stays reserved across restarts until the lease is released.
+`-` creates a herdr-managed git worktree of the firstmate repo as the home and records the herdr workspace ID in `data/secondmates.md`.
+The home persists with no live process and is never recycled by herdr until it is explicitly released.
+The workspace ID is the durable handle for the home; the slot stays reserved across restarts until release.
 Release happens only on explicit retirement or seed rollback, never on routine restart or recovery.
 
 `bin/fm-home-seed.sh` copies the charter into the secondmate home as `data/charter.md`.
@@ -74,14 +74,14 @@ bin/fm-backlog-handoff.sh <secondmate-id> <item-key>...
 After seeding, run this handoff for the new secondmate's in-scope queued items.
 The helper resolves the secondmate home from `data/secondmates.md` and mechanically moves each named item from the main `data/backlog.md` into the secondmate home's `data/backlog.md`.
 It preserves the line and its section, so the item is neither duplicated nor lost.
-It refuses `## In flight` entries because active task ownership also lives in tmux and `state/`.
+It refuses `## In flight` entries because active task ownership also lives in herdr and `state/`.
 It is idempotent; an item already in the secondmate backlog is skipped.
 It refuses any destination that is not a genuine seeded firstmate home with safe operational directories and a matching `.fm-secondmate-home` marker, so a move can never land in a project.
 Do not hand off `local-only` items.
 
 ## Recovery
 
-For `kind=secondmate` meta with no window, treat the secondmate as a dead persistent direct report and respawn it with:
+For `kind=secondmate` meta with no pane, treat the secondmate as a dead persistent direct report and respawn it with:
 
 ```sh
 bin/fm-spawn.sh <id> --secondmate
@@ -104,11 +104,11 @@ Run `bin/fm-teardown.sh <id>` for `kind=secondmate` only when the captain or mai
 
 The safety check is the secondmate's own home.
 Teardown refuses while its `state/*.meta` contains in-flight work.
-When safe, teardown kills the direct tmux window, removes the `data/secondmates.md` route, clears the main home metadata, and removes the retired secondmate home.
-Removing a leased home releases its durable treehouse lease via `treehouse return`, so the pool slot is freed for reuse rather than left leased forever.
-A plain-clone home with no pool slot is simply removed.
-If `treehouse return` fails for a leased home, teardown stops with state intact rather than raw-removing the directory and hiding a held lease.
+When safe, teardown closes the direct herdr pane, removes the `data/secondmates.md` route, clears the main home metadata, and removes the retired secondmate home.
+For herdr-managed homes (those with a `workspace:` field in `data/secondmates.md`), teardown calls `herdr worktree remove --workspace <id>` to remove the worktree and release the slot.
+A plain-clone home with no workspace field is removed directly with `rm -rf`.
+If `herdr worktree remove` fails for a herdr-managed home, teardown stops with state intact rather than raw-removing the directory and hiding a still-live workspace.
 
 With `--force`, teardown is the explicit discard path.
-It kills child windows, discards child work and state inside the secondmate home, removes the route, releases the lease, and removes the retired secondmate home.
+It closes child herdr panes, discards child work and state inside the secondmate home, removes the route, removes the workspace, and removes the retired secondmate home.
 Never use `--force` unless the captain explicitly said to discard the work.

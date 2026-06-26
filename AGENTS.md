@@ -183,7 +183,7 @@ Composer: omp draws a full rounded box (`╭── … ──╮` over `╰─�
 | Skill invocation | `/<skill>` (e.g. `/no-mistakes`) |
 
 First launch in a fresh worktree (or first ever on a machine) may show a trust or bypass-permissions confirmation.
-After every spawn, peek the pane within ~20s; if such a dialog is showing, accept it with `bin/fm-send.sh <window> --key Enter` (or the choice the dialog requires) and verify the brief started processing.
+After every spawn, peek the pane within ~20s; if such a dialog is showing, accept it with `bin/fm-send.sh <pane> --key Enter` (or the choice the dialog requires) and verify the brief started processing.
 
 Ghost text: claude renders a predicted-next-prompt suggestion in an otherwise-empty composer after a turn completes.
 Firstmate launches every claude crewmate with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (env prefix in `bin/fm-spawn.sh`) to suppress it; `bin/fm-herdr-lib.sh` strips box-drawing borders as defense-in-depth for panes that flag cannot reach.

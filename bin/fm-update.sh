@@ -16,11 +16,11 @@
 # any other worktree's checkout or the shared `main` branch.
 #
 # It does NOT re-read AGENTS.md or nudge secondmates itself - those are LLM /
-# tmux actions the skill performs. The script's job is the safe git mechanics
+# herdr actions the skill performs. The script's job is the safe git mechanics
 # plus a parseable summary telling the caller what to do next:
 #   - one status line per target (updated/already current/skipped)
 #   - reread-firstmate: yes|no    (did the running firstmate's instructions change)
-#   - nudge-secondmates: <window-targets...>|none   (updated live secondmates to nudge)
+#   - nudge-secondmates: <pane-targets...>|none   (updated live secondmates to nudge)
 #
 # Usage: fm-update.sh [--help]
 set -eu

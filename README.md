@@ -28,14 +28,14 @@ You can run one coding agent easily.
 But the moment you want three project tasks done in parallel - fixes, investigations, plans, audits - you become a tab-juggler: babysitting sessions, copy-pasting context between repos, forgetting which terminal had the failing test.
 
 firstmate flips the model.
-You talk to a single agent - the first mate - and it runs the crew for you: spawning autonomous agents in tmux windows, giving each a clean git worktree, supervising them to completion, and handing you finished PRs, approved local merges, or standalone investigation reports.
+You talk to a single agent - the first mate - and it runs the crew for you: spawning autonomous agents, each in its own herdr tab with a clean git worktree, supervising them to completion, and handing you finished PRs, approved local merges, or standalone investigation reports.
 For larger fleets, you can opt in to persistent secondmates: domain supervisors that are still ordinary direct reports, but run from their own isolated firstmate homes.
 There is no app to install; the whole orchestrator is an `AGENTS.md` file that any terminal coding agent can follow.
 
 - **One liaison** - you never talk to a worker agent.
   The first mate dispatches, supervises, escalates only real decisions, and reports plain outcomes about work that is ready, blocked, or needs your call.
-- **A visible crew** - every crewmate lives in a tmux window.
-  Watch any of them work, or type into their window to intervene; the first mate reconciles.
+- **A visible crew** - every crewmate lives in its own herdr tab.
+  Watch any of them work, or type into their pane to intervene; the first mate reconciles.
 - **Persistent domain supervisors** - route natural-language scopes through `data/secondmates.md` when a domain deserves its own long-lived supervisor.
   Each secondmate has a separate `FM_HOME`, local state, local projects, and its own session lock, while the main first mate still supervises it like any other direct report.
 - **Guarded by construction** - the first mate is read-only over your projects except for clean local default-branch refreshes, safe pruning of local branches whose remote is gone, and approved `local-only` fast-forward merges; crewmates work in disposable git worktrees (`git worktree add`), each placed as its own named tab in a per-project herdr workspace.
@@ -54,7 +54,7 @@ $ claude   # launch your agent harness here; AGENTS.md takes over
 > ahoy! look at my github project xyz, then fix the flaky login test and add dark mode
 
 # firstmate checks its toolchain (asking your consent before installing anything),
-# clones the project under projects/, and spawns two crewmates in tmux windows
+# clones the project under projects/, and spawns two crewmates in their own herdr tabs
 # fm-fix-login-k3 and fm-dark-mode-p7.
 # Minutes later:
 
@@ -71,7 +71,7 @@ $ claude   # launch your agent harness here; AGENTS.md takes over
 ```sh
 # 1. a verified agent harness - claude, codex, opencode, or pi
 # 2. git + GitHub auth
-# 3. tmux - the crew lives in tmux windows (firstmate offers to install it if missing)
+# 3. herdr - the crew lives in herdr tabs (firstmate offers to install it if missing)
 gh auth login
 ```
 
@@ -86,8 +86,8 @@ That is the whole install.
 On first launch the first mate detects what its required toolchain is missing or too old (herdr, node, gh, no-mistakes, gh-axi, chrome-devtools-axi, lavish-axi), lists it with the exact install commands, and installs only after you say go.
 If compatible `tasks-axi` is already on `PATH`, bootstrap records it as an optional capability fact and firstmate uses its verbs for routine backlog mutations; when it is absent or incompatible, firstmate keeps hand-editing `data/backlog.md` exactly as before.
 
-**Run it inside tmux for the best experience.**
-firstmate works from any terminal - outside tmux, crewmates land in a detached `firstmate` session you can attach to - but launching your harness from inside tmux puts every crewmate window in your own session, one per task, where you can watch the crew work in real time or type into any window to intervene.
+**Run it inside herdr for the best experience.**
+firstmate works from any terminal, but running your harness inside herdr puts every crewmate in its own tab within a per-project workspace, where you can watch the crew work in real time or type into any pane to intervene.
 
 ## How It Works
 
@@ -100,7 +100,7 @@ firstmate works from any terminal - outside tmux, crewmates land in a detached `
  │ reads projects/ + firstmate routes  │
  │ writes guarded backlog/briefs/state │
  └──┬──────────────┬───────────────┬───┘
-    │ tmux send-keys / status files │
+    │ herdr send / status files     │
     ▼              ▼               ▼
  ┌──────────────┐   ┌──────────────┐      ┌──────────────┐
  │ keel/fix-x   │   │ keel/add-y   │  ... │ harbour/z    │   herdr tabs you can watch
@@ -135,7 +135,7 @@ firstmate works from any terminal - outside tmux, crewmates land in a detached `
 - **Local clones stay fresh** - bootstrap and PR-based teardown refresh remote-backed project clones with clean default-branch fast-forwards when the clone is on the default branch and has no local work, and prune local branches whose remote is gone and that no worktree still needs.
 - **Self-updates stay safe** - `/updatefirstmate` fast-forwards the running firstmate repo and registered secondmate homes from `origin`, then re-reads updated instructions and nudges updated secondmates without touching project clones.
   The update is fast-forward only: dirty, diverged, offline, and off-default targets are reported and left untouched.
-- **Restart-proof** - all state lives in tmux, status files, local markdown under `data/`, `data/secondmates.md`, and persistent secondmate homes.
+- **Restart-proof** - all truth lives in herdr (pane status), status files, local markdown under `data/`, `data/secondmates.md`, and persistent secondmate homes.
   Kill the first mate session anytime; the next one reconciles and carries on.
 
 ## The bin/ toolbelt
@@ -167,6 +167,9 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-teardown.sh`         | Return the worktree or retire/release a secondmate home; protects ship work, requires scout reports, checks child work, and prints the backlog reminder |
 | `fm-harness.sh`          | Detect the running harness; resolve the effective crewmate harness                                                  |
 | `fm-lock.sh`             | Per-home firstmate session lock                                                                                     |
+| `fm-lineage.sh`          | Read-only lineage tree (state/*.meta -> herdr pane/tab/workspace); `--json` feeds fm-fleet-view and fm-bench        |
+| `fm-fleet-view.sh`       | Render `fm-lineage.sh --json` into a self-contained HTML fleet dashboard and open it with lavish; read-only         |
+| `fm-demo.sh`             | Self-cleaning dev demo: throwaway omp panes in an `fm-demo` workspace, showing lineage and a sample wake            |
 
 ## Configuration
 
@@ -194,18 +197,9 @@ Runtime tuning via environment variables (defaults shown):
 
 ```sh
 FM_HOME=                 # optional operational home; unset means this repo root
-FM_POLL=15              # seconds between watcher cycles
-FM_HEARTBEAT=600        # base seconds between fleet reviews; backs off exponentially while idle
-FM_HEARTBEAT_MAX=7200   # heartbeat backoff cap
-FM_CHECK_INTERVAL=300   # seconds between slow checks (merged-PR polls)
-FM_CHECK_TIMEOUT=30     # seconds allowed per slow check script
-FM_GUARD_GRACE=300      # seconds a stale watcher beacon may age before guard warnings
-FM_SIGNAL_GRACE=30      # seconds to coalesce nearby status and turn-end signals into one wake
-FM_STATUS_INTERNAL_LOG=state/.status-internal.log   # rolling log path for suppressed non-captain status lines
-FM_STATUS_INTERNAL_LOG_MAX=500  # max lines kept in FM_STATUS_INTERNAL_LOG before tail-trim
 FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT=20   # seconds allowed for bootstrap's best-effort clone refresh
 FM_FLEET_PRUNE=1        # set to 0 to skip pruning local branches whose upstream is gone
-FM_BUSY_REGEX='esc (to )?interrupt|Working\.\.\.'   # busy-pane signatures, shared by watcher and tmux helper
+FM_BUSY_REGEX='esc (to )?interrupt|Working\.\.\.'   # busy-pane signatures, used by bin/fm-herdr-lib.sh
 FM_COMPOSER_IDLE_RE=    # optional empty-composer regex, applied after dim-ghost and border stripping
 FM_SEND_RETRIES=3       # fm-send Enter-retry attempts after typing the line once
 FM_SEND_SLEEP=0.4       # seconds between fm-send submit checks
