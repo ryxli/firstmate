@@ -74,7 +74,7 @@ bin/                 helper scripts, committed, including fm-fleet-sync.sh for c
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate
 config/identity      this instance's identity: name=, role=, and parent= lines; LOCAL, gitignored;
                      read at bootstrap before captain.md; written by fm-home-seed.sh for
-                     secondmates, set manually for Keel; sourced by fm-identity-lib.sh to
+                     secondmates, set manually for the main firstmate; sourced by fm-identity-lib.sh to
                      derive worker labels and supervision-chain context in briefs
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
@@ -94,11 +94,11 @@ state/               volatile runtime signals; gitignored
 ```
 
 Task ids are short kebab slugs with a random suffix, e.g. `fix-login-k3`.
-Each task gets its OWN herdr tab inside the domain/project workspace; that tab and its pane carry the display label `<supervisor>/<task-slug>` (e.g. `keel/fix-login`) while the random task id stays in meta/backlog/status and the herdr agent identity stays `omp`. The pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
+Each task gets its OWN herdr tab inside the domain/project workspace; that tab and its pane carry the display label `<supervisor>/<task-slug>` (e.g. `fm/fix-login`) while the random task id stays in meta/backlog/status and the herdr agent identity stays `omp`. The pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
 
 ## 3. Bootstrap (run at every session start)
 
-Read `config/identity` if present to learn this instance's own name, role, and parent in the supervision chain (key=value format, e.g. `name=Keel`, `role=Main firstmate crew supervisor`, `parent=captain`).
+Read `config/identity` if present to learn this instance's own name, role, and parent in the supervision chain (key=value format, e.g. `name=<the first mate's name>`, `role=Main firstmate crew supervisor`, `parent=captain`; the name is optional and defaults to `firstmate` when unset).
 Then self-register in herdr so the pane carries a human-readable display label for the session: this name is the supervisor pane display label, fed from `config/identity name=`, and it labels the pane and tab display surfaces only - never the agent identity.
 Use `herdr pane rename` (sets the pane's display label), NOT `herdr agent rename`: renaming the agent overwrites the pane's authoritative agent identity, and the omp<->herdr status integration reports lifecycle as agent `omp` and only binds while that identity is left intact. An `agent rename` makes the pane report `agent_status: unknown` forever. `herdr pane current` returns JSON, so extract the `pane_id` field before passing it:
 

@@ -26,7 +26,7 @@
  *   `{ customType: "fm-wake", content: digest, display: true }`.
  * - pi.logger: best-effort diagnostics.
  *
- * ============ pi.sendMessage delivery semantics (assumed; for Keel) =========
+ * ============ pi.sendMessage delivery semantics (assumed) =========
  * We inject with `{ deliverAs: "nextTurn", triggerTurn: true }`:
  *   - deliverAs "nextTurn" stores the message hidden from the editable
  *     pending-message UI and injects it on the next user prompt.
@@ -40,7 +40,7 @@
  * site is the single `inject()` helper.)
  *
  * ===================== herdr primitives (live loop) ====================
- * Per Keel's guidance the live loop blocks on the herdr socket event STREAM,
+ * The live loop blocks on the herdr socket event STREAM,
  * not on N per-pane `herdr agent wait` shells:
  *   - ONE persistent unix-socket connection to $HERDR_SOCKET_PATH (fallback
  *     ~/.config/herdr/herdr.sock), newline-delimited JSON. We send one

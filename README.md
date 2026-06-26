@@ -103,7 +103,7 @@ firstmate works from any terminal, but running your harness inside herdr puts ev
     │ herdr send / status files     │
     ▼              ▼               ▼
  ┌──────────────┐   ┌──────────────┐      ┌──────────────┐
- │ keel/fix-x   │   │ keel/add-y   │  ... │ harbour/z    │   herdr tabs you can watch
+ │ fm/fix-x     │   │ fm/add-y     │  ... │ harbour/z    │   herdr tabs you can watch
  │ crewmate     │   │ crewmate     │      │ secondmate   │   one autonomous agent each
  └───┬──────────┘   └───┬──────────┘      └───┬──────────┘
      ▼                  ▼                      ▼

@@ -12,12 +12,12 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
-# A home with a Keel identity so the supervisor name/slug are deterministic.
+# A home with a Mate identity so the supervisor name/slug are deterministic.
 make_home() {
   local name=$1 home
   home="$TMP_ROOT/$name"
   mkdir -p "$home/data" "$home/state" "$home/config"
-  printf 'name=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
+  printf 'name=Mate\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
   printf '%s\n' "$home"
 }
 
@@ -36,13 +36,13 @@ test_ship_brief_has_identity_context() {
   brief="$home/data/fix-login-k3/brief.md"
   [ -f "$brief" ] || fail "no ship brief written"
   grep -qF '# Identity context' "$brief" || fail "ship brief missing identity context"
-  grep -qF 'Supervisor: Keel (Main firstmate crew supervisor)' "$brief" \
+  grep -qF 'Supervisor: Mate (Main firstmate crew supervisor)' "$brief" \
     || fail "ship brief missing supervisor name/role"
-  grep -qF 'captain > Keel > keel/fix-login' "$brief" \
+  grep -qF 'captain > Mate > mate/fix-login' "$brief" \
     || fail "ship brief missing supervision chain"
   grep -qF 'Domain/project workspace: myproj' "$brief" \
     || fail "ship brief missing domain/project workspace"
-  grep -qF 'Your visible herdr tab and pane label: keel/fix-login' "$brief" \
+  grep -qF 'Your visible herdr tab and pane label: mate/fix-login' "$brief" \
     || fail "ship brief missing worker visible label"
   grep -qF "$home/state/fix-login-k3.status" "$brief" \
     || fail "ship brief missing report-back target"
@@ -67,7 +67,7 @@ test_scout_brief_has_identity_context() {
   brief="$home/data/probe-z1/brief.md"
   [ -f "$brief" ] || fail "no scout brief written"
   grep -qF '# Identity context' "$brief" || fail "scout brief missing identity context"
-  grep -qF 'Your visible herdr tab and pane label: keel/probe' "$brief" \
+  grep -qF 'Your visible herdr tab and pane label: mate/probe' "$brief" \
     || fail "scout brief missing worker visible label"
   pass "scout brief also propagates identity context"
 }

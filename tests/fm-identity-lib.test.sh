@@ -20,9 +20,9 @@ eq() {
 }
 
 # A config dir with a full identity file.
-CFG_KEEL="$TMP_ROOT/keel/config"
-mkdir -p "$CFG_KEEL"
-printf 'name=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$CFG_KEEL/identity"
+CFG_MATE="$TMP_ROOT/mate/config"
+mkdir -p "$CFG_MATE"
+printf 'name=Mate\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$CFG_MATE/identity"
 
 # A config dir with whitespace around values.
 CFG_WS="$TMP_ROOT/ws/config"
@@ -34,10 +34,10 @@ CFG_EMPTY="$TMP_ROOT/empty/config"
 mkdir -p "$CFG_EMPTY"
 
 test_identity_values() {
-  eq "supervisor name" "Keel" "$(fm_supervisor_name "$CFG_KEEL")"
-  eq "supervisor role" "Main firstmate crew supervisor" "$(fm_supervisor_role "$CFG_KEEL")"
-  eq "supervisor parent" "captain" "$(fm_supervisor_parent "$CFG_KEEL")"
-  eq "supervisor slug" "keel" "$(fm_supervisor_slug "$CFG_KEEL")"
+  eq "supervisor name" "Mate" "$(fm_supervisor_name "$CFG_MATE")"
+  eq "supervisor role" "Main firstmate crew supervisor" "$(fm_supervisor_role "$CFG_MATE")"
+  eq "supervisor parent" "captain" "$(fm_supervisor_parent "$CFG_MATE")"
+  eq "supervisor slug" "mate" "$(fm_supervisor_slug "$CFG_MATE")"
   pass "identity values read from config/identity"
 }
 
@@ -68,13 +68,13 @@ test_task_slug_preserves_non_suffix_ids() {
 }
 
 test_worker_label_composition() {
-  eq "named supervisor label" "keel/fix-login" "$(fm_worker_label "$CFG_KEEL" fix-login-k3)"
+  eq "named supervisor label" "mate/fix-login" "$(fm_worker_label "$CFG_MATE" fix-login-k3)"
   eq "default supervisor label" "fm/fix-login" "$(fm_worker_label "$CFG_EMPTY" fix-login-k3)"
   pass "worker label is <supervisor>/<task-slug>"
 }
 
 test_worker_label_explicit_override() {
-  eq "explicit label wins" "keel/custom-name" "$(fm_worker_label "$CFG_KEEL" fix-login-k3 keel/custom-name)"
+  eq "explicit label wins" "mate/custom-name" "$(fm_worker_label "$CFG_MATE" fix-login-k3 mate/custom-name)"
   pass "explicit worker label overrides derivation"
 }
 

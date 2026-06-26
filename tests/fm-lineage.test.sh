@@ -44,14 +44,14 @@ case "${1:-} ${2:-}" in
     printf '{"result":{"pane":{"pane_id":"w8:p10"}}}\n'; exit 0 ;;
   "pane get")
     case "${3:-}" in
-      w8:p10) printf '{"result":{"pane":{"pane_id":"w8:p10","workspace_id":"w8","tab_id":"w8:t4","label":"keel/fix-login","agent_status":"working","cwd":"/wt/fix-login-k3","foreground_cwd":"/wt/fix-login-k3"}}}\n' ;;
-      w8:p11) printf '{"result":{"pane":{"pane_id":"w8:p11","workspace_id":"w8","tab_id":"w8:t5","label":"keel/add-cache","agent_status":"idle","cwd":"/wt/add-cache-q7","foreground_cwd":"/wt/add-cache-q7"}}}\n' ;;
+      w8:p10) printf '{"result":{"pane":{"pane_id":"w8:p10","workspace_id":"w8","tab_id":"w8:t4","label":"mate/fix-login","agent_status":"working","cwd":"/wt/fix-login-k3","foreground_cwd":"/wt/fix-login-k3"}}}\n' ;;
+      w8:p11) printf '{"result":{"pane":{"pane_id":"w8:p11","workspace_id":"w8","tab_id":"w8:t5","label":"mate/add-cache","agent_status":"idle","cwd":"/wt/add-cache-q7","foreground_cwd":"/wt/add-cache-q7"}}}\n' ;;
       *) printf '{"error":"pane_not_found"}\n' ;;
     esac; exit 0 ;;
   "tab get")
     case "${3:-}" in
-      w8:t4) printf '{"result":{"tab":{"tab_id":"w8:t4","workspace_id":"w8","label":"keel/fix-login","agent_status":"working"}}}\n' ;;
-      w8:t5) printf '{"result":{"tab":{"tab_id":"w8:t5","workspace_id":"w8","label":"keel/add-cache","agent_status":"idle"}}}\n' ;;
+      w8:t4) printf '{"result":{"tab":{"tab_id":"w8:t4","workspace_id":"w8","label":"mate/fix-login","agent_status":"working"}}}\n' ;;
+      w8:t5) printf '{"result":{"tab":{"tab_id":"w8:t5","workspace_id":"w8","label":"mate/add-cache","agent_status":"idle"}}}\n' ;;
       *) printf '{"error":"tab_not_found"}\n' ;;
     esac; exit 0 ;;
   "workspace get")
@@ -70,22 +70,22 @@ SH
   printf '%s\n' "$fakebin"
 }
 
-# Build a self-contained firstmate home with Keel identity and two live ship
+# Build a self-contained firstmate home with Mate identity and two live ship
 # tasks placed in the same project workspace. Echoes the home path.
 make_home() {
   local name=$1 home
   home="$TMP_ROOT/$name"
   mkdir -p "$home/state" "$home/config" "$home/data"
-  printf 'name=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
+  printf 'name=Mate\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
   {
     printf 'pane=w8:p10\ntab=w8:t4\nworktree=/wt/fix-login-k3\nproject=/proj/myproj\n'
     printf 'harness=omp\nkind=ship\nmode=no-mistakes\nyolo=off\n'
-    printf 'domain=myproj\nworkspace=myproj\nworker=keel/fix-login\nagent_identity=omp\n'
+    printf 'domain=myproj\nworkspace=myproj\nworker=mate/fix-login\nagent_identity=omp\n'
   } > "$home/state/fix-login-k3.meta"
   {
     printf 'pane=w8:p11\ntab=w8:t5\nworktree=/wt/add-cache-q7\nproject=/proj/myproj\n'
     printf 'harness=omp\nkind=ship\nmode=direct-PR\nyolo=off\n'
-    printf 'domain=myproj\nworkspace=myproj\nworker=keel/add-cache\nagent_identity=omp\n'
+    printf 'domain=myproj\nworkspace=myproj\nworker=mate/add-cache\nagent_identity=omp\n'
   } > "$home/state/add-cache-q7.meta"
   printf '%s\n' "$home"
 }
@@ -127,27 +127,27 @@ test_text_tree_live_lineage() {
   [ "$(printf '%s\n' "$out" | grep -cF 'workspace myproj [w8]')" -eq 1 ] \
     || fail "two same-workspace tasks should share one workspace node: $out"
 
-  printf '%s\n' "$out" | grep -qF 'tab keel/fix-login [w8:t4] status=working' \
+  printf '%s\n' "$out" | grep -qF 'tab mate/fix-login [w8:t4] status=working' \
     || fail "tab A line missing/incorrect: $out"
-  printf '%s\n' "$out" | grep -qF 'tab keel/add-cache [w8:t5] status=idle' \
+  printf '%s\n' "$out" | grep -qF 'tab mate/add-cache [w8:t5] status=idle' \
     || fail "tab B line missing/incorrect: $out"
 
-  printf '%s\n' "$out" | grep -qF 'pane keel/fix-login [w8:p10] agent=omp status=working' \
+  printf '%s\n' "$out" | grep -qF 'pane mate/fix-login [w8:p10] agent=omp status=working' \
     || fail "pane A line missing label/agent/status: $out"
   printf '%s\n' "$out" | grep -qF 'cwd=/wt/fix-login-k3' \
     || fail "pane A cwd missing: $out"
-  printf '%s\n' "$out" | grep -qF 'pane keel/add-cache [w8:p11] agent=omp status=idle' \
+  printf '%s\n' "$out" | grep -qF 'pane mate/add-cache [w8:p11] agent=omp status=idle' \
     || fail "pane B line missing label/agent/status: $out"
 
   # The random-suffixed task id is recovered exactly from the meta stem.
-  printf '%s\n' "$out" | grep -qE '^ +task fix-login-k3 kind=ship mode=no-mistakes worker=keel/fix-login domain=myproj' \
+  printf '%s\n' "$out" | grep -qE '^ +task fix-login-k3 kind=ship mode=no-mistakes worker=mate/fix-login domain=myproj' \
     || fail "task A line missing exact id/fields: $out"
-  printf '%s\n' "$out" | grep -qE '^ +task add-cache-q7 kind=ship mode=direct-PR worker=keel/add-cache domain=myproj' \
+  printf '%s\n' "$out" | grep -qE '^ +task add-cache-q7 kind=ship mode=direct-PR worker=mate/add-cache domain=myproj' \
     || fail "task B line missing exact id/fields: $out"
 
   printf '%s\n' "$out" | grep -qF 'omp session firstmate' \
     || fail "root session line missing omp harness/firstmate prefix: $out"
-  printf '%s\n' "$out" | grep -qF 'supervisor=Keel parent=captain identity=omp' \
+  printf '%s\n' "$out" | grep -qF 'supervisor=Mate parent=captain identity=omp' \
     || fail "root session line missing supervisor/parent/identity: $out"
 
   assert_read_only "$home/herdr.log"
@@ -179,16 +179,16 @@ test_json_normalized_model() {
   printf '%s' "$out" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
-assert d["supervisor"] == "Keel", d.get("supervisor")
+assert d["supervisor"] == "Mate", d.get("supervisor")
 ws = d["workspaces"]
 assert len(ws) == 1 and ws[0]["id"] == "w8" and ws[0]["label"] == "myproj", ws
 tabs = ws[0]["tabs"]
 labels = sorted(t["label"] for t in tabs)
-assert labels == ["keel/add-cache", "keel/fix-login"], labels
+assert labels == ["mate/add-cache", "mate/fix-login"], labels
 panes = {p["task"]["id"]: p for t in tabs for p in t["panes"]}
 a = panes["fix-login-k3"]
 assert a["id"] == "w8:p10" and a["agent_identity"] == "omp" and a["agent_status"] == "working", a
-assert a["task"]["kind"] == "ship" and a["task"]["worker"] == "keel/fix-login", a["task"]
+assert a["task"]["kind"] == "ship" and a["task"]["worker"] == "mate/fix-login", a["task"]
 b = panes["add-cache-q7"]
 assert b["agent_status"] == "idle" and b["task"]["mode"] == "direct-PR", b
 print("json-ok")
@@ -223,7 +223,7 @@ test_recursive_nests_secondmate_home() {
   parent=$(make_home recursive)
   child="$TMP_ROOT/recursive-child"
   mkdir -p "$child/state" "$child/config"
-  printf 'name=Reef\nrole=Secondmate crew supervisor\nparent=Keel\n' > "$child/config/identity"
+  printf 'name=Reef\nrole=Secondmate crew supervisor\nparent=Mate\n' > "$child/config/identity"
   {
     printf 'pane=w8:p12\ntab=w8:t6\nworktree=/wt/child-r1\nproject=/proj/myproj\n'
     printf 'harness=omp\nkind=ship\nmode=no-mistakes\nyolo=off\n'
@@ -233,14 +233,14 @@ test_recursive_nests_secondmate_home() {
   {
     printf 'pane=w8:p13\ntab=w8:t7\nworktree=/wt/sm-host\nproject=/proj/myproj\n'
     printf 'harness=omp\nkind=secondmate\nmode=charter\nyolo=off\n'
-    printf 'domain=myproj\nworkspace=myproj\nworker=keel/secondmate\nagent_identity=omp\n'
+    printf 'domain=myproj\nworkspace=myproj\nworker=mate/secondmate\nagent_identity=omp\n'
     printf 'home=%s\n' "$child"
   } > "$parent/state/sm-reef.meta"
   fakebin=$(make_fake_herdr "$parent")
   out=$(run_lineage "$parent" "$fakebin" --recursive) || fail "recursive failed: $out"
 
   # The parent secondmate task carries the home= pointer to the child firstmate.
-  printf '%s\n' "$out" | grep -qF 'task sm-reef kind=secondmate mode=charter worker=keel/secondmate' \
+  printf '%s\n' "$out" | grep -qF 'task sm-reef kind=secondmate mode=charter worker=mate/secondmate' \
     || fail "recursive: parent secondmate task missing: $out"
   printf '%s\n' "$out" | grep -qF "home=$child" \
     || fail "recursive: secondmate task missing home= pointer: $out"
@@ -248,7 +248,7 @@ test_recursive_nests_secondmate_home() {
   # unindented root line cannot match '^ +', so this proves real nesting.
   printf '%s\n' "$out" | grep -qE '^ +omp session firstmate home=' \
     || fail "recursive: child home not nested (no indented session line): $out"
-  printf '%s\n' "$out" | grep -qF "session firstmate home=$child supervisor=Reef parent=Keel identity=omp" \
+  printf '%s\n' "$out" | grep -qF "session firstmate home=$child supervisor=Reef parent=Mate identity=omp" \
     || fail "recursive: child secondmate home line wrong: $out"
   # ...and the child's own task is reconstructed inside that nested home.
   printf '%s\n' "$out" | grep -qE '^ +task child-r1 kind=ship .*worker=reef/child-task' \
@@ -264,20 +264,20 @@ test_missing_pane_degrades_to_state_view() {
   local home fakebin out
   home="$TMP_ROOT/missing-pane"
   mkdir -p "$home/state" "$home/config"
-  printf 'name=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
+  printf 'name=Mate\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
   # Recorded pane w8:p99 is unknown to the fake herdr, so `pane get` returns
   # pane_not_found while herdr itself stays reachable (HERDR_OK=1 + missing pane).
   {
     printf 'pane=w8:p99\ntab=w8:t4\nworktree=/wt/ghost\nproject=/proj/myproj\n'
     printf 'harness=omp\nkind=ship\nmode=no-mistakes\nyolo=off\n'
-    printf 'domain=myproj\nworkspace=myproj\nworker=keel/ghost\nagent_identity=omp\n'
+    printf 'domain=myproj\nworkspace=myproj\nworker=mate/ghost\nagent_identity=omp\n'
   } > "$home/state/ghost-z9.meta"
   fakebin=$(make_fake_herdr "$home")
   out=$(run_lineage "$home" "$fakebin") || fail "missing-pane run should exit 0: $out"
 
-  printf '%s\n' "$out" | grep -qE '^ +task ghost-z9 kind=ship .*worker=keel/ghost' \
+  printf '%s\n' "$out" | grep -qE '^ +task ghost-z9 kind=ship .*worker=mate/ghost' \
     || fail "missing-pane: task dropped from degraded tree: $out"
-  printf '%s\n' "$out" | grep -qF 'pane keel/ghost [w8:p99] agent=omp status=unknown missing-pane' \
+  printf '%s\n' "$out" | grep -qF 'pane mate/ghost [w8:p99] agent=omp status=unknown missing-pane' \
     || fail "missing-pane: pane not marked missing-pane: $out"
 
   assert_read_only "$home/herdr.log"

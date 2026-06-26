@@ -136,7 +136,7 @@ SH
 
 test_crewmate_creates_domain_workspace_and_own_tab() {
   local home fakebin out meta
-  home=$(make_case crew-new myproj Keel)
+  home=$(make_case crew-new myproj Mate)
   fakebin=$(make_fake_herdr "$home")
   : > "$home/ws.tsv"
   mkdir -p "$home/data/fix-login-k3"
@@ -149,7 +149,7 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
     || fail "did not create a workspace labeled by project: $(cat "$home/herdr.log")"
   ! grep -qF 'workspace create --label fix-login-k3' "$home/herdr.log" \
     || fail "workspace was labeled by raw task id, not the project"
-  grep -qF 'tab create --workspace wNEW --label keel/fix-login' "$home/herdr.log" \
+  grep -qF 'tab create --workspace wNEW --label mate/fix-login' "$home/herdr.log" \
     || fail "tab not created in domain workspace with worker display label: $(cat "$home/herdr.log")"
   # The herdr agent SLOT name is the UNIQUE task id (not the harness name), so
   # concurrent crewmates never collide on the agent name; the omp<->herdr status
@@ -158,7 +158,7 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
     || fail "agent not started in its own tab under the unique task-id slot: $(cat "$home/herdr.log")"
   grep -q 'agent start fix-login-k3 .*--env PATH=' "$home/herdr.log" \
     || fail "agent start did not pass --env PATH (omp would not resolve on the daemon PATH): $(cat "$home/herdr.log")"
-  grep -qF 'pane rename wX:p10 keel/fix-login' "$home/herdr.log" \
+  grep -qF 'pane rename wX:p10 mate/fix-login' "$home/herdr.log" \
     || fail "pane was not given its worker display label: $(cat "$home/herdr.log")"
   ! grep -qF 'agent rename' "$home/herdr.log" \
     || fail "agent rename appeared; it breaks the omp<->herdr status binding: $(cat "$home/herdr.log")"
@@ -168,9 +168,9 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
   grep -qF 'pane=wX:p10' "$meta" || fail "meta pane not the agent pane"
   grep -qF 'tab=wX:t9' "$meta" || fail "meta missing herdr tab id"
   grep -qF 'workspace=myproj' "$meta" || fail "meta missing workspace label"
-  grep -qF 'worker=keel/fix-login' "$meta" || fail "meta missing worker label"
+  grep -qF 'worker=mate/fix-login' "$meta" || fail "meta missing worker label"
   grep -qF 'domain=myproj' "$meta" || fail "meta missing domain"
-  grep -qF 'supervisor=Keel' "$meta" || fail "meta missing supervisor name"
+  grep -qF 'supervisor=Mate' "$meta" || fail "meta missing supervisor name"
   grep -qF 'agent_identity=omp' "$meta" || fail "meta missing agent_identity=omp"
   ! grep -q '^workspace_id=' "$meta" \
     || fail "meta recorded workspace_id; teardown would destroy the shared workspace"
@@ -179,7 +179,7 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
 
 test_crewmate_single_agent_pane() {
   local home fakebin out
-  home=$(make_case crew-single myproj Keel)
+  home=$(make_case crew-single myproj Mate)
   fakebin=$(make_fake_herdr "$home")
   : > "$home/ws.tsv"
   mkdir -p "$home/data/add-x-q7"
@@ -196,7 +196,7 @@ test_crewmate_single_agent_pane() {
 
 test_crewmate_reuses_existing_domain_workspace() {
   local home fakebin out
-  home=$(make_case crew-reuse myproj Keel)
+  home=$(make_case crew-reuse myproj Mate)
   fakebin=$(make_fake_herdr "$home")
   printf 'myproj\twEXIST\n' > "$home/ws.tsv"
   mkdir -p "$home/data/fix-bug-m2"
@@ -207,7 +207,7 @@ test_crewmate_reuses_existing_domain_workspace() {
 
   ! grep -qF 'workspace create' "$home/herdr.log" \
     || fail "created a new workspace instead of reusing the existing labeled one"
-  grep -qF 'tab create --workspace wEXIST --label keel/fix-bug' "$home/herdr.log" \
+  grep -qF 'tab create --workspace wEXIST --label mate/fix-bug' "$home/herdr.log" \
     || fail "did not add the tab to the existing domain workspace: $(cat "$home/herdr.log")"
   pass "crewmate reuses the existing project-labeled workspace"
 }
@@ -231,7 +231,7 @@ make_secondmate_home() {
 
 test_secondmate_lands_in_ship_workspace_own_tab() {
   local home fakebin smhome out
-  home=$(make_case sm-ship shipproj Keel)
+  home=$(make_case sm-ship shipproj Mate)
   fakebin=$(make_fake_herdr "$home")
   : > "$home/ws.tsv"
   smhome=$(make_secondmate_home sm-ship anchor Anchor 1)
@@ -263,7 +263,7 @@ test_secondmate_lands_in_ship_workspace_own_tab() {
 
 test_secondmate_home_autolinks_missing_files() {
   local home fakebin smhome out
-  home=$(make_case sm-autolink shipproj Keel)
+  home=$(make_case sm-autolink shipproj Mate)
   fakebin=$(make_fake_herdr "$home")
   : > "$home/ws.tsv"
   smhome=$(make_secondmate_home sm-autolink anchor2 Anchor 0)
@@ -283,7 +283,7 @@ test_secondmate_home_autolinks_missing_files() {
 # itself (no leaked worktree/branch, no agent started).
 test_spawn_refuses_when_worktree_resolves_to_primary_checkout() {
   local home fakebin out realgit
-  home=$(make_case crew-tangle myproj Keel)
+  home=$(make_case crew-tangle myproj Mate)
   fakebin=$(make_fake_herdr "$home")
   : > "$home/ws.tsv"
   mkdir -p "$home/data/fix-tangle-k3"

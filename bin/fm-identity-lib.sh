@@ -8,7 +8,7 @@
 # brief scaffolder (which propagates the same identity downward in prose).
 #
 # The canonical per-instance identity file is config/identity (key=value,
-# e.g. `name=Keel`, `role=Main firstmate crew supervisor`, `parent=captain`),
+# e.g. `name=<name>`, `role=Main firstmate crew supervisor`, `parent=captain`),
 # the same LOCAL/gitignored config/ pattern as config/crew-harness. It is
 # optional: when absent every helper falls back to neutral defaults so the
 # tooling works on a fresh checkout with no identity configured.
@@ -32,7 +32,7 @@ fm_identity_value() {
 }
 
 # fm_supervisor_name <config-dir>
-# Human-readable supervisor name (e.g. "Keel"); "firstmate" when unset.
+# Human-readable supervisor name (the configured name); "firstmate" when unset.
 fm_supervisor_name() {
   fm_identity_value "$1" name 2>/dev/null || printf 'firstmate\n'
 }
@@ -52,7 +52,7 @@ fm_supervisor_parent() {
 
 # fm_supervisor_slug <config-dir>
 # Short lowercase handle used as the "who spawned this" prefix of a worker
-# label (e.g. "keel"). Falls back to "fm" when no identity is configured,
+# label (the lowercased name, e.g. a name of "Foo Bar" gives "foo-bar"). Falls back to "fm" when no identity is configured,
 # preserving the historical fm-<id> agent-name shape.
 fm_supervisor_slug() {
   local cfg=$1 name
@@ -71,7 +71,7 @@ fm_task_slug() {
 
 # fm_worker_label <config-dir> <task-id> [explicit-label]
 # The visible herdr tab and pane display label for a crewmate:
-# "<supervisor>/<task-slug>" (e.g. "keel/fix-teardown-cleanup"). An explicit
+# "<supervisor>/<task-slug>" (e.g. "fm/fix-teardown-cleanup"). An explicit
 # label, when given, wins so a caller can override the derivation. The random
 # task id is never part of this label - it lives only in metadata/backlog/status.
 fm_worker_label() {
