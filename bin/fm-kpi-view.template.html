@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="luxury">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Firstmate KPI view</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+<style>
+  /* layout safety: nested grid/flex children must be allowed to shrink */
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, h1, h2, h3, h4, li, dd, td, th, .badge, .label) { overflow-wrap: anywhere; }
+  :where(img, svg, video, canvas) { max-width: 100%; height: auto; }
+
+  .kv-mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  .kv-truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* role tones for the cost-by-role bars and folder badges */
+  .kv-role-supervisor { background: var(--color-primary); }
+  .kv-role-secondmate { background: var(--color-secondary); }
+  .kv-role-crew       { background: var(--color-accent); }
+  .kv-role-ephemeral  { background: color-mix(in oklab, var(--color-base-content) 28%, transparent); }
+  .kv-role-other      { background: color-mix(in oklab, var(--color-base-content) 28%, transparent); }
+
+  /* cost-by-role track + fill: track stays visible even at zero fill */
+  .kv-track { background: color-mix(in oklab, var(--color-base-content) 14%, transparent); border: 1px solid color-mix(in oklab, var(--color-base-content) 22%, transparent); border-radius: 9999px; overflow: hidden; }
+  .kv-fill { height: 100%; border-radius: 9999px; min-width: 2px; }
+  .kv-excluded { background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, color-mix(in oklab, var(--color-base-100) 45%, transparent) 5px, color-mix(in oklab, var(--color-base-100) 45%, transparent) 10px); }
+
+  /* role badges: solid fills with theme-content foreground for guaranteed legibility */
+  .kv-badge { border: 0; font-weight: 600; }
+  .kv-badge-supervisor { background: var(--color-primary);   color: var(--color-primary-content); }
+  .kv-badge-secondmate { background: var(--color-secondary); color: var(--color-secondary-content); }
+  .kv-badge-crew       { background: var(--color-accent);    color: var(--color-accent-content); }
+  .kv-badge-ephemeral  { background: color-mix(in oklab, var(--color-base-content) 62%, transparent); color: var(--color-base-100); }
+  .kv-badge-other      { background: color-mix(in oklab, var(--color-base-content) 62%, transparent); color: var(--color-base-100); }
+</style>
+</head>
+<body class="bg-base-200 text-base-content">
+<main class="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8 space-y-6">
+  <div id="kv-app" class="space-y-6"></div>
+  <noscript>
+    <div role="alert" class="alert alert-warning">
+      <span>This KPI view renders client side. Enable JavaScript to see the dashboard.</span>
+    </div>
+  </noscript>
+</main>
+
+<script type="application/json" id="kv-data">__FM_DATA__</script>
+<script>
+(function () {
+  "use strict";
+
+  // role display metadata; productive roles drive the productive KPIs, excluded
+  // roles (test scaffolds) are shown but visually demoted.
+  var ROLE_ORDER = ["supervisor", "secondmate", "crew", "ephemeral", "other"];
+  var PRODUCTIVE = { supervisor: true, secondmate: true, crew: true };
+  var ROLE_META = {
+    supervisor: { label: "supervisor", bar: "kv-role-supervisor", badge: "kv-badge-supervisor" },
+    secondmate: { label: "secondmate", bar: "kv-role-secondmate", badge: "kv-badge-secondmate" },
+    crew:       { label: "crew",       bar: "kv-role-crew",       badge: "kv-badge-crew" },
+    ephemeral:  { label: "ephemeral",  bar: "kv-role-ephemeral",  badge: "kv-badge-ephemeral" },
+    other:      { label: "other",      bar: "kv-role-other",      badge: "kv-badge-other" }
+  };
+  function roleMeta(r) {
+    return ROLE_META[r] || { label: r || "?", bar: "kv-role-other", badge: "kv-badge-other" };
+  }
+
+  // ---- formatting (n/a-safe) --------------------------------------------
+
+  function isNum(x) { return typeof x === "number" && isFinite(x); }
+
+  // integer with ASCII thousands separators
+  function commas(n) {
+    var s = String(Math.round(n));
+    var neg = s.charAt(0) === "-";
+    if (neg) s = s.slice(1);
+    var out = "";
+    while (s.length > 3) { out = "," + s.slice(-3) + out; s = s.slice(0, -3); }
+    return (neg ? "-" : "") + s + out;
+  }
+  function usd(x) { return isNum(x) ? "$" + x.toFixed(2) : "n/a"; }
+  function intf(x) { return isNum(x) ? commas(x) : "n/a"; }
+  function pct(x) { return isNum(x) ? (x * 100).toFixed(1) + "%" : "n/a"; }
+  function present(v) { return v == null ? "" : String(v).trim(); }
+
+  // h(tag, attrs?, ...children): safe DOM builder. Text always via textContent.
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (!Object.prototype.hasOwnProperty.call(attrs, k)) continue;
+        var v = attrs[k];
+        if (v == null || v === false) continue;
+        if (k === "class") el.className = v;
+        else if (k === "text") el.textContent = v;
+        else if (k === "html") el.innerHTML = v;
+        else el.setAttribute(k, v);
+      }
+    }
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c == null || c === false) continue;
+      if (Array.isArray(c)) { for (var j = 0; j < c.length; j++) appendChild(el, c[j]); }
+      else appendChild(el, c);
+    }
+    return el;
+  }
+  function appendChild(el, c) {
+    if (c == null || c === false) return;
+    el.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+
+  function badge(text, extra) {
+    return h("span", { class: "badge badge-sm " + (extra || "badge-ghost"), text: text });
+  }
+  function roleBadge(role) {
+    var m = roleMeta(role);
+    return h("span", { class: "badge badge-sm kv-badge " + m.badge, text: m.label });
+  }
+
+  // ---- sections ----------------------------------------------------------
+
+  function header(kpi) {
+    var workspace = present(kpi.workspace) || "firstmate";
+    var schema = present(kpi.schema);
+    var generated = present(kpi.generated);
+    var source = present(kpi.source);
+    var win = present(kpi.window);
+
+    var left = h("div", { class: "min-w-0 space-y-2" },
+      h("div", { class: "flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-base-content/45" },
+        h("span", { style: "display:inline-block;width:0.6rem;height:0.6rem;border-radius:9999px;background:var(--color-success)" }),
+        h("span", { text: "Firstmate KPIs" }),
+        schema ? badge(schema, "badge-soft badge-primary") : null),
+      h("h1", { class: "text-3xl lg:text-4xl font-semibold leading-tight", text: workspace }),
+      win ? h("p", { class: "text-sm text-base-content/70", text: win }) : null);
+
+    var right = h("div", { class: "shrink-0 text-right text-xs text-base-content/65 space-y-1" },
+      source ? h("div", null, h("span", { class: "opacity-80", text: "source " }), source) : null,
+      generated ? h("div", { class: "kv-mono" }, h("span", { class: "opacity-80", text: "as of " }), generated) : null);
+
+    return h("header", { class: "card bg-base-100 border border-base-content/10" },
+      h("div", { class: "card-body p-5 flex flex-col sm:flex-row sm:items-start gap-4 justify-between" }, left, right));
+  }
+
+  // one headline stat tile
+  function stat(label, value, sub, tone) {
+    return h("div", { class: "rounded-xl bg-base-100 border border-base-content/10 px-4 py-3 flex flex-col gap-1" },
+      h("div", { class: "text-[0.7rem] uppercase tracking-wider text-base-content/60", text: label }),
+      h("div", { class: "text-2xl font-semibold leading-none " + (tone || ""), text: value }),
+      sub ? h("div", { class: "text-xs text-base-content/65", text: sub }) : null);
+  }
+
+  function headlineStats(kpi) {
+    var tiles = [
+      stat("productive cost", usd(kpi.cost_usd_productive), "supervisor + secondmate + crew"),
+      stat("productive tokens", intf(kpi.tokens_productive), "input + output"),
+      stat("cache hit rate", pct(kpi.cache_hit_rate), "higher is cheaper"),
+      stat("error rate", pct(kpi.error_rate), "failed requests", isNum(kpi.error_rate) && kpi.error_rate > 0.02 ? "text-warning" : ""),
+      stat("supervisor overhead", pct(kpi.supervisor_overhead_cost), "of productive cost")
+    ];
+    return h("section", { class: "space-y-2" },
+      sectionTitle("Efficiency"),
+      h("div", { class: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5" }, tiles));
+  }
+
+  function sectionTitle(text, note) {
+    return h("div", { class: "flex items-baseline gap-2 flex-wrap" },
+      h("h2", { class: "text-xs uppercase tracking-[0.2em] text-base-content/60 font-semibold", text: text }),
+      note ? h("span", { class: "text-xs text-base-content/65", text: note }) : null);
+  }
+
+  function outcomes(kpi) {
+    function count(label, value, tone) {
+      return h("div", { class: "rounded-xl bg-base-100 border border-base-content/10 px-4 py-3 flex flex-col gap-1" },
+        h("div", { class: "text-[0.7rem] uppercase tracking-wider text-base-content/60", text: label }),
+        h("div", { class: "text-3xl font-semibold leading-none " + (tone || ""), text: isNum(value) ? commas(value) : "n/a" }));
+    }
+    var counts = h("div", { class: "grid grid-cols-3 gap-2.5" },
+      count("landed", kpi.tasks_landed, "text-info"),
+      count("in flight", kpi.tasks_in_flight, "text-success"),
+      count("queued", kpi.tasks_queued, "text-warning"));
+
+    var northStar = h("div", { class: "grid grid-cols-2 gap-2.5" },
+      stat("cost per landed", usd(kpi.cost_per_landed_usd), "North Star (coarse)"),
+      stat("tokens per landed", intf(kpi.tokens_per_landed), "North Star (coarse)"));
+
+    return h("section", { class: "space-y-2" },
+      sectionTitle("Outcomes", "from backlog"),
+      h("div", { class: "grid grid-cols-1 lg:grid-cols-2 gap-2.5" }, counts, northStar));
+  }
+
+  function costByRole(kpi) {
+    var byRole = kpi.by_role || {};
+    var rows = [];
+    var total = 0;
+    var prodTotal = 0;
+    for (var i = 0; i < ROLE_ORDER.length; i++) {
+      var r = ROLE_ORDER[i];
+      var c = isNum(byRole[r]) ? byRole[r] : 0;
+      total += c;
+      if (PRODUCTIVE[r]) prodTotal += c;
+      rows.push({ role: r, cost: c });
+    }
+    // also surface any role present in the data but not in our known order
+    for (var key in byRole) {
+      if (!Object.prototype.hasOwnProperty.call(byRole, key)) continue;
+      if (ROLE_ORDER.indexOf(key) === -1) {
+        var cc = isNum(byRole[key]) ? byRole[key] : 0;
+        total += cc;
+        rows.push({ role: key, cost: cc });
+      }
+    }
+
+    var bars = rows.map(function (row) {
+      var m = roleMeta(row.role);
+      var share = total > 0 ? row.cost / total : 0;
+      var excluded = !PRODUCTIVE[row.role];
+      var fill = h("div", { class: "kv-fill " + m.bar + (excluded ? " kv-excluded" : ""),
+        style: "width:" + (share * 100).toFixed(2) + "%" });
+      return h("div", { class: "space-y-1" },
+        h("div", { class: "flex items-baseline justify-between gap-2 text-sm" },
+          h("div", { class: "flex items-center gap-2 min-w-0" },
+            roleBadge(row.role),
+            excluded ? h("span", { class: "badge badge-sm badge-outline badge-warning font-semibold uppercase", text: "excluded" }) : null),
+          h("div", { class: "flex items-baseline gap-2 shrink-0" },
+            h("span", { class: "font-semibold", text: usd(row.cost) }),
+            h("span", { class: "text-xs text-base-content/65", text: (share * 100).toFixed(1) + "%" }))),
+        h("div", { class: "kv-track h-2.5" }, fill));
+    });
+
+    var legend = h("div", { class: "flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-base-content/70" },
+      h("span", null, h("span", { class: "font-semibold text-base-content/70", text: "productive " }),
+        usd(prodTotal) + " (supervisor + secondmate + crew)"),
+      h("span", null, h("span", { class: "font-semibold text-base-content/70", text: "excluded " }),
+        usd(total - prodTotal) + " (ephemeral + other test scaffolds)"));
+
+    return h("section", { class: "card bg-base-100 border border-base-content/10" },
+      h("div", { class: "card-body p-5 space-y-3" },
+        sectionTitle("Cost by role"),
+        legend,
+        h("div", { class: "space-y-2.5" }, bars)));
+  }
+
+  function folderTable(kpi) {
+    var folders = (kpi.by_folder || []).slice();
+    folders.sort(function (a, b) { return (b.cost_usd || 0) - (a.cost_usd || 0); });
+    if (!folders.length) {
+      return h("section", { class: "card bg-base-100 border border-base-content/10" },
+        h("div", { class: "card-body p-5 space-y-3" }, sectionTitle("By folder"),
+          h("div", { class: "text-sm text-base-content/45 italic", text: "no folder records" })));
+    }
+
+    function th(label, right) {
+      return h("th", { class: (right ? "text-right " : "") + "text-[0.7rem] uppercase tracking-wider text-base-content/60 font-semibold" }, label);
+    }
+    var head = h("thead", null, h("tr", null,
+      th("folder"), th("role"), th("cost", true), th("tokens", true),
+      th("cache", true), th("error", true), th("req", true)));
+
+    var rows = folders.map(function (f) {
+      var err = f.error_rate;
+      return h("tr", { class: "hover" },
+        h("td", { class: "kv-mono text-xs max-w-[22rem]", title: present(f.folder) },
+          h("div", { class: "kv-truncate", title: present(f.folder), text: present(f.folder) || "(unnamed)" })),
+        h("td", null, roleBadge(present(f.role))),
+        h("td", { class: "text-right kv-mono", text: usd(f.cost_usd) }),
+        h("td", { class: "text-right kv-mono", text: intf(f.tokens) }),
+        h("td", { class: "text-right kv-mono", text: pct(f.cache_hit_rate) }),
+        h("td", { class: "text-right kv-mono " + (isNum(err) && err > 0 ? "text-warning" : "text-base-content/60"), text: pct(err) }),
+        h("td", { class: "text-right kv-mono", text: intf(f.requests) }));
+    });
+
+    return h("section", { class: "card bg-base-100 border border-base-content/10" },
+      h("div", { class: "card-body p-5 space-y-3" },
+        sectionTitle("By folder", folders.length + " folders, sorted by cost"),
+        h("div", { class: "overflow-x-auto" },
+          h("table", { class: "table table-sm table-zebra" }, head, h("tbody", null, rows)))));
+  }
+
+  function agentTypes(kpi) {
+    var types = kpi.by_agent_type || [];
+    if (!types.length) {
+      return h("section", { class: "space-y-2" }, sectionTitle("By agent type"),
+        h("div", { class: "text-sm text-base-content/45 italic", text: "no agent-type records" }));
+    }
+    var cards = types.map(function (t) {
+      var label = present(t.agent_type) || "?";
+      return h("div", { class: "rounded-xl bg-base-100 border border-base-content/10 px-4 py-3 flex flex-col gap-1" },
+        h("div", { class: "text-[0.7rem] uppercase tracking-wider text-base-content/60", text: label }),
+        h("div", { class: "flex items-baseline gap-3 flex-wrap" },
+          h("span", { class: "text-2xl font-semibold leading-none", text: usd(t.cost_usd) }),
+          h("span", { class: "text-xs text-base-content/65 kv-mono", text: intf(t.tokens) + " tok" })));
+    });
+    return h("section", { class: "space-y-2" },
+      sectionTitle("By agent type", "main vs subagent"),
+      h("div", { class: "grid grid-cols-1 sm:grid-cols-2 gap-2.5" }, cards));
+  }
+
+  function gaps(kpi) {
+    var list = kpi.gaps || [];
+    if (!list.length) return null;
+    var items = list.map(function (g) {
+      return h("li", { class: "flex items-start gap-2" },
+        h("span", { class: "mt-0.5 text-warning", text: "!" }),
+        h("span", { class: "text-sm", text: present(g) }));
+    });
+    return h("section", { role: "note", class: "alert alert-warning items-start" },
+      h("svg", { xmlns: "http://www.w3.org/2000/svg", class: "h-6 w-6 shrink-0", fill: "none",
+        viewBox: "0 0 24 24", stroke: "currentColor", "stroke-width": "2", "aria-hidden": "true" },
+        h("path", { "stroke-linecap": "round", "stroke-linejoin": "round",
+          d: "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" })),
+      h("div", { class: "min-w-0 space-y-1" },
+        h("div", { class: "font-semibold", text: "Gaps (not faked): " + list.length + " metric" + (list.length === 1 ? "" : "s") + " not yet instrumented" }),
+        h("ul", { class: "space-y-0.5 mt-1" }, items)));
+  }
+
+  // ---- boot --------------------------------------------------------------
+
+  function render() {
+    var app = document.getElementById("kv-app");
+    var kpi;
+    try {
+      kpi = JSON.parse(document.getElementById("kv-data").textContent);
+    } catch (e) {
+      app.appendChild(h("div", { role: "alert", class: "alert alert-error" },
+        h("span", { text: "Could not parse KPI data: " + e.message })));
+      return;
+    }
+    if (!kpi || typeof kpi !== "object") kpi = {};
+
+    app.appendChild(header(kpi));
+    app.appendChild(headlineStats(kpi));
+    app.appendChild(outcomes(kpi));
+    app.appendChild(costByRole(kpi));
+    app.appendChild(folderTable(kpi));
+    app.appendChild(agentTypes(kpi));
+    var g = gaps(kpi);
+    if (g) app.appendChild(g);
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

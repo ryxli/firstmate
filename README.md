@@ -170,6 +170,8 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-lineage.sh`          | Read-only lineage tree (state/*.meta -> herdr pane/tab/workspace); `--json` feeds fm-fleet-view and fm-bench        |
 | `fm-fleet-view.sh`       | Render `fm-lineage.sh --json` into a self-contained HTML fleet dashboard and open it with lavish; read-only         |
 | `fm-demo.sh`             | Self-cleaning dev demo: throwaway omp panes in an `fm-demo` workspace, showing lineage and a sample wake            |
+| `fm-kpi.sh`             | Firstmate workflow KPIs from `omp stats --json` + backlog (cost, tokens, cache, supervisor overhead, outcomes, North Star); `--json` agent surface, terminal table, `--snapshot`/`--history` trend log |
+| `fm-kpi-view.sh`        | Render `fm-kpi.sh --json` into a self-contained HTML KPI dashboard and open it with lavish; read-only               |
 
 ## Configuration
 
