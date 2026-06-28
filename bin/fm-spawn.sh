@@ -39,6 +39,8 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 # shellcheck source=bin/fm-spawn-lib.sh
 . "$SCRIPT_DIR/fm-spawn-lib.sh"
+# shellcheck source=bin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 
 KIND=ship
 POS=()
@@ -471,6 +473,39 @@ spawn_cleanup_worktree() {
   fi
 }
 
+# append_backlog_inflight <id> <repo> <kind>: idempotently record a dispatched
+# ship/scout task under "## In flight" in data/backlog.md, so a dispatch is never
+# lost from the backlog if the session restarts before the operator logs it.
+# Routes through tasks-axi when compatible (AGENTS.md section 10), else hand-appends.
+# Best-effort: a backlog write must never fail or block the spawn.
+append_backlog_inflight() {
+  local id=$1 repo=$2 kind=$3 backlog today line
+  backlog="$DATA/backlog.md"
+  today=$(date +%Y-%m-%d)
+  mkdir -p "$DATA" 2>/dev/null || return 0
+  if [ ! -f "$backlog" ]; then
+    printf '## In flight\n\n## Queued\n\n## Done\n' > "$backlog"
+  fi
+  # idempotent: skip if an In-flight-style entry for this id already exists.
+  if grep -qE -- "^- (\[ \] |\*\*)$id( |\*|-|$)" "$backlog"; then
+    return 0
+  fi
+  if fm_tasks_axi_compatible 2>/dev/null; then
+    if tasks-axi add "$id" "$kind task" --kind "$kind" --repo "$repo" --start >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  line="- [ ] $id - $kind task (repo: $repo, since $today)"
+  if grep -q '^## In flight' "$backlog"; then
+    if awk -v l="$line" '{print} /^## In flight$/ && !d {print l; d=1}' "$backlog" > "$backlog.tmp" 2>/dev/null; then
+      mv "$backlog.tmp" "$backlog"
+    fi
+  else
+    printf '%s\n%s\n' '## In flight' "$line" >> "$backlog"
+  fi
+  return 0
+}
+
 # Worktree-isolation guard: a crewmate must NEVER branch or commit in the primary
 # project checkout. Before launching, prove the just-created worktree is a real
 # git worktree root whose top-level resolves to the disposable worktree and is
@@ -533,5 +568,11 @@ mkdir -p "$STATE"
     echo "projects=$SECONDMATE_PROJECTS"
   fi
 } > "$STATE/$ID.meta"
+
+# Auto-log the dispatch to the backlog (ship/scout only; secondmates are persistent
+# and tracked via data/secondmates.md). Best-effort: never fail the spawn over it.
+if [ "$KIND" != secondmate ]; then
+  append_backlog_inflight "$ID" "$(basename "$PROJ_ABS")" "$KIND" || true
+fi
 
 echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO pane=$PANE tab=$TAB_ID workspace=$WORKSPACE_LABEL worker=$WORKER_LABEL worktree=$WT"
