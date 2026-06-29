@@ -212,6 +212,33 @@ test_crewmate_reuses_existing_domain_workspace() {
   pass "crewmate reuses the existing project-labeled workspace"
 }
 
+test_crewmate_in_secondmate_home_uses_mate_workspace() {
+  local home fakebin out meta
+  home=$(make_case crew-in-sm myproj Anchor)
+  printf '%s' anchor > "$home/.fm-secondmate-home"
+  fakebin=$(make_fake_herdr "$home")
+  : > "$home/ws.tsv"
+  mkdir -p "$home/data/probe-cache-z9"
+  printf 'brief\n' > "$home/data/probe-cache-z9/brief.md"
+
+  out=$(run_spawn "$home" "$fakebin" probe-cache-z9 projects/myproj omp) \
+    || fail "crewmate spawn in secondmate home failed: $out"
+
+  # A crewmate spawned from a secondmate home shares the secondmate's OWN named
+  # workspace (here Anchor), so its crew nest under it - NOT the project-named
+  # workspace, which for a domain secondmate is the firstmate repo and would
+  # collide with the main firstmate's space.
+  grep -qF 'workspace create --label Anchor' "$home/herdr.log" \
+    || fail "crew did not land in the secondmate's named workspace: $(cat "$home/herdr.log")"
+  ! grep -qF 'workspace create --label myproj' "$home/herdr.log" \
+    || fail "crew landed in the project-named workspace (the bug): $(cat "$home/herdr.log")"
+
+  meta="$home/state/probe-cache-z9.meta"
+  grep -qF 'workspace=Anchor' "$meta" || fail "meta workspace not the secondmate name"
+  grep -qF 'domain=Anchor' "$meta" || fail "meta domain not the secondmate name"
+  pass "crewmate from a secondmate home lands in the mate's own workspace"
+}
+
 # Build a seeded secondmate home (marker + operational dirs), optionally missing
 # AGENTS.md/bin so the auto-link path is exercised. Echoes the home path.
 # Args: case-name id supervisor-name with_agents_md(0|1)
@@ -313,6 +340,7 @@ test_spawn_refuses_when_worktree_resolves_to_primary_checkout() {
 test_crewmate_creates_domain_workspace_and_own_tab
 test_crewmate_single_agent_pane
 test_crewmate_reuses_existing_domain_workspace
+test_crewmate_in_secondmate_home_uses_mate_workspace
 test_secondmate_lands_in_own_named_workspace
 test_secondmate_home_autolinks_missing_files
 test_spawn_refuses_when_worktree_resolves_to_primary_checkout
