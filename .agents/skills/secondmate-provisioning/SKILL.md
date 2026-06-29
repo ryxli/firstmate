@@ -8,7 +8,7 @@ user-invocable: false
 
 Use this reference before creating, seeding, validating, handing backlog to, recovering, or retiring a persistent secondmate, and before editing `data/secondmates.md`.
 
-Keep the always-inline routing rules in `AGENTS.md` authoritative: route by natural-language `scope:`, local-only projects stay with the main firstmate, and secondmates are idle by default.
+Keep the always-inline routing rules in `AGENTS.md` authoritative: route by natural-language `scope:`, local-only projects stay with the main firstmate, and secondmates are idle for ROUTED work but actively tend their own domain (health, watch-items, regressions to guard) while never self-initiating an org-wide sweep.
 
 ## Routing table
 
@@ -33,7 +33,7 @@ The scaffold writes a charter brief instead of a task brief.
 Set `FM_SECONDMATE_CHARTER='<charter>'` to fill the charter text and `FM_SECONDMATE_SCOPE='<scope>'` when the routing scope differs.
 If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholder before seeding.
 Keep the charter focused on the persistent responsibility, available project clones, and escalation back to the main firstmate status file.
-The scaffold's definition of done encodes the idle-by-default contract: on startup the secondmate reconciles only its own in-flight work and then waits for routed tasks, never self-initiating a survey or audit.
+The scaffold's definition of done encodes the idle-plus-domain-grooming contract: on startup the secondmate reconciles only its own in-flight work, then tends its own domain (health, standing watch-items, regressions to guard) while waiting for routed tasks, never self-initiating an org-wide survey or audit beyond its domain.
 Preserve that wording when filling the charter.
 
 Provision the persistent home and registry entry after the charter is filled:
@@ -93,8 +93,8 @@ If meta is missing but `data/secondmates.md` still registers the secondmate, res
 Do not reconstruct a secondmate's whole tree from the main home.
 The main firstmate reconciles only direct reports.
 Each secondmate is a firstmate in its own home, so it runs recovery on startup and reconciles its own crewmates.
-A secondmate's recovery reconciles only work that is already its own and then idles.
-It never initiates a survey or audit during recovery.
+A secondmate's recovery reconciles only work that is already its own, then resumes tending its own domain.
+It never initiates an org-wide survey or audit beyond its domain during recovery.
 
 ## Retirement and teardown
 
