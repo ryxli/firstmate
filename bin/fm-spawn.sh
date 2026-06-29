@@ -419,9 +419,18 @@ if [ "$KIND" = secondmate ]; then
   WORKSPACE_CWD="$PROJ_ABS"
   DOMAIN="$WORKSPACE_LABEL"
 else
-  DOMAIN="${FM_TASK_DOMAIN:-$(basename "$PROJ_ABS")}"
+  # A secondmate's crewmates share the secondmate's OWN home workspace (labelled by
+  # its name), so its crew nest under it in herdr instead of landing in the main
+  # firstmate's repo-named workspace. Ordinary (main-home) crew use the project name.
+  if [ -f "$FM_HOME/$SUB_HOME_MARKER" ]; then
+    sm_name=$(fm_identity_value "$CONFIG" name 2>/dev/null || true)
+    DOMAIN="${FM_TASK_DOMAIN:-${sm_name:-$(basename "$FM_HOME")}}"
+    WORKSPACE_CWD="$FM_HOME"
+  else
+    DOMAIN="${FM_TASK_DOMAIN:-$(basename "$PROJ_ABS")}"
+    WORKSPACE_CWD="$PROJ_ABS"
+  fi
   WORKSPACE_LABEL="$DOMAIN"
-  WORKSPACE_CWD="$PROJ_ABS"
   WORKER_LABEL=$(fm_worker_label "$CONFIG" "$ID" "${FM_TASK_LABEL:-}")
 fi
 
