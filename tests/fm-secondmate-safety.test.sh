@@ -1962,20 +1962,25 @@ seed_secondmate_home_marker() {
   printf '%s\n' "$id" > "$home/.fm-secondmate-home"
 }
 
-test_secondmate_charter_brief_is_idle_by_default() {
+test_secondmate_charter_brief_tends_domain_by_default() {
   local home brief
   home="$TMP_ROOT/idle-charter-home"
   mkdir -p "$home/data" "$home/state"
   scaffold_secondmate_charter "$home" idle-sm 'feature work for alpha' alpha
   brief="$home/data/idle-sm/brief.md"
   [ -f "$brief" ] || fail "secondmate charter brief was not scaffolded"
-  # Idle contract: waits for routed work, never self-initiates.
-  grep -F 'go idle and wait silently for the main firstmate' "$brief" >/dev/null \
-    || fail "charter brief does not tell the secondmate to go idle and wait for routed work"
-  grep -F 'Act only on tasks the main firstmate routes to you' "$brief" >/dev/null \
-    || fail "charter brief does not restrict work to routed tasks"
-  grep -F 'never spawn a survey, audit, or any self-directed' "$brief" >/dev/null \
-    || fail "charter brief does not forbid self-initiated survey/audit work"
+  # Domain-grooming idle contract: persistent by default, tends its own domain and
+  # rests responsively on an empty routed queue, never self-initiating org-wide work.
+  grep -F 'You are persistent by default. Do not exit just because your queue is empty.' "$brief" >/dev/null \
+    || fail "charter brief dropped the persistent-by-default contract"
+  grep -F 'you do not go fully dark: tend your domain' "$brief" >/dev/null \
+    || fail "charter brief does not tell the secondmate to tend its own domain instead of going fully dark"
+  grep -F 'rest responsively' "$brief" >/dev/null \
+    || fail "charter brief does not tell the secondmate to rest responsively"
+  grep -F 'An empty ROUTED queue is a healthy resting state' "$brief" >/dev/null \
+    || fail "charter brief does not state an empty routed queue is a healthy resting state"
+  grep -F 'never start those on your own initiative' "$brief" >/dev/null \
+    || fail "charter brief does not forbid self-initiated org-wide survey/audit work"
   # Reconcile-on-startup must remain: bootstrap and recovery still run, scoped to own work.
   grep -F 'run normal firstmate bootstrap and recovery' "$brief" >/dev/null \
     || fail "charter brief dropped the bootstrap/recovery reconciliation step"
@@ -1985,7 +1990,7 @@ test_secondmate_charter_brief_is_idle_by_default() {
   if grep -F 'then supervise work that matches your scope' "$brief" >/dev/null; then
     fail "charter brief still uses the over-broad 'supervise work that matches your scope' phrasing"
   fi
-  pass "secondmate charter brief is idle by default and does not self-initiate work"
+  pass "secondmate charter brief tends its domain by default and does not self-initiate org-wide work"
 }
 
 test_backlog_handoff_moves_in_scope_items() {
@@ -2179,6 +2184,6 @@ test_secondmate_force_teardown_refuses_child_repo_descendant
 test_secondmate_force_teardown_refuses_unregistered_child_worktree
 test_secondmate_teardown_refuses_home_ancestor
 test_secondmate_teardown_refuses_home_descendants
-test_secondmate_charter_brief_is_idle_by_default
+test_secondmate_charter_brief_tends_domain_by_default
 test_backlog_handoff_moves_in_scope_items
 test_backlog_handoff_creates_absent_section_and_refuses_non_secondmate_home
