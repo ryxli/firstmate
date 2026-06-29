@@ -38,11 +38,11 @@ test_ship_brief_has_identity_context() {
   grep -qF '# Identity context' "$brief" || fail "ship brief missing identity context"
   grep -qF 'Supervisor: Mate (Main firstmate crew supervisor)' "$brief" \
     || fail "ship brief missing supervisor name/role"
-  grep -qF 'captain > Mate > mate/fix-login' "$brief" \
+  grep -qF 'captain > Mate > fix-login' "$brief" \
     || fail "ship brief missing supervision chain"
   grep -qF 'Domain/project workspace: myproj' "$brief" \
     || fail "ship brief missing domain/project workspace"
-  grep -qF 'Your visible herdr tab and pane label: mate/fix-login' "$brief" \
+  grep -qF 'Your visible herdr tab and pane label: fix-login' "$brief" \
     || fail "ship brief missing worker visible label"
   grep -qF "$home/state/fix-login-k3.status" "$brief" \
     || fail "ship brief missing report-back target"
@@ -67,7 +67,7 @@ test_scout_brief_has_identity_context() {
   brief="$home/data/probe-z1/brief.md"
   [ -f "$brief" ] || fail "no scout brief written"
   grep -qF '# Identity context' "$brief" || fail "scout brief missing identity context"
-  grep -qF 'Your visible herdr tab and pane label: mate/probe' "$brief" \
+  grep -qF 'Your visible herdr tab and pane label: probe' "$brief" \
     || fail "scout brief missing worker visible label"
   pass "scout brief also propagates identity context"
 }
@@ -79,8 +79,8 @@ test_brief_identity_defaults_without_config() {
   out=$(run_brief "$home" fix-x-k3 myproj) || fail "scaffold failed: $out"
   brief="$home/data/fix-x-k3/brief.md"
   grep -qF 'Supervisor: firstmate' "$brief" || fail "default supervisor name not used"
-  grep -qF 'Your visible herdr tab and pane label: fm/fix-x' "$brief" \
-    || fail "default worker label (fm/<slug>) not used"
+  grep -qF 'Your visible herdr tab and pane label: fix-x' "$brief" \
+    || fail "default worker label (task slug) not used"
   pass "brief uses neutral identity defaults when no config/identity"
 }
 

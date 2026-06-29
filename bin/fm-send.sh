@@ -2,7 +2,7 @@
 # Send one line of literal text to a crewmate pane, then Enter.
 # Usage: fm-send.sh <pane> <text...>
 #   <pane> may be a task-id shorthand (fm-<id>) that looks up the pane via
-#   this home's state/<id>.meta, a worker label (e.g. fm/fix-login) resolved
+#   this home's state/<id>.meta, a worker label (e.g. fix-login) resolved
 #   via herdr agent get, or an explicit herdr pane id (e.g. w8:p3).
 # Special keys instead of text: fm-send.sh <pane> --key Escape   (or Enter, ...)
 #

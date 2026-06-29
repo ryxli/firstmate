@@ -410,12 +410,16 @@ fi
 
 # Resolve identity-driven placement labels.
 #   workspace label = the domain/project for crew (shared per domain), or the secondmate's own name (its home space) for a secondmate
-#   worker label    = "<supervisor>/<task>" for a crewmate, the mate's own name
-#                     for a named mate; the random task id stays in meta only.
+#   worker label    = the task slug for a crewmate, or "home" for a secondmate
+#                     (its workspace already carries the mate's name, so the tab
+#                     need not repeat it); the random task id stays in meta only.
 if [ "$KIND" = secondmate ]; then
-  WORKER_LABEL=$(fm_identity_value "$PROJ_ABS/config" name 2>/dev/null || true)
-  [ -n "$WORKER_LABEL" ] || WORKER_LABEL=$ID
-  WORKSPACE_LABEL="$WORKER_LABEL"
+  SM_NAME=$(fm_identity_value "$PROJ_ABS/config" name 2>/dev/null || true)
+  [ -n "$SM_NAME" ] || SM_NAME=$ID
+  WORKSPACE_LABEL="$SM_NAME"
+  # The workspace is already named after the mate; label its own tab "home" so
+  # the space reads "<Name> . home" rather than the duplicate "<Name> . <Name>".
+  WORKER_LABEL=home
   WORKSPACE_CWD="$PROJ_ABS"
   DOMAIN="$WORKSPACE_LABEL"
 else

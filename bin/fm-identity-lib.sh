@@ -70,15 +70,19 @@ fm_task_slug() {
 }
 
 # fm_worker_label <config-dir> <task-id> [explicit-label]
-# The visible herdr tab and pane display label for a crewmate:
-# "<supervisor>/<task-slug>" (e.g. "fm/fix-teardown-cleanup"). An explicit
-# label, when given, wins so a caller can override the derivation. The random
-# task id is never part of this label - it lives only in metadata/backlog/status.
+# The visible herdr tab and pane display label for a crewmate: the task slug
+# alone (e.g. "fix-teardown-cleanup"). Supervisor attribution is not part of
+# this label - it lives in state/<id>.meta supervisor= and in the herdr
+# workspace (the secondmate's name or the project), so the tab need not repeat
+# it. An explicit label, when given, wins so a caller can override the
+# derivation. The random task id is never part of this label - it lives only
+# in metadata/backlog/status. The config-dir argument is retained for signature
+# stability even though the slug-only label no longer consults identity.
 fm_worker_label() {
-  local cfg=$1 id=$2 explicit=${3:-}
+  local id=$2 explicit=${3:-}
   if [ -n "$explicit" ]; then
     printf '%s\n' "$explicit"
     return 0
   fi
-  printf '%s/%s\n' "$(fm_supervisor_slug "$cfg")" "$(fm_task_slug "$id")"
+  fm_task_slug "$id"
 }

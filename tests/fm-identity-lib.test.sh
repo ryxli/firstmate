@@ -68,13 +68,13 @@ test_task_slug_preserves_non_suffix_ids() {
 }
 
 test_worker_label_composition() {
-  eq "named supervisor label" "mate/fix-login" "$(fm_worker_label "$CFG_MATE" fix-login-k3)"
-  eq "default supervisor label" "fm/fix-login" "$(fm_worker_label "$CFG_EMPTY" fix-login-k3)"
-  pass "worker label is <supervisor>/<task-slug>"
+  eq "named supervisor label" "fix-login" "$(fm_worker_label "$CFG_MATE" fix-login-k3)"
+  eq "default supervisor label" "fix-login" "$(fm_worker_label "$CFG_EMPTY" fix-login-k3)"
+  pass "worker label is the task slug alone (no supervisor prefix)"
 }
 
 test_worker_label_explicit_override() {
-  eq "explicit label wins" "mate/custom-name" "$(fm_worker_label "$CFG_MATE" fix-login-k3 mate/custom-name)"
+  eq "explicit label wins" "custom-name" "$(fm_worker_label "$CFG_MATE" fix-login-k3 custom-name)"
   pass "explicit worker label overrides derivation"
 }
 

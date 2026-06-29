@@ -103,7 +103,7 @@ firstmate works from any terminal, but running your harness inside herdr puts ev
     │ herdr send / status files     │
     ▼              ▼               ▼
  ┌──────────────┐   ┌──────────────┐      ┌──────────────┐
- │ fm/fix-x     │   │ fm/add-y     │  ... │ harbour/z    │   herdr tabs you can watch
+ │ fix-x        │   │ add-y        │  ... │ Harbour      │   herdr tabs you can watch
  │ crewmate     │   │ crewmate     │      │ secondmate   │   one autonomous agent each
  └───┬──────────┘   └───┬──────────┘      └───┬──────────┘
      ▼                  ▼                      ▼
@@ -207,7 +207,7 @@ FM_SEND_RETRIES=3       # fm-send Enter-retry attempts after typing the line onc
 FM_SEND_SLEEP=0.4       # seconds between fm-send submit checks
 # spawn placement (bin/fm-spawn.sh)
 FM_SHIP_WORKSPACE_LABEL=ship   # herdr workspace label for the shared "ship" workspace where secondmates land
-FM_TASK_LABEL=               # per-task worker label override (default: <supervisor>/<task-slug>)
+FM_TASK_LABEL=               # per-task worker label override (default: the task slug)
 FM_TASK_DOMAIN=              # per-task domain override for workspace resolution (default: project name)
 # supervision extension (.omp/extensions/fm-supervisor.ts); away-mode via /afk
 FM_SIGNAL_GRACE=30                 # seconds a turn-end coalesces with a relevant status into one wake

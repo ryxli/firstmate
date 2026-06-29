@@ -180,22 +180,24 @@ phase_spawn() {
   assert_grep "home=$SUB_ABS" "$meta" "spawn meta did not record the subhome"
   assert_grep 'projects=alpha, beta, gamma' "$meta" "spawn meta did not record the project list"
   assert_grep 'workspace=Design' "$meta" "spawn meta did not record the secondmate's own named workspace"
-  assert_grep 'worker=Design' "$meta" "spawn meta did not record the secondmate worker display label"
+  assert_grep 'worker=home' "$meta" "spawn meta did not record the secondmate own-tab 'home' display label"
   assert_grep "tab=$HERDR_TAB" "$meta" "spawn meta did not record the herdr tab id"
   assert_grep 'supervisor=firstmate' "$meta" "spawn meta did not record the supervisor name"
   assert_grep 'agent_identity=codex' "$meta" "spawn meta did not record the codex integration identity"
   [ "$pane" = "$HERDR_AGENT_PANE" ] || fail "spawn meta did not record the herdr agent pane (got '$pane')"
 
-  # Placement: the secondmate lands in its own tab inside the shared ship
-  # workspace, with the human name on the tab + pane DISPLAY labels. The herdr
-  # agent SLOT is the unique task id (here `design`), never the harness name, so
-  # concurrent secondmates do not collide on the agent name; agent_identity=codex
-  # is recorded in meta (the integration key status binds to), and the leftover
-  # root shell is closed.
-  assert_grep "tab create --workspace $HERDR_WS --label Design" "$LOG" "spawn did not create the secondmate's own tab in its own named workspace"
+  # Placement: the secondmate lands in its own tab inside its own named ship
+  # workspace (Design). The workspace carries the human name; its own tab and
+  # spawn-time pane get the "home" label so the space reads "Design . home"
+  # rather than the duplicate "Design . Design" (the mate renames its own pane
+  # to its name at bootstrap). The herdr agent SLOT is the unique task id (here
+  # `design`), never the harness name, so concurrent secondmates do not collide
+  # on the agent name; agent_identity=codex is recorded in meta (the integration
+  # key status binds to), and the leftover root shell is closed.
+  assert_grep "tab create --workspace $HERDR_WS --label home" "$LOG" "spawn did not label the secondmate's own tab 'home' in its named workspace"
   assert_grep "agent start design --tab $HERDR_TAB" "$LOG" "spawn did not start the agent in its own tab under the unique task-id slot"
   assert_grep "pane close $HERDR_ROOT_PANE" "$LOG" "spawn did not close the tab's leftover root shell"
-  assert_grep "pane rename $HERDR_AGENT_PANE Design" "$LOG" "spawn did not apply the display-only pane label"
+  assert_grep "pane rename $HERDR_AGENT_PANE home" "$LOG" "spawn did not apply the display-only 'home' pane label"
   # The agent identity must survive (it binds the omp<->herdr status integration);
   # only the pane gets a display label, and the agent's own pane is never closed.
   assert_no_grep 'agent rename' "$LOG" "spawn renamed the herdr agent, which breaks the omp<->herdr status binding"
@@ -275,7 +277,7 @@ phase_recovery() {
   # The herdr placement is reconstructed: the secondmate's own named workspace,
   # its worker label, and a fresh agent pane recorded for routing.
   assert_grep 'workspace=Design' "$meta" "respawn did not reconstruct the named-workspace placement"
-  assert_grep 'worker=Design' "$meta" "respawn did not reconstruct the worker label"
+  assert_grep 'worker=home' "$meta" "respawn did not reconstruct the own-tab 'home' worker label"
   assert_grep "pane=$HERDR_AGENT_PANE" "$meta" "respawn did not record a herdr pane for the relaunched agent"
   pass "recovery: respawns from the durable registry and persistent home"
 }

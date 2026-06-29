@@ -9,14 +9,15 @@
 # What is asserted:
 #   - a crewmate lands in a workspace LABELED by the project (not the task id),
 #     creating it when absent and REUSING it when it already exists;
-#   - the crewmate gets its OWN tab + pane DISPLAY-labeled "<supervisor>/<task-slug>"
-#     with the random task id kept out of the visible label, while the herdr agent
-#     identity stays the integration-safe key (omp) and is NEVER renamed;
+#   - the crewmate gets its OWN tab + pane DISPLAY-labeled by the task slug
+#     (no supervisor-slug prefix; the random task id stays out of the visible
+#     label), while the herdr agent identity stays the integration-safe key
+#     (omp) and is NEVER renamed;
 #   - the tab ends as a SINGLE agent pane: the leftover root shell is closed;
 #   - the meta records tab=, supervisor lineage, and agent_identity=omp, but no
 #     workspace_id (so teardown does per-task cleanup, never destroying the shared
 #     domain workspace);
-#   - a --secondmate lands in its own workspace named after the secondmate (its home);
+#   - a --secondmate lands in its own workspace named after the secondmate (its home), its own tab labeled "home" so the space is not "Name . Name";
 #   - a secondmate home missing AGENTS.md/bin is auto-linked, not rejected.
 set -u
 
@@ -149,7 +150,7 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
     || fail "did not create a workspace labeled by project: $(cat "$home/herdr.log")"
   ! grep -qF 'workspace create --label fix-login-k3' "$home/herdr.log" \
     || fail "workspace was labeled by raw task id, not the project"
-  grep -qF 'tab create --workspace wNEW --label mate/fix-login' "$home/herdr.log" \
+  grep -qF 'tab create --workspace wNEW --label fix-login' "$home/herdr.log" \
     || fail "tab not created in domain workspace with worker display label: $(cat "$home/herdr.log")"
   # The herdr agent SLOT name is the UNIQUE task id (not the harness name), so
   # concurrent crewmates never collide on the agent name; the omp<->herdr status
@@ -158,7 +159,7 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
     || fail "agent not started in its own tab under the unique task-id slot: $(cat "$home/herdr.log")"
   grep -q 'agent start fix-login-k3 .*--env PATH=' "$home/herdr.log" \
     || fail "agent start did not pass --env PATH (omp would not resolve on the daemon PATH): $(cat "$home/herdr.log")"
-  grep -qF 'pane rename wX:p10 mate/fix-login' "$home/herdr.log" \
+  grep -qF 'pane rename wX:p10 fix-login' "$home/herdr.log" \
     || fail "pane was not given its worker display label: $(cat "$home/herdr.log")"
   ! grep -qF 'agent rename' "$home/herdr.log" \
     || fail "agent rename appeared; it breaks the omp<->herdr status binding: $(cat "$home/herdr.log")"
@@ -168,7 +169,7 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
   grep -qF 'pane=wX:p10' "$meta" || fail "meta pane not the agent pane"
   grep -qF 'tab=wX:t9' "$meta" || fail "meta missing herdr tab id"
   grep -qF 'workspace=myproj' "$meta" || fail "meta missing workspace label"
-  grep -qF 'worker=mate/fix-login' "$meta" || fail "meta missing worker label"
+  grep -qF 'worker=fix-login' "$meta" || fail "meta missing worker label"
   grep -qF 'domain=myproj' "$meta" || fail "meta missing domain"
   grep -qF 'supervisor=Mate' "$meta" || fail "meta missing supervisor name"
   grep -qF 'agent_identity=omp' "$meta" || fail "meta missing agent_identity=omp"
@@ -207,7 +208,7 @@ test_crewmate_reuses_existing_domain_workspace() {
 
   ! grep -qF 'workspace create' "$home/herdr.log" \
     || fail "created a new workspace instead of reusing the existing labeled one"
-  grep -qF 'tab create --workspace wEXIST --label mate/fix-bug' "$home/herdr.log" \
+  grep -qF 'tab create --workspace wEXIST --label fix-bug' "$home/herdr.log" \
     || fail "did not add the tab to the existing domain workspace: $(cat "$home/herdr.log")"
   pass "crewmate reuses the existing project-labeled workspace"
 }
@@ -268,17 +269,19 @@ test_secondmate_lands_in_own_named_workspace() {
 
   grep -qF 'workspace create --label Anchor' "$home/herdr.log" \
     || fail "secondmate did not create its own named workspace: $(cat "$home/herdr.log")"
-  grep -qF 'tab create --workspace wNEW --label Anchor' "$home/herdr.log" \
-    || fail "secondmate did not get its own tab labeled by name: $(cat "$home/herdr.log")"
-  # The secondmate's display label (its own name) goes on the tab + pane; the herdr
-  # agent SLOT is the unique task id (here `anchor`), never the harness name, so
-  # concurrent secondmates do not collide. agent_identity=omp is recorded in meta.
+  grep -qF 'tab create --workspace wNEW --label home' "$home/herdr.log" \
+    || fail "secondmate own tab not labeled 'home' (avoids the 'Name . Name' duplicate): $(cat "$home/herdr.log")"
+  # The secondmate's workspace carries its name (Anchor); its own tab is labeled
+  # "home" so the space reads "Anchor . home" instead of the duplicate
+  # "Anchor . Anchor". The herdr agent SLOT is the unique task id (here `anchor`),
+  # never the harness name, so concurrent secondmates do not collide.
+  # agent_identity=omp is recorded in meta.
   grep -qF 'agent start anchor --tab wX:t9' "$home/herdr.log" \
     || fail "secondmate agent not started under the unique task-id slot: $(cat "$home/herdr.log")"
   grep -q 'agent start anchor .*--env PATH=' "$home/herdr.log" \
     || fail "secondmate agent start did not pass --env PATH (binary would not resolve on the daemon PATH): $(cat "$home/herdr.log")"
-  grep -qF 'pane rename wX:p10 Anchor' "$home/herdr.log" \
-    || fail "secondmate pane did not get its display label: $(cat "$home/herdr.log")"
+  grep -qF 'pane rename wX:p10 home' "$home/herdr.log" \
+    || fail "secondmate spawn-time pane label not 'home' (it renames to its name at bootstrap): $(cat "$home/herdr.log")"
   ! grep -qF 'agent rename' "$home/herdr.log" \
     || fail "agent rename appeared; it breaks the omp<->herdr status binding: $(cat "$home/herdr.log")"
   grep -qF 'agent_identity=omp' "$home/state/anchor.meta" \
