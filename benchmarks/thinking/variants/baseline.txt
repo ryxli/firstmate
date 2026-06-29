@@ -1,0 +1,3 @@
+# Baseline variant: NO added thinking discipline (the control arm).
+# Lines starting with '#' are comments stripped by the variant loader, so this
+# file injects nothing into the system prompt.

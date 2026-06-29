@@ -1,0 +1,7 @@
+{
+  "id": "arithmetic-shelf",
+  "title": "shelf book count",
+  "prompt": "A bookshelf has 5 shelves. Each shelf holds exactly 12 books and all shelves are full. If 18 books are removed, how many books remain on the bookshelf? Reply with only the number.",
+  "context": "",
+  "oracle": { "kind": "numeric", "expected": 42 }
+}

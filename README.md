@@ -240,5 +240,7 @@ tests/fm-resolve-spawn.test.sh            # spawn resolver preflight: harness bi
 [ "$(readlink .claude/skills)" = "../.agents/skills" ]
 bun benchmarks/run.ts                     # OLD-vs-NEW supervision interface-efficiency benchmark
 bin/fm-bench.sh                           # end-to-end lifecycle bench on real herdr+omp: concurrency, supervision, teardown; isolated per iteration and self-cleaning (zero leftover). --matrix sweeps settings; --real adds omp-stats cost/cache/missed-cache metrics per iteration; --keep skips teardown for inspection
+bin/fm-think-bench.sh check-corpus        # thinking-efficiency bench (benchmarks/thinking): BASELINE-vs-NEW A/B proving a thinking-discipline change cuts reasoning tokens without quality loss; pure core is CI-tested, the live A/B is flag-gated with record/replay. See benchmarks/thinking/README.md
+bin/fm-think-bench.sh replay benchmarks/thinking/results/*.runs.json   # deterministic verdict replay from a committed recording (no LLM)
 bun -e "import('./.omp/extensions/fm-supervisor.ts')"   # supervision extension loads clean
 ```

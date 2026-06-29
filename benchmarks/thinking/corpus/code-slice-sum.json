@@ -1,0 +1,7 @@
+{
+  "id": "code-slice-sum",
+  "title": "python slice sum output",
+  "prompt": "What does this Python program print? Reply with only the output.",
+  "context": "x = [1, 2, 3, 4]\nprint(sum(x[1:3]))",
+  "oracle": { "kind": "numeric", "expected": 5 }
+}
