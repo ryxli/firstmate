@@ -1,0 +1,7 @@
+{
+  "id": "snail-well",
+  "title": "snail in the well",
+  "prompt": "A snail at the bottom of a 10 meter well climbs up 3 meters during each day and slips back 2 meters each night. On which day does it first reach the top of the well? Reply with only the number.",
+  "context": "",
+  "oracle": { "kind": "numeric", "expected": 8 }
+}

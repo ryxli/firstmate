@@ -1,0 +1,7 @@
+{
+  "id": "day-of-week",
+  "title": "day of week offset",
+  "prompt": "Today is Wednesday. What day of the week will it be exactly 100 days from today? Reply with just the day name.",
+  "context": "",
+  "oracle": { "kind": "contains", "needles": ["friday"], "ci": true }
+}

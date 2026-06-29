@@ -1,0 +1,378 @@
+{
+  "run": "2026-06-29T07:52:33.986Z",
+  "model": "gpt-5.4-mini",
+  "thinking": "medium",
+  "baseline": "baseline",
+  "candidate": "decide-once",
+  "corpusSize": 6,
+  "trialsPerCell": 3,
+  "aggregates": [
+    {
+      "variant": "baseline",
+      "trials": 18,
+      "thinking": {
+        "median": 127,
+        "mean": 148,
+        "stddev": 58.72,
+        "n": 18
+      },
+      "output": {
+        "median": 134,
+        "mean": 155.33,
+        "stddev": 59.17,
+        "n": 18
+      },
+      "latency_ms": {
+        "median": 6620.5,
+        "mean": 7350.72,
+        "stddev": 2053.73,
+        "n": 18
+      },
+      "quality_pass_rate": 1,
+      "quality_mean": 1
+    },
+    {
+      "variant": "decide-once",
+      "trials": 18,
+      "thinking": {
+        "median": 114,
+        "mean": 119.5,
+        "stddev": 82.88,
+        "n": 18
+      },
+      "output": {
+        "median": 121,
+        "mean": 126.72,
+        "stddev": 83.03,
+        "n": 18
+      },
+      "latency_ms": {
+        "median": 5917,
+        "mean": 6534.33,
+        "stddev": 2726.97,
+        "n": 18
+      },
+      "quality_pass_rate": 1,
+      "quality_mean": 1
+    }
+  ],
+  "decision": {
+    "adopt": true,
+    "baseline": "baseline",
+    "candidate": "decide-once",
+    "thinkingTokenDelta": 13,
+    "thinkingTokenDeltaPct": 10.2,
+    "qualityDelta": 0,
+    "latencyDelta": 703.5,
+    "latencyDeltaPct": 10.6,
+    "failingSignals": []
+  },
+  "perTask": [
+    {
+      "task": "arithmetic-shelf",
+      "baseline": {
+        "variant": "baseline",
+        "trials": 3,
+        "thinking": {
+          "median": 108,
+          "mean": 108.67,
+          "stddev": 17.97,
+          "n": 3
+        },
+        "output": {
+          "median": 115,
+          "mean": 115.67,
+          "stddev": 17.97,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 5365,
+          "mean": 5257.33,
+          "stddev": 471.99,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      },
+      "candidate": {
+        "variant": "decide-once",
+        "trials": 3,
+        "thinking": {
+          "median": 21,
+          "mean": 40.67,
+          "stddev": 33.63,
+          "n": 3
+        },
+        "output": {
+          "median": 28,
+          "mean": 47.67,
+          "stddev": 33.63,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 4733,
+          "mean": 7724,
+          "stddev": 4615.57,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      }
+    },
+    {
+      "task": "code-slice-sum",
+      "baseline": {
+        "variant": "baseline",
+        "trials": 3,
+        "thinking": {
+          "median": 121,
+          "mean": 122,
+          "stddev": 22.46,
+          "n": 3
+        },
+        "output": {
+          "median": 128,
+          "mean": 129,
+          "stddev": 22.46,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 7802,
+          "mean": 7534,
+          "stddev": 1393.64,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      },
+      "candidate": {
+        "variant": "decide-once",
+        "trials": 3,
+        "thinking": {
+          "median": 91,
+          "mean": 79.67,
+          "stddev": 52.06,
+          "n": 3
+        },
+        "output": {
+          "median": 98,
+          "mean": 86.67,
+          "stddev": 52.06,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 5060,
+          "mean": 5938,
+          "stddev": 2937.96,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      }
+    },
+    {
+      "task": "day-of-week",
+      "baseline": {
+        "variant": "baseline",
+        "trials": 3,
+        "thinking": {
+          "median": 202,
+          "mean": 194.67,
+          "stddev": 55.76,
+          "n": 3
+        },
+        "output": {
+          "median": 209,
+          "mean": 202.33,
+          "stddev": 56.54,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 9913,
+          "mean": 10487.67,
+          "stddev": 1979.7,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      },
+      "candidate": {
+        "variant": "decide-once",
+        "trials": 3,
+        "thinking": {
+          "median": 172,
+          "mean": 170.67,
+          "stddev": 71.04,
+          "n": 3
+        },
+        "output": {
+          "median": 179,
+          "mean": 177.67,
+          "stddev": 71.04,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 6319,
+          "mean": 6851.33,
+          "stddev": 2157.21,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      }
+    },
+    {
+      "task": "podium-logic",
+      "baseline": {
+        "variant": "baseline",
+        "trials": 3,
+        "thinking": {
+          "median": 235,
+          "mean": 218.67,
+          "stddev": 57.91,
+          "n": 3
+        },
+        "output": {
+          "median": 242,
+          "mean": 227,
+          "stddev": 57.73,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 8039,
+          "mean": 7886.33,
+          "stddev": 971.93,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      },
+      "candidate": {
+        "variant": "decide-once",
+        "trials": 3,
+        "thinking": {
+          "median": 182,
+          "mean": 181.67,
+          "stddev": 13.47,
+          "n": 3
+        },
+        "output": {
+          "median": 191,
+          "mean": 190,
+          "stddev": 12.68,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 6080,
+          "mean": 6303.67,
+          "stddev": 562.79,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      }
+    },
+    {
+      "task": "rate-printer",
+      "baseline": {
+        "variant": "baseline",
+        "trials": 3,
+        "thinking": {
+          "median": 93,
+          "mean": 106.33,
+          "stddev": 37.14,
+          "n": 3
+        },
+        "output": {
+          "median": 100,
+          "mean": 113.33,
+          "stddev": 37.14,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 6076,
+          "mean": 6090.67,
+          "stddev": 421.44,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      },
+      "candidate": {
+        "variant": "decide-once",
+        "trials": 3,
+        "thinking": {
+          "median": 35,
+          "mean": 33.67,
+          "stddev": 2.62,
+          "n": 3
+        },
+        "output": {
+          "median": 42,
+          "mean": 40.67,
+          "stddev": 2.62,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 3857,
+          "mean": 4410.33,
+          "stddev": 824.6,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      }
+    },
+    {
+      "task": "snail-well",
+      "baseline": {
+        "variant": "baseline",
+        "trials": 3,
+        "thinking": {
+          "median": 121,
+          "mean": 137.67,
+          "stddev": 27.92,
+          "n": 3
+        },
+        "output": {
+          "median": 128,
+          "mean": 144.67,
+          "stddev": 27.92,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 6252,
+          "mean": 6848.33,
+          "stddev": 1310.37,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      },
+      "candidate": {
+        "variant": "decide-once",
+        "trials": 3,
+        "thinking": {
+          "median": 224,
+          "mean": 210.67,
+          "stddev": 46.69,
+          "n": 3
+        },
+        "output": {
+          "median": 231,
+          "mean": 217.67,
+          "stddev": 46.69,
+          "n": 3
+        },
+        "latency_ms": {
+          "median": 7583,
+          "mean": 7978.67,
+          "stddev": 714.72,
+          "n": 3
+        },
+        "quality_pass_rate": 1,
+        "quality_mean": 1
+      }
+    }
+  ]
+}

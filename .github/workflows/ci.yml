@@ -25,6 +25,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+      # The thinking-efficiency bench's pure-core test (tests/fm-think-bench.test.sh)
+      # drives benchmarks/thinking via bun; install it so that test runs (not skips).
+      - uses: oven-sh/setup-bun@v2
       - run: |
           set -eu
           for test_script in tests/*.test.sh; do

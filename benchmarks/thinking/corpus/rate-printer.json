@@ -1,0 +1,7 @@
+{
+  "id": "rate-printer",
+  "title": "printer page rate",
+  "prompt": "A printer prints 3 pages every 5 seconds at a constant rate. How many seconds does it take to print 36 pages? Reply with only the number.",
+  "context": "",
+  "oracle": { "kind": "numeric", "expected": 60 }
+}
