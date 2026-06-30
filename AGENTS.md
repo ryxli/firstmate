@@ -429,6 +429,8 @@ Covered by section 8.
 Steer a crewmate only with short single lines via `bin/fm-send.sh`; anything long belongs in a file the crewmate can read.
 Steer a secondmate the same way.
 Its charter retargets escalation to the main firstmate's status file, so routine internal churn stays inside the secondmate home and only `done`, `blocked`, `needs-decision`, `failed`, or captain-relevant phase changes wake the main firstmate.
+`bin/fm-send.sh` never overwrites a draft the captain is mid-typing in a target pane: if that pane's composer holds an unsent human draft, the send is deferred (the message is queued under `state/.sendq/<pane>/` and `fm-send` exits 75) instead of clobbering it, and the queue drains in order on the next send once the composer is clear, so a deferred steer is delivered rather than lost.
+A `--key` control send (e.g. `--key Escape`) is exempt - it is an interrupt, not text that can clobber a draft.
 
 ### Delivery modes and yolo
 

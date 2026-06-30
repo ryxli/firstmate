@@ -118,7 +118,7 @@ case "${1:-}" in
   pane)
     case "${2:-}" in
       current) printf '{"result":{"pane":{"pane_id":"w0:p0"}}}\n'; exit 0 ;;
-      read) printf 'idle prompt\n'; exit 0 ;;
+      read) printf '%s\n' "${FM_FAKE_PANE_LINES:-}"; exit 0 ;;
       close|run) exit 0 ;;
       get) printf '{"pane_id":"w1:p1"}\n'; exit 0 ;;
     esac ;;

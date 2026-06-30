@@ -11,6 +11,13 @@
 # composer after all retries), fm-send exits NON-ZERO. The compose/submit
 # logic lives in bin/fm-herdr-lib.sh. Tune with FM_SEND_RETRIES (default 3)
 # and FM_SEND_SLEEP (0.4).
+#
+# Peek-and-defer guard: before submitting, fm-send checks the pane's composer.
+# If it holds a human's unsent draft, the message is NOT run (that would clobber
+# the draft); it is queued under state/.sendq/<pane>/ and fm-send exits 75
+# (deferred). The queue drains FIFO on the next send once the composer is clear,
+# so a deferred message is delivered, not lost. The --key path is unguarded:
+# special keys (Escape, Enter) are control actions, not text that can clobber.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +60,20 @@ else
   case "$*" in /*) settle=1.2 ;; *) settle=0.3 ;; esac
   retries=${FM_SEND_RETRIES:-3}
   sleep_s=${FM_SEND_SLEEP:-0.4}
+
+  # Peek-and-defer guard. First drain any messages already queued for this pane
+  # while the composer is clear, then refuse to clobber a human's unsent draft:
+  # if the composer holds one, queue this message (FIFO) and exit 75 (deferred)
+  # rather than running text into it. The queue lives under state/.sendq/<pane>/
+  # and drains on the next send once the composer is clear again.
+  qdir=$(fm_sendq_dir "$STATE" "$P")
+  fm_sendq_flush "$qdir" "$P" "$retries" "$sleep_s" >/dev/null || true
+  if fm_pane_input_pending "$P"; then
+    fm_sendq_enqueue "$qdir" "$*"
+    echo "deferred: $P composer holds an unsent draft; queued message (will send when the composer is clear)" >&2
+    exit 75
+  fi
+
   verdict=$(fm_herdr_submit_core "$P" "$*" "$retries" "$sleep_s" "$settle")
   case "$verdict" in
     pending)

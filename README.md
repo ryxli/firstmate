@@ -158,8 +158,8 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-merge-local.sh`      | Fast-forward a `local-only` project's local default branch after approval                                           |
 | `fm-review-diff.sh`      | Review a crewmate branch against the authoritative base, with optional `--stat` output                              |
 | `.omp/extensions/fm-supervisor.ts` | In-process supervision extension: blocks on herdr socket events + status writes + check polls and injects one dense wake digest per captain-relevant event; honors `/afk` for batched away-mode escalation |
-| `fm-send.sh`             | Send one verified literal line (or `--key Escape`) to a crewmate pane; exits non-zero when Enter is positively swallowed |
-| `fm-herdr-lib.sh`        | Shared herdr pane primitives for busy detection, dim-ghost-aware and border-aware composer detection, and verified submit retry |
+| `fm-send.sh`             | Send one verified literal line (or `--key Escape`) to a crewmate pane; exits non-zero when Enter is positively swallowed. Peek-and-defer guard: if the composer holds a human's unsent draft, the message is queued under `state/.sendq/<pane>/` and the send exits 75 (deferred) instead of clobbering the draft; the queue drains FIFO on the next send once the composer is clear |
+| `fm-herdr-lib.sh`        | Shared herdr pane primitives for busy detection, dim-ghost-aware and border-aware composer detection, verified submit retry, and the composer-safe per-pane send queue (`fm_sendq_*`) |
 | `fm-identity-lib.sh`     | Sourced library: derives supervisor name/role/parent, worker tab labels, and task slugs from `config/identity` for consistent naming across spawn and brief scaffolding |
 | `fm-peek.sh`             | Print a bounded tail of a crewmate pane                                                                             |
 | `fm-pr-check.sh`         | Record a PR-ready task and register its merge `check.sh` poll for the supervisor extension |

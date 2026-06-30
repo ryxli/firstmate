@@ -7,7 +7,7 @@
 #
 # herdr tracks agent status natively (idle|working|blocked|done|unknown),
 # so the ANSI ghost-text stripping and pane-hash busy detection from the
-# tmux era are gone. The three guarantees this lib provides instead:
+# tmux era are gone. The guarantees this lib provides instead:
 #
 #   1. fm_pane_is_busy: reads herdr agent status; returns 0 when "working".
 #   2. fm_pane_input_pending: reads visible pane content to detect a
@@ -17,6 +17,10 @@
 #      verifies the agent received it by waiting briefly for a working->idle
 #      transition or a clean idle state; returns a verdict string the caller
 #      can act on.
+#   4. fm_sendq_* (dir/count/enqueue/flush): a per-pane on-disk send queue so a
+#      message is never run into a composer that holds a human's unsent draft.
+#      A blocked send is queued (FIFO) instead of clobbering the draft, and the
+#      queue drains on the next send once the composer is clear again.
 #
 # All functions are set -u and set -e safe.
 
@@ -151,4 +155,84 @@ fm_herdr_submit_core() {
   # the text is still stuck unsubmitted.
   [ "$status" = idle ] && ! fm_pane_input_pending "$pane" && { printf 'empty'; return 0; }
   printf 'pending'
+}
+
+# --- Composer-safe send queue ------------------------------------------------
+#
+# These four functions back fm-send.sh's peek-and-defer guard: never run text
+# into a pane whose composer holds a human's unsent draft. A blocked send is
+# appended to a per-pane on-disk queue (FIFO) instead of clobbering the draft,
+# and the queue drains on the next send once the composer is clear again.
+
+# fm_sendq_dir <queue-root> <pane>: print the queue directory for a pane id.
+# The pane id (e.g. "w8:p3") is sanitized to a filesystem-safe name so the
+# colon never breaks the path.
+fm_sendq_dir() {
+  local root=$1 pane=$2 safe
+  safe=$(printf '%s' "$pane" | tr -c 'A-Za-z0-9._-' '_')
+  printf '%s/.sendq/%s' "$root" "$safe"
+}
+
+# fm_sendq_count <queue-dir>: print the number of queued messages (0 if none).
+fm_sendq_count() {
+  local dir=$1 n=0 f
+  if [ -d "$dir" ]; then
+    for f in "$dir"/*.msg; do
+      [ -e "$f" ] || continue
+      n=$((n + 1))
+    done
+  fi
+  printf '%s' "$n"
+}
+
+# fm_sendq_enqueue <queue-dir> <text>: append <text> as the next FIFO message.
+# Idempotent against an immediate retry: if the newest queued message already
+# holds identical text, nothing is added (so re-running a deferred send while
+# the draft persists never duplicates the message).
+fm_sendq_enqueue() {
+  local dir=$1 text=$2 last seq=1 f base n
+  mkdir -p "$dir"
+  last=""
+  for f in "$dir"/*.msg; do
+    [ -e "$f" ] || continue
+    base=${f##*/}; base=${base%.msg}
+    n=$((10#$base))
+    if [ "$n" -ge "$seq" ]; then seq=$((n + 1)); fi
+    last=$f
+  done
+  if [ -n "$last" ] && [ "$(cat "$last")" = "$text" ]; then
+    return 0
+  fi
+  printf '%s' "$text" > "$dir/$(printf '%012d' "$seq").msg"
+}
+
+# fm_sendq_flush <queue-dir> <pane> <retries> <sleep_s>: deliver queued messages
+# in FIFO order while the composer stays clear, removing each file as it lands.
+# Stops at the first message that cannot be delivered (the composer now holds a
+# draft, or the send could not be confirmed) so queued order is preserved and a
+# human draft is never clobbered. Prints the number delivered; returns 0 only
+# when the queue is fully drained.
+fm_sendq_flush() {
+  local dir=$1 pane=$2 retries=${3:-3} sleep_s=${4:-0.4}
+  local f text settle verdict delivered=0 remaining=0
+  if [ ! -d "$dir" ]; then printf '0'; return 0; fi
+  for f in "$dir"/*.msg; do
+    [ -e "$f" ] || continue
+    if [ "$remaining" -gt 0 ]; then
+      remaining=$((remaining + 1)); continue
+    fi
+    if fm_pane_input_pending "$pane"; then
+      remaining=$((remaining + 1)); continue
+    fi
+    text=$(cat "$f")
+    case "$text" in /*) settle=1.2 ;; *) settle=0.3 ;; esac
+    verdict=$(fm_herdr_submit_core "$pane" "$text" "$retries" "$sleep_s" "$settle")
+    if [ "$verdict" = empty ]; then
+      rm -f "$f"; delivered=$((delivered + 1))
+    else
+      remaining=$((remaining + 1))
+    fi
+  done
+  printf '%s' "$delivered"
+  [ "$remaining" -eq 0 ]
 }

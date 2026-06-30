@@ -85,7 +85,7 @@ case "${1:-}" in
   pane)
     case "${2:-}" in
       close|run|rename|send-keys) exit 0 ;;
-      read) printf 'idle prompt\n'; exit 0 ;;
+      read) printf '%s\n' "${FM_FAKE_PANE_LINES:-}"; exit 0 ;;
       get) printf '{"pane_id":"wSHIP:p3"}\n'; exit 0 ;;
     esac ;;
 esac
