@@ -129,6 +129,7 @@ firstmate works from any terminal, but running your harness inside herdr puts ev
   Secondmates are idle by default: after startup recovery reconciles only work already in their own home, an empty queue waits silently for routed tasks, and they never self-initiate surveys or audits.
   After seeding a secondmate, `fm-backlog-handoff.sh` moves already-judged in-scope queued items from the main backlog into that secondmate home so the domain queue starts in the right place.
   Idle secondmate panes are healthy; teardown is explicit and refuses while the secondmate home has in-flight work unless the captain has approved discard with `--force`.
+- **Lavish review never blocks the first mate** - opening a Lavish artifact through `fm-lavish-open.sh` launches a detached steward worker that owns the blocking `lavish-axi poll` for that session, records every feedback round to `state/lavish/`, and wakes the originating pane; the first mate's supervision loop is never tied up polling. Replies post through a write-only HTTP endpoint (`fm-lavish-reply.sh`), so they never race the steward's poll, and `fm-lavish-open.sh --recover` re-attends any open session orphaned by a restart.
 - **Project modes are explicit** - `data/projects.md` records each project's delivery mode and optional `+yolo` autonomy flag.
   `no-mistakes` projects run the full validation pipeline, `direct-PR` projects open PRs without that pipeline, and `local-only` projects stay local until firstmate performs an approved fast-forward merge.
 - **Project memory belongs to projects** - durable project-intrinsic agent knowledge lives in each project's committed `AGENTS.md`, with `CLAUDE.md` as a symlink.
@@ -174,6 +175,10 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-demo.sh`             | Self-cleaning dev demo: throwaway omp panes in an `fm-demo` workspace, showing lineage and a sample wake            |
 | `fm-kpi.sh`             | Firstmate workflow KPIs from `omp stats --json` + backlog (cost, tokens, cache, supervisor overhead, outcomes, North Star); `--json` agent surface, terminal table, `--snapshot`/`--history` trend log |
 | `fm-kpi-view.sh`        | Render `fm-kpi.sh --json` into a self-contained HTML KPI dashboard and open it with lavish; read-only               |
+| `fm-lavish-open.sh`     | Open/resume a Lavish artifact and launch a detached steward that owns the long-poll and relays feedback to your pane; `--recover` relaunches orphaned stewards. Keeps the first mate off `lavish-axi poll` |
+| `fm-lavish-steward.sh`  | The per-session Lavish poll worker (launched detached): holds `lavish-axi poll`, records each feedback round to `state/lavish/`, and wakes the originating pane                          |
+| `fm-lavish-reply.sh`    | Post an agent reply into a Lavish session via the write-only HTTP endpoint; non-blocking, never consumes feedback                                                                       |
+| `fm-lavish-lib.sh`      | Sourced library: Lavish session-key / base-URL / state-dir primitives mirroring the CLI, steward liveness, and orphan-poll reaping                                                      |
 
 ## Configuration
 
