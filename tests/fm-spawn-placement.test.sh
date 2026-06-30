@@ -61,7 +61,8 @@ case "${1:-}" in
         while [ $# -gt 0 ]; do case "$1" in --label) shift; lbl=${1:-} ;; esac; shift; done
         wid="${FM_FAKE_NEW_WSID:-wNEW}"
         [ -z "${FM_FAKE_WS:-}" ] || printf '%s\t%s\n' "$lbl" "$wid" >> "$FM_FAKE_WS"
-        printf '{"result":{"workspace":{"workspace_id":"%s"}}}\n' "$wid"
+        printf '{"result":{"workspace":{"workspace_id":"%s"},"root_pane":{"pane_id":"%s"}}}\n' \
+          "$wid" "${FM_FAKE_WS_INIT_PANE:-wX:p1}"
         exit 0 ;;
     esac ;;
   tab)
@@ -111,7 +112,7 @@ run_spawn() {
     FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' \
     FM_FAKE_HERDR_LOG="$home/herdr.log" \
     FM_FAKE_WS="$home/ws.tsv" \
-    FM_FAKE_ROOT_PANE="wX:p9" FM_FAKE_AGENT_PANE="wX:p10" \
+    FM_FAKE_ROOT_PANE="wX:p9" FM_FAKE_AGENT_PANE="wX:p10" FM_FAKE_WS_INIT_PANE="wX:p1" \
     FM_SPAWN_NO_GUARD=1 \
     FM_REAL_GIT="${FM_REAL_GIT:-}" FM_FAKE_WT="${FM_FAKE_WT:-}" FM_FAKE_TOPLEVEL="${FM_FAKE_TOPLEVEL:-}" \
     "$SPAWN" "$@" 2>&1
@@ -189,10 +190,15 @@ test_crewmate_single_agent_pane() {
   out=$(run_spawn "$home" "$fakebin" add-x-q7 projects/myproj omp) \
     || fail "spawn failed: $out"
 
-  # The leftover root shell pane must be closed so the tab is a single agent pane.
+  # The leftover tab root shell pane must be closed so the tab is a single agent pane.
   grep -qF 'pane close wX:p9' "$home/herdr.log" \
-    || fail "root shell pane was not closed; tab would be a split beside a blank shell: $(cat "$home/herdr.log")"
-  pass "spawned tab ends as a single agent pane (root shell closed)"
+    || fail "tab root shell pane was not closed; tab would be a split beside a blank shell: $(cat "$home/herdr.log")"
+  # The freshly-created workspace also ships with its OWN default shell pane in a
+  # separate tab; spawning into a brand-new workspace must close that orphan too,
+  # leaving exactly one pane (the agent).
+  grep -qF 'pane close wX:p1' "$home/herdr.log" \
+    || fail "freshly-created workspace's orphan root shell was not closed: $(cat "$home/herdr.log")"
+  pass "spawned tab ends as a single agent pane (tab + workspace root shells closed)"
 }
 
 test_crewmate_reuses_existing_domain_workspace() {
@@ -210,6 +216,11 @@ test_crewmate_reuses_existing_domain_workspace() {
     || fail "created a new workspace instead of reusing the existing labeled one"
   grep -qF 'tab create --workspace wEXIST --label fix-bug' "$home/herdr.log" \
     || fail "did not add the tab to the existing domain workspace: $(cat "$home/herdr.log")"
+  # Reuse has no orphan workspace shell to close. The only pane closed is the new
+  # tab's own root shell (wX:p9); the workspace's init pane (wX:p1) must be left
+  # untouched - it belongs to whatever already lives in the reused workspace.
+  ! grep -qF 'pane close wX:p1' "$home/herdr.log" \
+    || fail "reuse path closed the workspace's init pane; that pane is not an orphan here: $(cat "$home/herdr.log")"
   pass "crewmate reuses the existing project-labeled workspace"
 }
 
