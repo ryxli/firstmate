@@ -74,7 +74,9 @@ case "${1:-}" in
     esac ;;
   agent)
     case "${2:-}" in
-      start) printf '{"result":{"agent":{"pane_id":"%s"}}}\n' "${FM_FAKE_AGENT_PANE:-wX:p10}"; exit 0 ;;
+      start)
+        if [ "${FM_FAKE_AGENT_START_FAIL:-0}" = "1" ]; then echo "fake: agent start failed" >&2; exit 1; fi
+        printf '{"result":{"agent":{"pane_id":"%s"}}}\n' "${FM_FAKE_AGENT_PANE:-wX:p10}"; exit 0 ;;
     esac ;;
   pane)
     case "${2:-}" in close|run) exit 0 ;; get) printf '{"pane_id":"wX:p10"}\n'; exit 0 ;; esac ;;
@@ -248,6 +250,8 @@ test_crewmate_in_secondmate_home_uses_mate_workspace() {
   meta="$home/state/probe-cache-z9.meta"
   grep -qF 'workspace=Anchor' "$meta" || fail "meta workspace not the secondmate name"
   grep -qF 'domain=Anchor' "$meta" || fail "meta domain not the secondmate name"
+  grep -qF 'pane close wX:p1' "$home/herdr.log" \
+    || fail "crew spawned in secondmate home did not close the fresh workspace's orphan root shell: $(cat "$home/herdr.log")"
   pass "crewmate from a secondmate home lands in the mate's own workspace"
 }
 
@@ -299,6 +303,8 @@ test_secondmate_lands_in_own_named_workspace() {
     || fail "secondmate meta missing agent_identity=omp"
   grep -qF 'tab=wX:t9' "$home/state/anchor.meta" \
     || fail "secondmate meta missing herdr tab id"
+  grep -qF 'pane close wX:p1' "$home/herdr.log" \
+    || fail "secondmate spawn did not close the fresh workspace's orphan root shell: $(cat "$home/herdr.log")"
   pass "secondmate lands in its own named workspace (its home) with omp identity"
 }
 
@@ -351,6 +357,28 @@ test_spawn_refuses_when_worktree_resolves_to_primary_checkout() {
   pass "spawn refuses to launch when the worktree resolves to the primary checkout"
 }
 
+test_workspace_orphan_pane_closed_on_agent_start_failure() {
+  local home fakebin out
+  home=$(make_case crew-fail-cleanup myproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  : > "$home/ws.tsv"
+  mkdir -p "$home/data/add-feat-r5"
+  printf 'brief\n' > "$home/data/add-feat-r5/brief.md"
+
+  out=$(
+    export FM_FAKE_AGENT_START_FAIL=1
+    run_spawn "$home" "$fakebin" add-feat-r5 projects/myproj omp
+  ) && fail "spawn should have failed when agent start fails: $out"
+
+  grep -qF 'pane close wX:p1' "$home/herdr.log" \
+    || fail "agent start failure did not close the fresh workspace's orphan root shell: $(cat "$home/herdr.log")"
+  [ ! -d "$home/worktrees/add-feat-r5" ] \
+    || fail "failed spawn left its worktree behind"
+  ! git -C "$home/projects/myproj" rev-parse --verify --quiet refs/heads/fm/add-feat-r5 >/dev/null 2>&1 \
+    || fail "failed spawn left its branch behind"
+  pass "workspace orphan root shell closed even when agent start fails"
+}
+
 test_crewmate_creates_domain_workspace_and_own_tab
 test_crewmate_single_agent_pane
 test_crewmate_reuses_existing_domain_workspace
@@ -358,3 +386,4 @@ test_crewmate_in_secondmate_home_uses_mate_workspace
 test_secondmate_lands_in_own_named_workspace
 test_secondmate_home_autolinks_missing_files
 test_spawn_refuses_when_worktree_resolves_to_primary_checkout
+test_workspace_orphan_pane_closed_on_agent_start_failure

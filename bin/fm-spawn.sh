@@ -490,6 +490,9 @@ if [ "$KIND" = secondmate ]; then
 fi
 
 spawn_cleanup_worktree() {
+  if [ -n "${WORKSPACE_INIT_PANE:-}" ] && [ "${WORKSPACE_INIT_PANE:-}" != "${PANE:-}" ]; then
+    herdr pane close "$WORKSPACE_INIT_PANE" >/dev/null 2>&1 || true
+  fi
   [ "$KIND" = secondmate ] && return 0
   if [ -d "$WT" ]; then
     git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
