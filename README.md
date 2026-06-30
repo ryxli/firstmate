@@ -242,6 +242,7 @@ tests/fm-bootstrap.test.sh                # bootstrap dependency and feature-pro
 tests/fm-update.test.sh                   # fast-forward-only self-update, reread, nudge, dedup, and skip-safety tests
 tests/fm-secondmate-safety.test.sh        # secondmate routing, seeding, idle charter, backlog handoff, spawn, recovery, teardown, and FM_HOME safety
 tests/fm-teardown.test.sh                 # fm-teardown.sh safety and reminder checks: local-only fork-remote allow, truly-unpushed refuse, merged-to-main allow, no-mistakes regression, tasks-axi reminder, --force override
+tests/fm-idle-digest.test.sh              # bounded idle-digest state machine: begin idempotency and restart-resume, fold dedup and unknown-section rejection, active/pass loop self-termination at window/pass cap, screen Needs-you truncation guard, and clear
 tests/fm-resolve-spawn.test.sh            # spawn resolver preflight: harness binary check, unregistered-project warn, worktree base check, and abort-before-worktree integration with fm-spawn
 tests/fm-send-defer.test.sh              # peek-and-defer guard: empty-composer delivers, pending-draft defers (exit 75) without clobbering, queue drains FIFO on next clear send, idempotent re-defer, --key unguarded
 [ "$(readlink CLAUDE.md)" = "AGENTS.md" ]
