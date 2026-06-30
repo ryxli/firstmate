@@ -236,6 +236,7 @@ tests/fm-update.test.sh                   # fast-forward-only self-update, rerea
 tests/fm-secondmate-safety.test.sh        # secondmate routing, seeding, idle charter, backlog handoff, spawn, recovery, teardown, and FM_HOME safety
 tests/fm-teardown.test.sh                 # fm-teardown.sh safety and reminder checks: local-only fork-remote allow, truly-unpushed refuse, merged-to-main allow, no-mistakes regression, tasks-axi reminder, --force override
 tests/fm-resolve-spawn.test.sh            # spawn resolver preflight: harness binary check, unregistered-project warn, worktree base check, and abort-before-worktree integration with fm-spawn
+tests/fm-send-defer.test.sh              # peek-and-defer guard: empty-composer delivers, pending-draft defers (exit 75) without clobbering, queue drains FIFO on next clear send, idempotent re-defer, --key unguarded
 [ "$(readlink CLAUDE.md)" = "AGENTS.md" ]
 [ "$(readlink .claude/skills)" = "../.agents/skills" ]
 bun benchmarks/run.ts                     # OLD-vs-NEW supervision interface-efficiency benchmark
