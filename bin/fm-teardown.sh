@@ -513,6 +513,8 @@ fi
 PANE_KEY=$(printf '%s' "$PANE" | tr ':' '_')
 rm -f "$STATE/$ID.status" "$STATE/$ID.check.sh" "$STATE/$ID.meta"
 rm -f "$STATE/.herdr-prev-status-$PANE_KEY" "$STATE/.herdr-idle-count-$PANE_KEY" "$STATE/.herdr-turn-$PANE_KEY" "$STATE/.stale-$PANE_KEY"
+SENDQ_KEY=$(printf '%s' "$PANE" | tr -c 'A-Za-z0-9._-' '_')
+[ -n "$SENDQ_KEY" ] && rm -rf "$STATE/.sendq/$SENDQ_KEY" || true
 if [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$MODE" != local-only ]; then
   "$FM_ROOT/bin/fm-fleet-sync.sh" "$PROJ" || true
 fi
