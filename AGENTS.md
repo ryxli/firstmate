@@ -89,6 +89,7 @@ state/               volatile runtime signals; gitignored
   <id>.meta          written by fm-spawn: pane=, tab= (the herdr tab id), worktree=, project=, harness=, kind=, mode=, yolo=, domain=, workspace= (the domain/project herdr workspace label, shared by every task of that domain), worker= (the visible per-task herdr tab and pane display label: the task slug for a crewmate, or "home" for a secondmate's own tab so its space does not read "Name . Name"), supervisor= (the supervising firstmate name, recorded for audit), agent_identity= (the herdr agent identity the status integration binds to: omp for omp panes, else the harness name; observational only, never a labeling source); kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
   <id>.check.sh      optional slow poll you write per task (e.g. merged-PR check)
   .afk               durable away-mode flag; present = the supervisor extension batches relevant events into one digest (set by /afk, cleared on the captain's return)
+  .sendq/<pane>/     per-pane FIFO queue of deferred fm-send messages; written when the composer holds a human's unsent draft; drained on the next send once the composer is clear; cleaned up by fm-teardown on task removal
   .status-internal.log   rolling log of non-captain-relevant status lines the extension suppressed; capped at FM_STATUS_INTERNAL_LOG_MAX lines (default 500); never touch
 .no-mistakes/        local validation state and evidence; gitignored
 ```
