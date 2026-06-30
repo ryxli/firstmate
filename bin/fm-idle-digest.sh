@@ -138,7 +138,7 @@ cmd_pass() {
 cmd_fold() {
   [ "$#" -eq 2 ] || usage
   require_digest
-  local section=$1 line=$2
+  local section=$1 line=${2#- }
   is_canon "$section" || {
     echo "fm-idle-digest: unknown section '$section' (one of: ${CANON[*]})" >&2
     exit 2

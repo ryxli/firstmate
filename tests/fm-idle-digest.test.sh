@@ -160,6 +160,17 @@ test_screen_caps_sections_but_never_needs_you() {
   pass "screen caps other sections with an overflow pointer but never truncates Needs you"
 }
 
+test_fold_into_last_canonical_section() {
+  fresh_state; local s="$FM_STATE_OVERRIDE"
+  "$ID" begin >/dev/null
+  local f; f=$(DIGEST_OF "$s")
+  "$ID" fold "Fleet & cost" "3 jobs running, \$0.42 spent" || fail "fold into Fleet & cost failed"
+  local out; out=$("$ID" render) || fail "render failed"
+  printf '%s\n' "$out" | grep -q '^## Fleet & cost$' || fail "Fleet & cost heading missing from render"
+  printf '%s\n' "$out" | grep -q '^\- 3 jobs running' || fail "Fleet & cost bullet missing from render"
+  pass "fold into the last canonical section appears correctly via render (END path)"
+}
+
 test_clear_and_missing_digest_errors() {
   fresh_state; local s="$FM_STATE_OVERRIDE"
   "$ID" begin >/dev/null
@@ -192,5 +203,6 @@ test_loop_terminates_at_pass_cap
 test_window_and_maxpasses_zero_disable_refinement
 test_render_full_omits_empty_sections_and_metadata
 test_screen_caps_sections_but_never_needs_you
+test_fold_into_last_canonical_section
 test_clear_and_missing_digest_errors
 test_usage_and_unknown_subcommand
