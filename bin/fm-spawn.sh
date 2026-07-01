@@ -194,10 +194,15 @@ for w in d.get("result", {}).get("workspaces", []):
 ' "$1" 2>/dev/null || true
 }
 
-# herdr_resolve_workspace <label> <cwd>: return the id of the domain/project
-# workspace labelled <label>, creating it (rooted at <cwd>, unfocused) when it
-# does not exist. The same label always resolves to the same workspace, so every
-# task of a domain/project shares one.
+# herdr_resolve_workspace <label> <cwd>: resolve the domain/project workspace
+# labelled <label>, creating it (rooted at <cwd>, unfocused) when it does not
+# exist. The same label always resolves to the same workspace, so every task of a
+# domain/project shares one. Prints two parse-able lines on stdout:
+#   workspace=<workspace_id>
+#   init_pane=<pane_id>   the freshly-created workspace's own default shell pane,
+#                         which the caller closes after the agent tab is placed so
+#                         a new workspace is not left with an orphan root shell;
+#                         EMPTY when an existing workspace was reused (no orphan).
 #
 # list+create runs under a label-keyed advisory lock so concurrent same-repo
 # spawns serialize: the loser re-lists and reuses the winner's workspace rather
@@ -205,7 +210,7 @@ for w in d.get("result", {}).get("workspaces", []):
 # reclaimed so a crashed spawn cannot wedge the next one. Max contention wait is
 # ~10s (100 x 0.1s); a stale lock is reclaimed on sight, well before that.
 herdr_resolve_workspace() {
-  local label=$1 cwd=$2 wsid create_json create_err='' lockdir i mtime now
+  local label=$1 cwd=$2 wsid init_pane='' create_json create_err='' lockdir i mtime now
   lockdir="$STATE/.wslock-$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_')"
   mkdir -p "$STATE"
   i=0
@@ -227,6 +232,11 @@ herdr_resolve_workspace() {
   if [ -z "$wsid" ]; then
     create_json=$(herdr workspace create --label "$label" --cwd "$cwd" --no-focus 2>&1) || create_err=$create_json
     wsid=$(printf '%s' "$create_json" | herdr_json_get result workspace workspace_id)
+    # The freshly-created workspace ships with its own default tab + root shell
+    # pane; capture it so the caller can close that orphan once the agent lands in
+    # its own separate tab. Only populated on the create path - a reused workspace
+    # has no orphan to close.
+    init_pane=$(printf '%s' "$create_json" | herdr_json_get result root_pane pane_id)
     [ -n "$wsid" ] || wsid=$(herdr_workspace_id_for_label "$label")
   fi
 
@@ -237,7 +247,8 @@ herdr_resolve_workspace() {
     [ -z "$create_err" ] || echo "$create_err" >&2
     return 1
   fi
-  printf '%s\n' "$wsid"
+  printf 'workspace=%s\n' "$wsid"
+  printf 'init_pane=%s\n' "$init_pane"
 }
 
 # herdr_place_agent_tab <wsid> <display-label> <cwd> <slot> <launch-cmd>:
@@ -479,6 +490,9 @@ if [ "$KIND" = secondmate ]; then
 fi
 
 spawn_cleanup_worktree() {
+  if [ -n "${WORKSPACE_INIT_PANE:-}" ] && [ "${WORKSPACE_INIT_PANE:-}" != "${PANE:-}" ]; then
+    herdr pane close "$WORKSPACE_INIT_PANE" >/dev/null 2>&1 || true
+  fi
   [ "$KIND" = secondmate ] && return 0
   if [ -d "$WT" ]; then
     git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
@@ -543,7 +557,21 @@ fi
 # the omp<->herdr status binding survives. No workspace_id is recorded in meta:
 # the workspace is shared, so teardown must clean up only this task's pane + git
 # worktree, never the whole workspace.
-WORKSPACE_ID=$(herdr_resolve_workspace "$WORKSPACE_LABEL" "$WORKSPACE_CWD") || { spawn_cleanup_worktree; exit 1; }
+WS_RESOLVE=$(herdr_resolve_workspace "$WORKSPACE_LABEL" "$WORKSPACE_CWD") || { spawn_cleanup_worktree; exit 1; }
+WORKSPACE_ID=
+# init_pane is the freshly-created workspace's own default shell pane, non-empty
+# only when this spawn CREATED the workspace; it is closed below after the agent
+# tab is placed so a new workspace is not left with an orphan root shell.
+WORKSPACE_INIT_PANE=
+while IFS= read -r _ws_line; do
+  case "$_ws_line" in
+    workspace=*) WORKSPACE_ID=${_ws_line#workspace=} ;;
+    init_pane=*) WORKSPACE_INIT_PANE=${_ws_line#init_pane=} ;;
+  esac
+done <<EOF
+$WS_RESOLVE
+EOF
+[ -n "$WORKSPACE_ID" ] || { echo "error: herdr_resolve_workspace did not return a workspace id" >&2; spawn_cleanup_worktree; exit 1; }
 # Slot name (herdr agent registration handle) must be unique per session: use the
 # task id. agent_identity (recorded in meta) is the harness integration key that
 # status binds to via the socket, independent of the slot name.
@@ -560,6 +588,13 @@ done <<EOF
 $PLACEMENT
 EOF
 [ -n "$PANE" ] || { echo "error: herdr placement did not return a pane id" >&2; spawn_cleanup_worktree; exit 1; }
+
+# Close the freshly-created workspace's orphan root shell now that the agent lives
+# in its own tab. Only on the create path (init_pane set), and never the agent's
+# own pane. Best-effort: a stray shell must never fail an otherwise-good spawn.
+if [ -n "$WORKSPACE_INIT_PANE" ] && [ "$WORKSPACE_INIT_PANE" != "$PANE" ]; then
+  herdr pane close "$WORKSPACE_INIT_PANE" >/dev/null 2>&1 || true
+fi
 
 mkdir -p "$STATE"
 {
