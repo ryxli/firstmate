@@ -115,6 +115,7 @@ firstmate works from any terminal, but running your harness inside herdr puts ev
 ```
 
 - **Event-driven supervision** - an in-process omp extension (`.omp/extensions/fm-supervisor.ts`) loads at session start and blocks (zero tokens while idle) on the herdr socket event stream, `state/*.status` writes, and per-task `check.sh` polls. It wakes the first mate only on a captain-relevant event - a crewmate reporting `done:`/`blocked:`/`needs-decision:`, a PR merging, or a stale pane - by injecting ONE dense, self-contained digest into the session via `pi.sendMessage`. Non-relevant status churn is logged, never surfaced. There is no watcher to arm, wake-queue to drain, or re-arm ritual; a presence-gated away-mode (`/afk`) batches escalations into one digest while you are out.
+- **Idle-digest while you're away** - when the first mate would go idle but you are away (`/afk`, or silent past a threshold) and crewmates are still working, it stops trickling tiny per-event closeouts. It folds every update into ONE running digest (`state/.idle-digest.md`), keeps doing only safe read-only firstmate-side refinement inside a hard time/pass budget, and relays a single ~one-screen "while you were away" summary - pending decisions first, never truncated - the moment you return. Bounded by construction (`bin/fm-idle-digest.sh`, `skill://idle-digest`); it changes only timing and consolidation, never who approves what.
 - **Worktrees, not branches in your checkout** - crewmates never touch your clone; plain `git worktree add` creates an isolated checkout per task so parallel tasks on one repo cannot collide.
 - **Two task shapes** - ship tasks change projects and ship by project mode (`no-mistakes`, `direct-PR`, or `local-only`); scout tasks investigate, plan, reproduce bugs, or audit, then leave a report at `data/<id>/report.md` and never push.
 - **Optional secondmates** - `data/secondmates.md` records persistent domain supervisors with natural-language scopes, project clone lists, and home paths.
@@ -158,6 +159,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-merge-local.sh`      | Fast-forward a `local-only` project's local default branch after approval                                           |
 | `fm-review-diff.sh`      | Review a crewmate branch against the authoritative base, with optional `--stat` output                              |
 | `.omp/extensions/fm-supervisor.ts` | In-process supervision extension: blocks on herdr socket events + status writes + check polls and injects one dense wake digest per captain-relevant event; honors `/afk` for batched away-mode escalation |
+| `fm-idle-digest.sh`      | Drive the bounded idle-digest loop while the captain is away: resume-safe running digest, time/pass-bounded refinement, and a one-screen consolidated render that never truncates pending decisions |
 | `fm-send.sh`             | Send one verified literal line (or `--key Escape`) to a crewmate pane; exits non-zero when Enter is positively swallowed. Peek-and-defer guard: if the composer holds a human's unsent draft, the message is queued under `state/.sendq/<pane>/` and the send exits 75 (deferred) instead of clobbering the draft; the queue drains FIFO on the next send once the composer is clear |
 | `fm-herdr-lib.sh`        | Shared herdr pane primitives for busy detection, dim-ghost-aware and border-aware composer detection, verified submit retry, and the composer-safe per-pane send queue (`fm_sendq_*`) |
 | `fm-identity-lib.sh`     | Sourced library: derives supervisor name/role/parent, worker tab labels, and task slugs from `config/identity` for consistent naming across spawn and brief scaffolding |
@@ -215,6 +217,11 @@ FM_STALE_ESCALATE_SECS=240         # idle seconds before a stale pane is escalat
 FM_ESCALATE_BATCH_SECS=90          # away-mode (/afk) buffer window for one batched digest; 0 = immediate
 FM_CHECK_INTERVAL=300              # seconds between per-task check.sh polls
 FM_CHECK_TIMEOUT=30                # max seconds for one check.sh / herdr call
+# idle-digest loop (bin/fm-idle-digest.sh); see skill://idle-digest
+FM_IDLE_DIGEST_SILENCE_SECS=600    # passive-absence threshold before idle-digest engages; 0 = afk-flag only
+FM_IDLE_DIGEST_WINDOW_SECS=1800    # refinement window before going idle; 0 = no active refinement
+FM_IDLE_DIGEST_MAX_PASSES=12       # max refinement passes per absence; 0 = no active refinement
+FM_IDLE_DIGEST_SECTION_MAX=6       # per-section bullet cap on the one-screen render (Needs you is never capped)
 ```
 
 ## Development
@@ -235,6 +242,7 @@ tests/fm-bootstrap.test.sh                # bootstrap dependency and feature-pro
 tests/fm-update.test.sh                   # fast-forward-only self-update, reread, nudge, dedup, and skip-safety tests
 tests/fm-secondmate-safety.test.sh        # secondmate routing, seeding, idle charter, backlog handoff, spawn, recovery, teardown, and FM_HOME safety
 tests/fm-teardown.test.sh                 # fm-teardown.sh safety and reminder checks: local-only fork-remote allow, truly-unpushed refuse, merged-to-main allow, no-mistakes regression, tasks-axi reminder, --force override
+tests/fm-idle-digest.test.sh              # bounded idle-digest state machine: begin idempotency and restart-resume, fold dedup and unknown-section rejection, active/pass loop self-termination at window/pass cap, screen Needs-you truncation guard, and clear
 tests/fm-resolve-spawn.test.sh            # spawn resolver preflight: harness binary check, unregistered-project warn, worktree base check, and abort-before-worktree integration with fm-spawn
 tests/fm-send-defer.test.sh              # peek-and-defer guard: empty-composer delivers, pending-draft defers (exit 75) without clobbering, queue drains FIFO on next clear send, idempotent re-defer, --key unguarded
 [ "$(readlink CLAUDE.md)" = "AGENTS.md" ]
