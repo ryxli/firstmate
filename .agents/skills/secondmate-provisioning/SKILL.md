@@ -35,6 +35,7 @@ If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholde
 Keep the charter focused on the persistent responsibility, available project clones, and escalation back to the main firstmate status file.
 The scaffold's definition of done encodes the idle-plus-domain-grooming contract: on startup the secondmate reconciles only its own in-flight work, then tends its own domain (health, standing watch-items, regressions to guard) while waiting for routed tasks, never self-initiating an org-wide survey or audit beyond its domain.
 Preserve that wording when filling the charter.
+The scaffold also auto-injects an "Act once, report deltas - no churn" section (lean-loop discipline) and a "House tooling conventions" block (bun/bunx rule and axi CLI grammar) into every charter; you do not add either manually.
 
 Provision the persistent home and registry entry after the charter is filled:
 
