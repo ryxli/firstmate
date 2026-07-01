@@ -68,11 +68,6 @@ fm_lavish_base_url() {
   printf 'http://%s:%s\n' "$host" "$port"
 }
 
-# fm_lavish_urlencode <str>: percent-encode a string for a query parameter.
-fm_lavish_urlencode() {
-  python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1], safe=""))' "$1" 2>/dev/null
-}
-
 # fm_lavish_state_dir: the per-home directory where steward metadata + relayed
 # feedback live (under the firstmate state dir, gitignored). Honors the same
 # FM_HOME / FM_STATE_OVERRIDE resolution as the rest of bin/.

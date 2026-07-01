@@ -62,13 +62,17 @@ if [ "${1:-}" = "--recover" ]; then
       continue # already attended
     fi
     # Stale meta (dead steward). Relaunch only if the session is still open.
-    status=$(LAVISH_AXI_NO_OPEN=1 bunx lavish-axi "$file" --no-open 2>/dev/null \
+    status=$(bunx lavish-axi "$file" --no-open 2>/dev/null \
       | sed -n 's/^[[:space:]]*status:[[:space:]]*//p' | head -1)
     case "$status" in
-      ended|"")
+      ended)
         rm -f "$meta" # session gone; drop the stale record
         ;;
       *)
+        # Empty status (unexpected output or server error) is treated the same as
+        # a live non-ended status: relaunch the steward and let its bounded-revive
+        # determine whether the session is truly dead, rather than silently
+        # abandoning a possibly-live session.
         fm_lavish_kill_polls "$file" # reap any orphan poll from the crashed steward
         launch_steward "$file" "$key" "${relay:--}" "$url"
         recovered=$((recovered + 1))
@@ -100,7 +104,7 @@ KEY=$(fm_lavish_key "$CANON") || { echo "error: cannot derive session key (need 
 
 # Open/resume the session via the official CLI (also guarantees the server is up).
 if [ "$NO_OPEN" -eq 1 ]; then
-  OPEN_OUT=$(LAVISH_AXI_NO_OPEN=1 bunx lavish-axi "$CANON" --no-open 2>&1)
+  OPEN_OUT=$(bunx lavish-axi "$CANON" --no-open 2>&1)
 else
   OPEN_OUT=$(bunx lavish-axi "$CANON" 2>&1)
 fi

@@ -78,7 +78,7 @@ log "steward started pid=$$ file=$FILE relay=$RELAY url=$URL"
 wake_agent() {
   local n=$1 msg
   [ "$RELAY" != "-" ] || { log "relay disabled; feedback recorded only"; return 0; }
-  msg="Lavish feedback ($n item(s)) on $FILE - read $FEEDBACK, apply the changes, then acknowledge in-browser with: $SCRIPT_DIR/fm-lavish-reply.sh $FILE \"<message>\" (do NOT run 'lavish-axi poll' yourself - the steward owns it)"
+  msg="Lavish feedback ($n item(s)) on $FILE - read $FEEDBACK, apply the changes, then acknowledge in-browser with: $SCRIPT_DIR/fm-lavish-reply.sh \"$FILE\" \"<message>\" (do NOT run 'lavish-axi poll' yourself - the steward owns it)"
   if "$SCRIPT_DIR/fm-send.sh" "$RELAY" "$msg" >>"$LOG" 2>&1; then
     log "relayed feedback to pane $RELAY ($n items)"
   else
@@ -117,7 +117,7 @@ while [ "$running" -eq 1 ]; do
     # giving up after FAIL_MAX consecutive failures so a permanently dead server
     # never leaves a steward spinning forever.
     fails=$((fails + 1))
-    revive=$(LAVISH_AXI_NO_OPEN=1 bunx lavish-axi "$FILE" --no-open 2>>"$LOG")
+    revive=$(bunx lavish-axi "$FILE" --no-open 2>>"$LOG")
     case "$revive" in
       *"status: ended"*)
         log "revive reports session ended; steward exiting"
@@ -154,7 +154,7 @@ while [ "$running" -eq 1 ]; do
         printf '\n## Feedback %s (%s item(s))\n\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$n"
         printf '%s\n%s\n%s\n' "$fence" "$body" "$fence"
         printf '\nApply the requested changes to %s, then acknowledge in-browser:\n' "$FILE"
-        printf '    %s/fm-lavish-reply.sh %s "<message for the captain>"\n' "$SCRIPT_DIR" "$FILE"
+        printf '    %s/fm-lavish-reply.sh "%s" "<message for the captain>"\n' "$SCRIPT_DIR" "$FILE"
         printf "Do NOT run 'lavish-axi poll' yourself - the steward owns the poll and will relay the next round here.\n"
       } >> "$FEEDBACK"
       log "feedback received ($n items); appended to $FEEDBACK"
