@@ -80,7 +80,7 @@ scan() { # <label> <extra-grep-flags> <pattern>
 # 1) the generic ecosystem runner, as a whole word.
 scan "npx invocation" "-w" 'npx'
 # 2) running built output directly: `node <path-with-dist>` (e.g. node dist/cli.js).
-scan "node dist invocation" "" 'node[[:space:]]+[^[:space:]]*dist'
+scan "node dist invocation" "-w" 'node[[:space:]]+[^[:space:]]*dist'
 # 3) a raw .js script file as a user-facing command (./bin/x.js, bin/x.js).
 scan ".js script invocation" "" '\.?/?bin/[^[:space:]]*\.js'
 
