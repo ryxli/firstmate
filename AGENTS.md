@@ -113,7 +113,7 @@ Use `herdr pane rename` (sets the pane's display label), NOT `herdr agent rename
   herdr pane rename "$(herdr pane current 2>/dev/null | sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p')" <name>
 
 This is idempotent and non-fatal if herdr is unavailable or the pane cannot be identified.
-Also label the first mate's OWN herdr workspace `firstmate` so the space reads clearly and stays distinct from the per-secondmate and per-project spaces (best-effort, idempotent; a label only, never `herdr agent rename`):
+Also label the first mate's OWN herdr workspace `firstmate` so the space reads clearly and stays distinct from the per-secondmate spaces (best-effort, idempotent; a label only, never `herdr agent rename`):
 
   herdr workspace rename "$(herdr pane current 2>/dev/null | sed -n 's/.*"workspace_id":"\([^"]*\)".*/\1/p')" firstmate
 
