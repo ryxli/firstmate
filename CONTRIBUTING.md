@@ -42,6 +42,9 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
   Each starts with a usage header comment; keep it accurate when you change behavior.
   Test scripts and helpers in `tests/` are plain bash too.
   `shellcheck bin/*.sh tests/*.sh` must pass, and CI enforces it.
+- This workstation runs bun.
+  Use `bun` / `bunx` for all JS/TS tooling in docs, help text, and any user-facing invocation.
+  `bin/fm-tooling-lint.sh` scans shipped tooling surfaces (README, CONTRIBUTING, `SKILL.md` files, `bin/*.sh` help text) for the generic JS ecosystem runner, built-output runs, and raw `.js` script invocations, and CI enforces it in the invariants job.
 - Changes to harness adapters (launch templates in `bin/fm-spawn.sh`, facts in `.agents/skills/harness-adapters/SKILL.md`) must be verified empirically against the real harness, never written from documentation alone.
 - In Markdown, put each full sentence on its own line.
 

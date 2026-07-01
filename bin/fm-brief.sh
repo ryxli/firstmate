@@ -84,6 +84,16 @@ $LEAN_DELTAS"
 LEAN_LOOP_SM="# Act once, report deltas (no churn)
 $LEAN_DELTAS"
 
+# House tooling conventions, injected verbatim into ship briefs and secondmate
+# charters so every worker and domain supervisor is born knowing the standard
+# (a from-scratch tool that reaches for the generic ecosystem default is the bug
+# this closes). The bin/fm-tooling-lint.sh guard mechanically enforces the bun
+# half; this block is the human-readable contract.
+HOUSE_TOOLING="# House tooling conventions
+This workstation runs bun. Use \`bun\` / \`bunx\` for all JS/TS tooling; never \`npx\`, and never \`node dist/...\` or \`./bin/*.js\` in docs, help text, or any user-facing invocation. A tool you build must be runnable and documented via \`bunx <tool>\` (or a bun-linked bare invocation) from day one.
+A new CLI joins the axi family (gh-axi, slack-axi, chrome-devtools-axi, lavish-axi): match their command grammar, lean TOON output, on-demand \`SKILL.md\` (no per-session injection), \`NO_TOKEN\` auth boundary, and invocation form. Do not invent a divergent convention.
+Any PR you open must help the reviewer VISUALIZE the change: a copy-paste of the command and its real output, a short before/after, or a demo snippet. Trim it to what shows the change, not an exhaustive dump."
+
 if [ "$KIND" = secondmate ]; then
 SECONDMATE_PROJECTS=""
 idx=1
@@ -126,6 +136,9 @@ What stays off-limits is any org-wide or higher-level survey, audit, or "find im
 Delegate real grooming work (a fix, a repro, a scoped audit) to a disposable crewmate, exactly as you would routed work.
 
 $LEAN_LOOP_SM
+
+$HOUSE_TOOLING
+Hold the work you supervise to this standard: brief it into your crewmates and check it before you relay a PR.
 
 # Escalation to main firstmate
 Handle routine work yourself.
@@ -175,7 +188,7 @@ You are a crewmate: an autonomous worker agent managed by firstmate. Work on you
 $IDENTITY_CONTEXT
 
 # Setup
-You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.
+You are in a disposable git worktree of $REPO, already on your own \`fm/$ID\` branch (firstmate created it with the worktree); do not create or switch branches.
 This is a SCOUT task: the deliverable is a written report, not a PR.
 The worktree is your laboratory - install, run, edit, and make scratch commits freely; all of it is discarded at teardown.
 The report is the only thing that survives, so anything worth keeping must be in it.
@@ -269,9 +282,8 @@ You are a crewmate: an autonomous worker agent managed by firstmate. Work on you
 $IDENTITY_CONTEXT
 
 # Setup
-You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.
-Verify isolation before anything else. Run \`pwd -P\` and \`git rev-parse --show-toplevel\`; both must resolve to your disposable worktree, not the primary project checkout (projects/$REPO). If the top-level path is the primary checkout, STOP - do not branch or commit here; run \`$REPORT $STATUS_FILE "blocked: not in my isolated worktree"\` and report.
-1. First action: create your branch: \`git checkout -b fm/$ID\`$SETUP2
+You are in a disposable git worktree of $REPO, already on your own \`fm/$ID\` branch (firstmate created it with \`git worktree add -b\`); do not create or switch branches - just work, commit onto \`fm/$ID\`, and push that branch.
+1. First action, verify isolation: run \`pwd -P\` and \`git rev-parse --show-toplevel\` (both must resolve to your disposable worktree, not the primary checkout projects/$REPO) and \`git branch --show-current\` (must print \`fm/$ID\`). If any is wrong, STOP - do not commit here; run \`$REPORT $STATUS_FILE "blocked: not in my isolated worktree"\` and report.$SETUP2
 
 # Rules
 $RULE1
@@ -289,6 +301,8 @@ $RULE1
    run \`$REPORT $STATUS_FILE "needs-decision: {summary of options}"\` and stop. Firstmate will reply with the decision.
 
 $LEAN_LOOP_CREW
+
+$HOUSE_TOOLING
 
 # Project memory
 If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/bin/fm-ensure-agents-md.sh .\` in the worktree.

@@ -53,3 +53,5 @@ jobs:
             printf '%s\n' "$tracked"
             exit 1
           fi
+      - name: Shipped tooling surfaces must use bun, not npx/node-dist/raw-js
+        run: bin/fm-tooling-lint.sh

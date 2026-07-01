@@ -30,7 +30,7 @@ run_brief() {
 }
 
 test_ship_brief_has_identity_context() {
-  local home out brief iso_line branch_line
+  local home out brief
   home=$(make_home ship)
   out=$(run_brief "$home" fix-login-k3 myproj) || fail "scaffold failed: $out"
   brief="$home/data/fix-login-k3/brief.md"
@@ -46,18 +46,24 @@ test_ship_brief_has_identity_context() {
     || fail "ship brief missing worker visible label"
   grep -qF "$home/state/fix-login-k3.status" "$brief" \
     || fail "ship brief missing report-back target"
-  grep -qF 'Verify isolation before anything else' "$brief" \
+  grep -qF 'verify isolation' "$brief" \
     || fail "ship brief missing worktree-isolation assertion"
   grep -qF 'git rev-parse --show-toplevel' "$brief" \
     || fail "ship brief missing the show-toplevel isolation check"
-  grep -qF 'do not branch or commit here' "$brief" \
-    || fail "ship brief isolation assertion does not tell the crewmate to stop before branching"
-  # The isolation assertion comes BEFORE the branch step.
-  iso_line=$(grep -n 'Verify isolation before anything else' "$brief" | head -1 | cut -d: -f1)
-  branch_line=$(grep -n 'git checkout -b fm/' "$brief" | head -1 | cut -d: -f1)
-  [ -n "$iso_line" ] && [ -n "$branch_line" ] && [ "$iso_line" -lt "$branch_line" ] \
-    || fail "isolation assertion must precede the branch-creation step"
-  pass "ship brief carries the isolation-first assertion before the branch step"
+  grep -qF 'git branch --show-current' "$brief" \
+    || fail "ship brief missing the branch-name isolation check"
+  # The brief must state the crewmate is ALREADY on its fm/<id> branch (fm-spawn
+  # created the worktree with `git worktree add -b`), and must NOT instruct branch
+  # creation - the old "git checkout -b fm/<id>" text made every crewmate hit
+  # "a branch named fm/<id> already exists". This is the anti-regression guard.
+  # shellcheck disable=SC2016  # literal backticks in the expected brief text
+  grep -qF 'already on your own `fm/fix-login-k3` branch' "$brief" \
+    || fail "ship brief must say the crewmate is already on its fm/<id> branch"
+  grep -qF 'do not create or switch branches' "$brief" \
+    || fail "ship brief must tell the crewmate not to create/switch branches"
+  ! grep -qF 'git checkout -b fm/' "$brief" \
+    || fail "ship brief must NOT instruct branch creation (git checkout -b fm/<id>)"
+  pass "ship brief says already-on-branch and does not instruct branch creation"
 }
 
 test_scout_brief_has_identity_context() {

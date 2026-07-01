@@ -513,7 +513,7 @@ A scout task follows Intake, Spawn, and Supervise exactly as above - scaffold th
 - Tear down immediately - no merge gate. `bin/fm-teardown.sh` allows a scout worktree's scratch commits and dirty files once the report exists; if the report is missing, it refuses, because the findings are the work product.
 - Record it in Done with the report path instead of a PR link using `tasks-axi done` when compatible tasks-axi is available, otherwise hand-edit `data/backlog.md` and keep Done to the 10 most recent, then re-evaluate the queue and dispatch only queued work whose blockers are gone and whose time/date gate, if any, has arrived.
 
-**Promotion.** When a scout's findings reveal shippable work (a reproduced bug with a clear fix) and the captain wants it shipped, promote the task in place instead of respawning: run `bin/fm-promote.sh <id>` (flips `kind=` to ship in meta, restoring teardown's full protection), then send the crewmate its ship instructions - inventory scratch state, reset to a clean default-branch base, carry over only intended fix changes, create branch `fm/<id>`, implement, and report `done` according to the project's delivery mode.
+**Promotion.** When a scout's findings reveal shippable work (a reproduced bug with a clear fix) and the captain wants it shipped, promote the task in place instead of respawning: run `bin/fm-promote.sh <id>` (flips `kind=` to ship in meta, restoring teardown's full protection), then send the crewmate its ship instructions - inventory scratch state, hard-reset `fm/<id>` to the default-branch HEAD (the branch already exists; fm-spawn created it with the worktree), carry over only intended fix changes, implement, and report `done` according to the project's delivery mode.
 The crewmate keeps its worktree, loaded context, and repro, but the ship branch must start from a clean base with only intended changes; scratch commits and debug edits from the scout phase never ride along.
 The repro becomes the regression test.
 From there the task is an ordinary ship task through its mode-specific validation, PR or local merge, and Teardown.
@@ -626,7 +626,7 @@ Secondmates contribute their segment on firstmate's request or at week close; fo
 
 ## 11. Crewmate briefs
 
-Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, lean-loop discipline, definition of done) and all paths filled in.
+Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, lean-loop discipline, house tooling conventions, definition of done) and all paths filled in.
 Identity context (supervisor name, role, parent in the supervision chain, the crewmate's visible herdr tab and pane display label, its domain/project workspace, and its status-reporting path) is injected automatically via `fm-identity-lib.sh`; override the worker label with `FM_TASK_LABEL` or the domain with `FM_TASK_DOMAIN`.
 For a ship task the definition of done is shaped by the project's delivery mode (section 6): `no-mistakes` ends in the harness-appropriate no-mistakes validation pipeline, `direct-PR` has the crewmate push and open the PR itself, `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
 The scaffold reads the mode via `fm-project-mode.sh`, so you do not pass it.
@@ -639,7 +639,7 @@ Set `FM_SECONDMATE_CHARTER='<charter>'` to fill the charter text and `FM_SECONDM
 If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholder before seeding.
 Keep the charter focused on the persistent responsibility, available project clones, and escalation back to the main firstmate status file.
 The scaffold's definition of done encodes the idle-by-default-plus-domain-grooming contract (section 6): on startup the secondmate reconciles only its own in-flight work, then tends its own domain (its health, standing watch-items, regressions to guard) while waiting for routed tasks, never self-initiating an org-wide survey or audit beyond its domain; preserve that wording when filling the charter.
-The scaffold also auto-injects an "Act once, report deltas - no churn" section (lean-loop discipline for the manager context) into every charter; you do not need to add it manually.
+The scaffold also auto-injects an "Act once, report deltas - no churn" section (lean-loop discipline for the manager context) and the "House tooling conventions" block (bun/bunx rule and axi CLI grammar) into every charter; ship briefs get the house tooling conventions block too; you do not add either manually.
 `bin/fm-home-seed.sh` copies the charter into the secondmate home as `data/charter.md`; `bin/fm-spawn.sh --secondmate` launches it through the same launch-template path.
 After seeding, hand the new secondmate's in-scope queued items off from the main backlog with `bin/fm-backlog-handoff.sh` (section 6).
 `bin/fm-home-seed.sh` refuses to copy a missing or placeholder charter.
