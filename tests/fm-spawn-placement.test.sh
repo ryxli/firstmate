@@ -18,6 +18,7 @@
 #     workspace_id (so teardown does per-task cleanup, never destroying the shared
 #     domain workspace);
 #   - a --secondmate lands in its own workspace named after the secondmate (its home), its own tab labeled "home" so the space is not "Name . Name";
+#   - an omp secondmate home overlay at config/omp-overlay.yml is injected into the fresh launch, and absent overlay leaves the omp command unchanged;
 #   - a secondmate home missing AGENTS.md/bin is auto-linked, not rejected.
 set -u
 
@@ -325,6 +326,43 @@ test_secondmate_home_autolinks_missing_files() {
   pass "secondmate home missing AGENTS.md/bin is auto-linked, not rejected"
 }
 
+test_secondmate_omp_overlay_is_injected_when_present() {
+  local home fakebin smhome smhome_abs out overlay_cmd
+  home=$(make_case sm-overlay shipproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  : > "$home/ws.tsv"
+  smhome=$(make_secondmate_home sm-overlay anchor3 Anchor 1)
+  smhome_abs=$(cd "$smhome" && pwd -P)
+  printf 'modelRoles:\n  default: openai-codex/gpt-5.4-mini\n' > "$smhome/config/omp-overlay.yml"
+
+  out=$(run_spawn "$home" "$fakebin" anchor3 "$smhome" omp --secondmate) \
+    || fail "secondmate spawn with overlay failed: $out"
+
+  overlay_cmd="omp --auto-approve --config '$smhome_abs/config/omp-overlay.yml' \"\$(cat '$smhome_abs/data/charter.md')\""
+  grep -qF -- "$overlay_cmd" "$home/herdr.log" \
+    || fail "omp overlay was not injected into the secondmate launch: $(cat "$home/herdr.log")"
+  pass "secondmate omp overlay is injected into the fresh launch"
+}
+
+test_secondmate_omp_overlay_is_omitted_when_absent() {
+  local home fakebin smhome smhome_abs out base_cmd
+  home=$(make_case sm-no-overlay shipproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  : > "$home/ws.tsv"
+  smhome=$(make_secondmate_home sm-no-overlay anchor4 Anchor 1)
+  smhome_abs=$(cd "$smhome" && pwd -P)
+
+  out=$(run_spawn "$home" "$fakebin" anchor4 "$smhome" omp --secondmate) \
+    || fail "secondmate spawn without overlay failed: $out"
+
+  base_cmd="omp --auto-approve \"\$(cat '$smhome_abs/data/charter.md')\""
+  grep -qF -- "$base_cmd" "$home/herdr.log" \
+    || fail "omp launch changed despite no overlay file: $(cat "$home/herdr.log")"
+  ! grep -qF -- '--config ' "$home/herdr.log" \
+    || fail "omp launch unexpectedly included --config without an overlay file: $(cat "$home/herdr.log")"
+  pass "secondmate omp launch stays unchanged when no overlay file exists"
+}
+
 # The worktree-isolation guard must refuse to launch when the just-created
 # worktree resolves to the primary project checkout, and must clean up after
 # itself (no leaked worktree/branch, no agent started).
@@ -385,5 +423,7 @@ test_crewmate_reuses_existing_domain_workspace
 test_crewmate_in_secondmate_home_uses_mate_workspace
 test_secondmate_lands_in_own_named_workspace
 test_secondmate_home_autolinks_missing_files
+test_secondmate_omp_overlay_is_injected_when_present
+test_secondmate_omp_overlay_is_omitted_when_absent
 test_spawn_refuses_when_worktree_resolves_to_primary_checkout
 test_workspace_orphan_pane_closed_on_agent_start_failure
