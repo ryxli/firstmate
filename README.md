@@ -227,6 +227,10 @@ FM_IDLE_DIGEST_SILENCE_SECS=600    # passive-absence threshold before idle-diges
 FM_IDLE_DIGEST_WINDOW_SECS=1800    # refinement window before going idle; 0 = no active refinement
 FM_IDLE_DIGEST_MAX_PASSES=12       # max refinement passes per absence; 0 = no active refinement
 FM_IDLE_DIGEST_SECTION_MAX=6       # per-section bullet cap on the one-screen render (Needs you is never capped)
+# Lavish render-delegation (bin/fm-lavish-steward.sh)
+FM_LAVISH_FAIL_MAX=8               # consecutive poll failures before the steward gives up
+FM_LAVISH_BACKOFF_START=2          # initial backoff seconds on poll failure
+FM_LAVISH_BACKOFF_CAP=30           # maximum backoff seconds (exponential, capped)
 ```
 
 ## Development
@@ -245,6 +249,7 @@ for test_script in tests/*.test.sh; do "$test_script"; done   # behavior tests, 
 tests/fm-composer-ghost.test.sh           # dim-ghost stripping, ghost-only composer detection, and escape-free peek tests
 tests/fm-bootstrap.test.sh                # bootstrap dependency and feature-probe tests
 tests/fm-update.test.sh                   # fast-forward-only self-update, reread, nudge, dedup, and skip-safety tests
+tests/fm-lavish.test.sh                   # Lavish render-delegation: session key math, URL variants, canonical path, state-dir, steward liveness, orphan-poll selectivity, argument validation, recover empty, give-up on dead server
 tests/fm-secondmate-safety.test.sh        # secondmate routing, seeding, idle charter, backlog handoff, spawn, recovery, teardown, and FM_HOME safety
 tests/fm-teardown.test.sh                 # fm-teardown.sh safety and reminder checks: local-only fork-remote allow, truly-unpushed refuse, merged-to-main allow, no-mistakes regression, tasks-axi reminder, --force override
 tests/fm-idle-digest.test.sh              # bounded idle-digest state machine: begin idempotency and restart-resume, fold dedup and unknown-section rejection, active/pass loop self-termination at window/pass cap, screen Needs-you truncation guard, and clear

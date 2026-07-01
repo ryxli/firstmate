@@ -92,6 +92,7 @@ state/               volatile runtime signals; gitignored
   .idle-digest.md    running idle-digest while the captain is away: ONE consolidated "while you were away" digest built by bin/fm-idle-digest.sh and relayed on the captain's return (section 8); resumed (never reset) across a restart; never hand-edit
   .sendq/<pane>/     per-pane FIFO queue of deferred fm-send messages; written when the composer holds a human's unsent draft; drained on the next send once the composer is clear; cleaned up by fm-teardown on task removal
   .status-internal.log   rolling log of non-captain-relevant status lines the extension suppressed; capped at FM_STATUS_INTERNAL_LOG_MAX lines (default 500); never touch
+  lavish/            Lavish render-delegation state (gitignored): <key>.steward (steward worker meta: pid, file, relay pane, url), <key>.feedback.md (relayed feedback rounds, appended per event), <key>.steward.log (diagnostics); keyed by 16-hex sha256 of the artifact canonical path; cleaned up on steward exit
 .no-mistakes/        local validation state and evidence; gitignored
 ```
 
