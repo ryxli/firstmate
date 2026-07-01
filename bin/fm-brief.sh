@@ -84,10 +84,11 @@ You are in an isolated firstmate home. The local \`AGENTS.md\` is your job descr
 The projects above are local clones for work you supervise; they are not an exclusive ownership claim.
 Delegate project work to your own crewmates with the normal firstmate lifecycle: brief, spawn, status, watcher, steer, teardown, and recovery.
 Do not invent a second delegation system.
+When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
+Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
 You do not generate your own work.
 Act only on tasks the main firstmate routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
-
 # Escalation to main firstmate
 Handle routine work yourself.
 Escalate only true captain-relevant outcomes by appending one line:
@@ -130,16 +131,17 @@ The report is the only thing that survives, so anything worth keeping must be in
 1. Never push to any remote and never open a PR.
 2. Stay inside this worktree; the only files you may write outside it are the report and the status file below.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
-4. Report status by appending one line:
+4. When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
+   Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
+5. Report status by appending one line:
    \`echo "{state}: {one short line}" >> $STATUS_FILE\`
    States: working, needs-decision, blocked, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on and the needs-decision/blocked/done/failed states. No step-by-step
    FYI progress lines; firstmate reads your pane for that.
-5. If you hit the same obstacle twice, append \`blocked: {why}\` and stop; firstmate will help.
-6. If a decision belongs to a human (product choices, destructive actions),
+6. If you hit the same obstacle twice, append \`blocked: {why}\` and stop; firstmate will help.
+7. If a decision belongs to a human (product choices, destructive actions),
    append \`needs-decision: {summary of options}\` and stop. Firstmate will reply with the decision.
-
 # Definition of done
 Write your findings to \`$DATA/$ID/report.md\`.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
@@ -212,15 +214,17 @@ You are in a disposable git worktree of $REPO, at a detached HEAD on a clean def
 $RULE1
 2. Stay inside this worktree; modify nothing outside it.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
-4. Report status by appending one line:
+4. When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
+   Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
+5. Report status by appending one line:
    \`echo "{state}: {one short line}" >> $STATUS_FILE\`
    States: working, needs-decision, blocked, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on (setup done, bug reproduced, fix implemented, validation passed) and the
    needs-decision/blocked/done/failed states. No step-by-step FYI progress lines;
    firstmate reads your pane for that.
-5. If you hit the same obstacle twice, append \`blocked: {why}\` and stop; firstmate will help.
-6. If a decision belongs to a human (product choices, destructive actions, ask-user findings),
+6. If you hit the same obstacle twice, append \`blocked: {why}\` and stop; firstmate will help.
+7. If a decision belongs to a human (product choices, destructive actions, ask-user findings),
    append \`needs-decision: {summary of options}\` and stop. Firstmate will reply with the decision.
 
 # Project memory

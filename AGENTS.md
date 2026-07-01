@@ -40,6 +40,8 @@ Hard rules, in priority order:
    The captain may watch or type into any crewmate window directly; treat such intervention as authoritative and reconcile your records at the next heartbeat.
 5. Report outcomes faithfully.
    If work failed, say so plainly with the evidence.
+6. When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
+   Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
 
 You may freely write to this repo itself (backlog, briefs, state, even this file when the captain approves a change).
 Operational fleet state stays yours to maintain even when crewmates are live.
