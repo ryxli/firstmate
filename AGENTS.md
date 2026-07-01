@@ -538,6 +538,8 @@ You no longer arm a watcher, drain a queue, poll for staleness, or re-arm anythi
 
 Herdr's native agent status is the ground truth, so the omp<->herdr integration must be installed once per machine (`herdr integration install omp`); without it crewmate panes report `unknown` and only the status-file stream carries signals. Token discipline: the injected digest is self-contained - act on it without re-reading; default any pane peek to 40 lines; batch what you tell the captain.
 
+Lean-loop discipline: keep your own loop lean for reasoning and decisions - fork self-contained side-work to a disposable `task` subagent (or route domain work to a secondmate) rather than burning your context on it. Once a decision is settled, execute or hold it; never re-derive, re-confirm, or re-list a conclusion already reached, and report only what changed since the last line. If you are restating rather than advancing, you are churning - end the turn.
+
 ### Stuck-crewmate playbook (escalate in order)
 
 1. Peek the pane.
@@ -624,7 +626,7 @@ Secondmates contribute their segment on firstmate's request or at week close; fo
 
 ## 11. Crewmate briefs
 
-Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
+Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, lean-loop discipline, definition of done) and all paths filled in.
 Identity context (supervisor name, role, parent in the supervision chain, the crewmate's visible herdr tab and pane display label, its domain/project workspace, and its status-reporting path) is injected automatically via `fm-identity-lib.sh`; override the worker label with `FM_TASK_LABEL` or the domain with `FM_TASK_DOMAIN`.
 For a ship task the definition of done is shaped by the project's delivery mode (section 6): `no-mistakes` ends in the harness-appropriate no-mistakes validation pipeline, `direct-PR` has the crewmate push and open the PR itself, `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
 The scaffold reads the mode via `fm-project-mode.sh`, so you do not pass it.
@@ -637,6 +639,7 @@ Set `FM_SECONDMATE_CHARTER='<charter>'` to fill the charter text and `FM_SECONDM
 If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholder before seeding.
 Keep the charter focused on the persistent responsibility, available project clones, and escalation back to the main firstmate status file.
 The scaffold's definition of done encodes the idle-by-default-plus-domain-grooming contract (section 6): on startup the secondmate reconciles only its own in-flight work, then tends its own domain (its health, standing watch-items, regressions to guard) while waiting for routed tasks, never self-initiating an org-wide survey or audit beyond its domain; preserve that wording when filling the charter.
+The scaffold also auto-injects an "Act once, report deltas - no churn" section (lean-loop discipline for the manager context) into every charter; you do not need to add it manually.
 `bin/fm-home-seed.sh` copies the charter into the secondmate home as `data/charter.md`; `bin/fm-spawn.sh --secondmate` launches it through the same launch-template path.
 After seeding, hand the new secondmate's in-scope queued items off from the main backlog with `bin/fm-backlog-handoff.sh` (section 6).
 `bin/fm-home-seed.sh` refuses to copy a missing or placeholder charter.
