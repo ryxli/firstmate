@@ -1957,6 +1957,10 @@ test_secondmate_charter_brief_is_idle_by_default() {
     || fail "charter brief does not restrict work to routed tasks"
   grep -F 'never spawn a survey, audit, or any self-directed' "$brief" >/dev/null \
     || fail "charter brief does not forbid self-initiated survey/audit work"
+  grep -F 'state the diagnostic intent first, then send short human-legible expert commands one by one' "$brief" >/dev/null \
+    || fail "charter brief does not teach the visible-pane command style"
+  grep -F 'Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane' "$brief" >/dev/null \
+    || fail "charter brief does not forbid noisy visible-pane command blobs"
   # Reconcile-on-startup must remain: bootstrap and recovery still run, scoped to own work.
   grep -F 'run normal firstmate bootstrap and recovery' "$brief" >/dev/null \
     || fail "charter brief dropped the bootstrap/recovery reconciliation step"
