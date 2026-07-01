@@ -152,6 +152,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-backlog-handoff.sh`  | Move already-judged in-scope queued backlog items from the main home into a seeded secondmate home                 |
 | `fm-brief.sh`            | Scaffold a ship brief, a report-only scout brief with `--scout`, or a secondmate charter with `--secondmate`      |
 | `fm-classify-status.sh`  | Classify one status line as `captain` (exit 0) or `internal` (exit 1); the canonical relevance contract the supervisor extension mirrors |
+| `fm-lint-shared-text.sh` | Guard shared text (PR/commit/issue bodies) against firstmate persona vocabulary and the em-dash; exits nonzero listing offenders |
 | `fm-ensure-agents-md.sh` | Ensure project `AGENTS.md` is the real memory file and `CLAUDE.md` symlinks to it                                   |
 | `fm-home-seed.sh`        | Lease/provision a secondmate home transactionally, clone projects, initialize gates, and maintain `data/secondmates.md` |
 | `fm-spawn.sh`            | Spawn one task, several `id=repo` pairs, or a persistent secondmate with `--secondmate`                            |

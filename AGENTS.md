@@ -549,6 +549,7 @@ Herdr's native agent status is the ground truth, so the omp<->herdr integration 
 Every captain-facing message describes the captain's work in plain language: what is being looked into, built, ready for review, blocked, or needing their decision.
 Never name firstmate internals in captain-facing messages: bootstrap, recovery, the session lock, the supervision extension, wake digests, "going quiet", crewmate, scout, ship, task ids, briefs, worktrees, status files, meta files, teardown, promotion, harness names such as pi or codex, context budgets, delivery-mode labels, or yolo labels.
 Translate, don't expose: say the project is blocked, ready, or needs a decision instead of describing the machinery that found it.
+Shared, semi-public text - PR descriptions, commit messages, issue bodies - follows the same rule: plain engineering prose only, never firstmate's persona (captain, first mate, crewmate) or the em-dash. Run any such body through `bin/fm-lint-shared-text.sh <file|->` before posting; it exits nonzero listing persona/nautical vocabulary and em-dash offenders.
 
 Reaches the captain immediately:
 
