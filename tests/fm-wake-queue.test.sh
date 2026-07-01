@@ -85,51 +85,130 @@ make_supercase() {
 #!/usr/bin/env bash
 set -u
 get_status() {
-  local f="${FM_FAKE_HERDR_STATUS_FILE:-}"
+  local pane="${1:-}" dir file f
+  dir="${FM_FAKE_HERDR_STATUS_DIR:-}"
+  if [ -n "$pane" ] && [ -n "$dir" ]; then
+    file="$dir/$(printf '%s' "$pane" | tr ':/' '__').status"
+    [ -f "$file" ] && cat "$file" 2>/dev/null && return
+  fi
+  f="${FM_FAKE_HERDR_STATUS_FILE:-}"
   [ -n "$f" ] && [ -f "$f" ] && cat "$f" 2>/dev/null && return
   printf 'idle'
 }
 set_status() {
-  local f="${FM_FAKE_HERDR_STATUS_FILE:-}"
-  [ -n "$f" ] && printf '%s' "$1" > "$f"
+  local value=$1 pane="${2:-}" dir file f
+  dir="${FM_FAKE_HERDR_STATUS_DIR:-}"
+  if [ -n "$pane" ] && [ -n "$dir" ]; then
+    mkdir -p "$dir"
+    file="$dir/$(printf '%s' "$pane" | tr ':/' '__').status"
+    printf '%s' "$value" > "$file"
+    return
+  fi
+  f="${FM_FAKE_HERDR_STATUS_FILE:-}"
+  [ -n "$f" ] && printf '%s' "$value" > "$f"
 }
 pane_content() {
-  local f="${FM_FAKE_HERDR_PANE_FILE:-}"
+  local pane="${1:-}" dir file f
+  dir="${FM_FAKE_HERDR_PANE_DIR:-}"
+  if [ -n "$pane" ] && [ -n "$dir" ]; then
+    file="$dir/$(printf '%s' "$pane" | tr ':/' '__').pane"
+    [ -f "$file" ] && cat "$file" 2>/dev/null
+    return
+  fi
+  f="${FM_FAKE_HERDR_PANE_FILE:-}"
   [ -n "$f" ] && [ -f "$f" ] && cat "$f" 2>/dev/null || true
+}
+set_pane_content() {
+  local pane=$1 text="${2-}" dir file f
+  dir="${FM_FAKE_HERDR_PANE_DIR:-}"
+  if [ -n "$dir" ]; then
+    mkdir -p "$dir"
+    file="$dir/$(printf '%s' "$pane" | tr ':/' '__').pane"
+    if [ -n "$text" ]; then
+      printf '%s\n' "$text" > "$file"
+    else
+      : > "$file"
+    fi
+    return
+  fi
+  f="${FM_FAKE_HERDR_PANE_FILE:-}"
+  [ -n "$f" ] || return
+  if [ -n "$text" ]; then
+    printf '%s\n' "$text" > "$f"
+  else
+    : > "$f"
+  fi
+}
+pane_alive() {
+  local pane=$1 dir file
+  dir="${FM_FAKE_HERDR_ALIVE_DIR:-}"
+  if [ -n "$dir" ]; then
+    file="$dir/$(printf '%s' "$pane" | tr ':/' '__').alive"
+    [ -f "$file" ] || return 1
+    [ "$(cat "$file" 2>/dev/null || printf '0')" = "1" ]
+    return
+  fi
+  [ "${FM_FAKE_HERDR_PANE_ALIVE:-1}" = "1" ]
+}
+resolve_agent_pane() {
+  local agent=$1 map_file line name pane
+  map_file="${FM_FAKE_HERDR_AGENT_MAP_FILE:-}"
+  [ -n "$map_file" ] && [ -f "$map_file" ] || return 1
+  while IFS= read -r line; do
+    name=${line%%=*}
+    pane=${line#*=}
+    [ "$name" = "$agent" ] || continue
+    printf '%s' "$pane"
+    return 0
+  done < "$map_file"
+  return 1
 }
 
 case "${1:-}" in
   pane)
     case "${2:-}" in
       get)
-        [ "${FM_FAKE_HERDR_PANE_ALIVE:-1}" = "1" ] || exit 1
+        pane_alive "${3:-}" || exit 1
         exit 0 ;;
       read)
-        pane_content; exit 0 ;;
+        pane_alive "${3:-}" || exit 1
+        pane_content "${3:-}"; exit 0 ;;
       run)
         # herdr pane run <pane> <text>
         pane="${3:-}"; shift 3 2>/dev/null || true; text="$*"
+        [ -n "${FM_FAKE_HERDR_LOG:-}" ] && printf 'pane run %s\t%s\n' "$pane" "$text" >> "${FM_FAKE_HERDR_LOG}"
+        pane_alive "$pane" || exit 1
         [ "${FM_FAKE_HERDR_SEND_FAIL:-0}" = "1" ] && exit 1
         sw="${FM_FAKE_HERDR_SWALLOW_FILE:-}"
         if [ -n "$sw" ] && [ -f "$sw" ]; then
           [ "${FM_FAKE_HERDR_PERSIST_SWALLOW:-0}" = "1" ] || rm -f "$sw"
           # Text lands in pane as pending (not submitted)
-          [ -n "${FM_FAKE_HERDR_PANE_FILE:-}" ] && printf '%s\n' "$text" > "${FM_FAKE_HERDR_PANE_FILE}"
+          set_pane_content "$pane" "$text"
         else
           [ -n "${FM_FAKE_HERDR_SENT:-}" ] && printf '%s\n' "$text" >> "${FM_FAKE_HERDR_SENT}"
           # Agent transitions to working (message received)
-          set_status working
+          set_status working "$pane"
           # Composer cleared
-          [ -n "${FM_FAKE_HERDR_PANE_FILE:-}" ] && : > "${FM_FAKE_HERDR_PANE_FILE}"
+          set_pane_content "$pane"
         fi
         exit 0 ;;
-      send-keys) exit 0 ;;
+      send-keys)
+        [ -n "${FM_FAKE_HERDR_LOG:-}" ] && printf 'pane send-keys %s\t%s\n' "${3:-}" "${4:-}" >> "${FM_FAKE_HERDR_LOG}"
+        pane_alive "${3:-}" || exit 1
+        exit 0 ;;
       current)
         printf '{"pane_id":"%s"}\n' "${FM_FAKE_HERDR_CURRENT_PANE:-fakepane}"; exit 0 ;;
     esac ;;
   agent)
     case "${2:-}" in
-      get) printf '{"agent_status":"%s"}\n' "$(get_status)"; exit 0 ;;
+      get)
+        target="${3:-}"
+        if pane=$(resolve_agent_pane "$target" 2>/dev/null); then
+          printf '{"pane_id":"%s","agent_status":"%s"}\n' "$pane" "$(get_status "$pane")"
+        else
+          printf '{"agent_status":"%s"}\n' "$(get_status "$target")"
+        fi
+        exit 0 ;;
     esac ;;
   notification) exit 0 ;;
   status) printf 'status: running\n'; exit 0 ;;
@@ -138,6 +217,33 @@ exit 0
 SH
   chmod +x "$fakebin/herdr"
   printf '%s\n' "$dir"
+}
+
+write_agent_map() {
+  local path=$1 agent=$2 pane=$3
+  printf '%s=%s\n' "$agent" "$pane" > "$path"
+}
+
+set_fake_pane_alive() {
+  local dir=$1 pane=$2 value=$3
+  mkdir -p "$dir"
+  printf '%s\n' "$value" > "$dir/$(printf '%s' "$pane" | tr ':/' '__').alive"
+}
+
+set_fake_pane_status() {
+  local dir=$1 pane=$2 value=$3
+  mkdir -p "$dir"
+  printf '%s' "$value" > "$dir/$(printf '%s' "$pane" | tr ':/' '__').status"
+}
+
+set_fake_pane_text() {
+  local dir=$1 pane=$2 value=${3-}
+  mkdir -p "$dir"
+  if [ -n "$value" ]; then
+    printf '%s\n' "$value" > "$dir/$(printf '%s' "$pane" | tr ':/' '__').pane"
+  else
+    : > "$dir/$(printf '%s' "$pane" | tr ':/' '__').pane"
+  fi
 }
 
 test_daemon_state_root_uses_fm_home() {
@@ -189,6 +295,41 @@ is_live_non_zombie() {
     Z*) return 1 ;;
   esac
   return 0
+}
+
+test_watcher_resolves_stale_meta_pane_via_live_agent_and_refreshes_meta() {
+  local dir state fakebin out drain_out status_dir alive_dir agent_map
+  local old_pane new_pane new_key
+  dir=$(make_supercase stale-pane-refresh)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  drain_out="$dir/drain.out"
+  status_dir="$dir/status-by-pane"
+  alive_dir="$dir/alive-by-pane"
+  agent_map="$dir/agent-map"
+  old_pane="w1:p1"
+  new_pane="w1:p9"
+  new_key=$(printf '%s' "$new_pane" | tr ':' '_')
+  printf 'pane=%s\nkind=ship\n' "$old_pane" > "$state/stale.meta"
+  write_agent_map "$agent_map" "fm-stale" "$new_pane"
+  set_fake_pane_alive "$alive_dir" "$old_pane" 0
+  set_fake_pane_alive "$alive_dir" "$new_pane" 1
+  set_fake_pane_status "$status_dir" "$old_pane" working
+  set_fake_pane_status "$status_dir" "$new_pane" idle
+  printf '1\n' > "$state/.herdr-idle-count-$new_key"
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_AGENT_MAP_FILE="$agent_map" \
+    FM_FAKE_HERDR_STATUS_DIR="$status_dir" \
+    FM_FAKE_HERDR_ALIVE_DIR="$alive_dir" \
+    FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_STALE_POLLS=2 "$WATCH" > "$out" &
+  wait_for_exit "$!" 40 || fail "watcher did not wake after resolving stale pane metadata"
+  grep -Fx "stale: $new_pane" "$out" >/dev/null || fail "watcher did not target the live pane after stale meta drift"
+  grep -Fx "pane=$new_pane" "$state/stale.meta" >/dev/null || fail "watcher did not refresh stale.meta to the live pane id"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" || fail "drain after live-pane stale wake failed"
+  grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$new_pane" >/dev/null || fail "queued stale wake did not carry the live pane id"
+  pass "watcher resolves stale meta pane ids through live agent identity and refreshes meta"
 }
 
 test_concurrent_append_and_drain() {
@@ -1151,6 +1292,73 @@ test_max_defer_flushes_empty_idle_pane() {
   pass "max-defer flushes and clears the buffer on an empty idle pane"
 }
 
+test_fm_send_resolves_stale_meta_pane_and_refreshes_meta() {
+  local dir fakebin state err status_dir alive_dir agent_map pane_dir log
+  local old_pane new_pane
+  dir=$(make_supercase send-resolve)
+  fakebin="$dir/fakebin"
+  state="$dir/state"
+  err="$dir/send.err"
+  status_dir="$dir/status-by-pane"
+  alive_dir="$dir/alive-by-pane"
+  agent_map="$dir/agent-map"
+  pane_dir="$dir/panes"
+  log="$dir/herdr.log"
+  old_pane="w1:p1"
+  new_pane="w1:p7"
+  printf 'pane=%s\nkind=ship\n' "$old_pane" > "$state/route.meta"
+  write_agent_map "$agent_map" "fm-route" "$new_pane"
+  set_fake_pane_alive "$alive_dir" "$old_pane" 0
+  set_fake_pane_alive "$alive_dir" "$new_pane" 1
+  set_fake_pane_status "$status_dir" "$new_pane" idle
+  set_fake_pane_text "$pane_dir" "$new_pane"
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_AGENT_MAP_FILE="$agent_map" \
+    FM_FAKE_HERDR_STATUS_DIR="$status_dir" \
+    FM_FAKE_HERDR_ALIVE_DIR="$alive_dir" \
+    FM_FAKE_HERDR_PANE_DIR="$pane_dir" \
+    FM_FAKE_HERDR_LOG="$log" \
+    FM_STATE_OVERRIDE="$state" FM_SEND_SLEEP=0.05 \
+    "$ROOT/bin/fm-send.sh" fm-route 'route this work' >/dev/null 2>"$err" \
+    || fail "fm-send failed to resolve the live pane from stale meta: $(cat "$err")"
+  grep -F "pane run $new_pane" "$log" >/dev/null || fail "fm-send did not send through the live pane id"
+  grep -Fx "pane=$new_pane" "$state/route.meta" >/dev/null || fail "fm-send did not refresh route.meta to the live pane id"
+  pass "fm-send resolves stale meta pane ids through live agent identity and refreshes meta"
+}
+
+test_fm_peek_resolves_stale_meta_pane_and_refreshes_meta() {
+  local dir fakebin state out err status_dir alive_dir agent_map pane_dir
+  local old_pane new_pane
+  dir=$(make_supercase peek-resolve)
+  fakebin="$dir/fakebin"
+  state="$dir/state"
+  out="$dir/peek.out"
+  err="$dir/peek.err"
+  status_dir="$dir/status-by-pane"
+  alive_dir="$dir/alive-by-pane"
+  agent_map="$dir/agent-map"
+  pane_dir="$dir/panes"
+  old_pane="w1:p2"
+  new_pane="w1:p8"
+  printf 'pane=%s\nkind=ship\n' "$old_pane" > "$state/peek.meta"
+  write_agent_map "$agent_map" "fm-peek" "$new_pane"
+  set_fake_pane_alive "$alive_dir" "$old_pane" 0
+  set_fake_pane_alive "$alive_dir" "$new_pane" 1
+  set_fake_pane_status "$status_dir" "$new_pane" idle
+  set_fake_pane_text "$pane_dir" "$new_pane" 'done: live pane output'
+  PATH="$fakebin:$PATH" \
+    FM_FAKE_HERDR_AGENT_MAP_FILE="$agent_map" \
+    FM_FAKE_HERDR_STATUS_DIR="$status_dir" \
+    FM_FAKE_HERDR_ALIVE_DIR="$alive_dir" \
+    FM_FAKE_HERDR_PANE_DIR="$pane_dir" \
+    FM_STATE_OVERRIDE="$state" \
+    "$ROOT/bin/fm-peek.sh" fm-peek 5 > "$out" 2>"$err" \
+    || fail "fm-peek failed to resolve the live pane from stale meta: $(cat "$err")"
+  grep -F 'done: live pane output' "$out" >/dev/null || fail "fm-peek did not read from the live pane id"
+  grep -Fx "pane=$new_pane" "$state/peek.meta" >/dev/null || fail "fm-peek did not refresh peek.meta to the live pane id"
+  pass "fm-peek resolves stale meta pane ids through live agent identity and refreshes meta"
+}
+
 test_max_defer_pending_composer_alarms_without_typing() {
   local dir state fakebin sent status_file pane_file
   dir=$(make_supercase maxdefer-pending-digest)
@@ -1304,6 +1512,7 @@ test_daemon_state_root_uses_fm_home
 test_concurrent_append_and_drain
 test_signal_catchup_without_running_watcher
 test_stale_enqueue_before_suppressor
+test_watcher_resolves_stale_meta_pane_via_live_agent_and_refreshes_meta
 test_check_output_is_queued
 test_singleton_start
 test_atomic_double_drain
@@ -1361,3 +1570,5 @@ test_below_max_defer_does_nothing
 test_max_defer_afk_inactive_does_not_flush_or_alarm
 test_fm_send_exits_nonzero_on_confirmed_swallow
 test_fm_send_exits_nonzero_on_initial_send_failure
+test_fm_send_resolves_stale_meta_pane_and_refreshes_meta
+test_fm_peek_resolves_stale_meta_pane_and_refreshes_meta

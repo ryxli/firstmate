@@ -146,16 +146,7 @@ window_to_task() {
 
 # For herdr, "window" concept maps to pane id or agent name "fm-<id>".
 pane_to_task() {
-  local pane=$1 meta mp task
-  for meta in "${FM_STATE_DIR:-$(_state_root)}"/*.meta; do
-    [ -e "$meta" ] || continue
-    mp=$(grep '^pane=' "$meta" | cut -d= -f2- || true)
-    [ "$mp" = "$pane" ] || continue
-    task=$(basename "$meta" .meta)
-    printf '%s' "$task"
-    return 0
-  done
-  return 1
+  fm_task_for_pane "$1" "${FM_STATE_DIR:-$(_state_root)}"
 }
 
 classify_signal() {

@@ -22,29 +22,7 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 "$SCRIPT_DIR/fm-guard.sh" || true
 
-resolve() {
-  case "$1" in
-    *:*)  # explicit pane id
-      echo "$1" ;;
-    fm-*)
-      meta="$STATE/${1#fm-}.meta"
-      if [ ! -f "$meta" ]; then
-        echo "error: no metadata for $1 in $STATE; pass a pane id to target a pane outside this firstmate home" >&2
-        exit 1
-      fi
-      pane=$(grep '^pane=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-      [ -n "$pane" ] || { echo "error: no pane recorded in $meta" >&2; exit 1; }
-      echo "$pane"
-      ;;
-    *)
-      pane=$(herdr agent get "$1" 2>/dev/null | grep -o '"pane_id":"[^"]*"' | cut -d'"' -f4 | head -1 || true)
-      [ -n "$pane" ] || { echo "error: no pane found for $1" >&2; exit 1; }
-      echo "$pane"
-      ;;
-  esac
-}
-
-P=$(resolve "$1")
+P=$(fm_resolve_live_pane "$1" "$STATE")
 shift
 
 if [ "${1:-}" = "--key" ]; then
