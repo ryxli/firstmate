@@ -538,6 +538,8 @@ You no longer arm a watcher, drain a queue, poll for staleness, or re-arm anythi
 
 Herdr's native agent status is the ground truth, so the omp<->herdr integration must be installed once per machine (`herdr integration install omp`); without it crewmate panes report `unknown` and only the status-file stream carries signals. Token discipline: the injected digest is self-contained - act on it without re-reading; default any pane peek to 40 lines; batch what you tell the captain.
 
+Lean-loop discipline: keep your own loop lean for reasoning and decisions - fork self-contained side-work to a disposable `task` subagent (or route domain work to a secondmate) rather than burning your context on it. Once a decision is settled, execute or hold it; never re-derive, re-confirm, or re-list a conclusion already reached, and report only what changed since the last line. If you are restating rather than advancing, you are churning - end the turn.
+
 ### Stuck-crewmate playbook (escalate in order)
 
 1. Peek the pane.

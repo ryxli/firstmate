@@ -66,6 +66,20 @@ STATUS_FILE=$(fm_shell_quote "$STATE/$ID.status")
 # firstmate's bin/) can still invoke it; a secondmate whose home has bin/ can too.
 REPORT=$(fm_shell_quote "$FM_ROOT/bin/fm-report.sh")
 
+# Shared lean-loop discipline, injected into every crewmate brief and secondmate
+# charter so the same behavioral contract lands on every spawned mate. LEAN_DELTAS
+# is the act-once/report-deltas/clear-context half; the crewmate block prepends a
+# fork-side-work line, while the secondmate charter's manager mode already carries
+# the fork/delegate rule, so it reuses LEAN_DELTAS alone (no redundant fork line).
+LEAN_DELTAS="Once a decision is settled - by you, your supervisor, or the captain - EXECUTE or HOLD it. Do NOT re-derive, re-analyze, re-confirm, or re-explain a conclusion already reached; deciding twice is waste.
+Report DELTAS only: what CHANGED since your last line. Never re-list already-reported work or re-state parked decisions.
+One pass: decide -> act/delegate -> report once. Once a thread is answered or handed off, drop it from working context; if you are restating rather than advancing, you are churning - end the turn."
+LEAN_LOOP_CREW="# Lean-loop discipline
+Keep your main loop lean for reasoning and decisions. Fork self-contained side-work - a bounded investigation, a mechanical edit, a data-gathering pass - to a disposable subagent rather than burning your own context on it.
+$LEAN_DELTAS"
+LEAN_LOOP_SM="# Act once, report deltas (no churn)
+$LEAN_DELTAS"
+
 if [ "$KIND" = secondmate ]; then
 SECONDMATE_PROJECTS=""
 idx=1
@@ -106,6 +120,8 @@ When in doubt, delegate and supervise.
 Beyond routed work, you proactively tend your OWN domain - its health, your standing watch-items, and the regressions you guard - and that stewardship is expected, not invented work.
 What stays off-limits is any org-wide or higher-level survey, audit, or "find improvements" sweep beyond your domain; never start those on your own initiative - they are unwanted.
 Delegate real grooming work (a fix, a repro, a scoped audit) to a disposable crewmate, exactly as you would routed work.
+
+$LEAN_LOOP_SM
 
 # Escalation to main firstmate
 Handle routine work yourself.
@@ -173,6 +189,8 @@ The report is the only thing that survives, so anything worth keeping must be in
 5. If you hit the same obstacle twice, run \`$REPORT $STATUS_FILE "blocked: {why}"\` and stop; firstmate will help.
 6. If a decision belongs to a human (product choices, destructive actions),
    run \`$REPORT $STATUS_FILE "needs-decision: {summary of options}"\` and stop. Firstmate will reply with the decision.
+
+$LEAN_LOOP_CREW
 
 # Definition of done
 Write your findings to \`$DATA/$ID/report.md\`.
@@ -265,6 +283,8 @@ $RULE1
 5. If you hit the same obstacle twice, run \`$REPORT $STATUS_FILE "blocked: {why}"\` and stop; firstmate will help.
 6. If a decision belongs to a human (product choices, destructive actions, ask-user findings),
    run \`$REPORT $STATUS_FILE "needs-decision: {summary of options}"\` and stop. Firstmate will reply with the decision.
+
+$LEAN_LOOP_CREW
 
 # Project memory
 If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/bin/fm-ensure-agents-md.sh .\` in the worktree.
