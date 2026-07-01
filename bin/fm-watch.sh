@@ -81,19 +81,21 @@ age_of() {
 # pane_key: safe filename suffix from a herdr pane id (e.g. "w8:p3" -> "w8_p3").
 pane_key() { printf '%s' "$1" | tr ':' '_'; }
 
-# Retrieve the pane id recorded in a meta file.
-meta_pane() { grep '^pane=' "$1" | cut -d= -f2- || true; }
-meta_kind() { grep '^kind=' "$1" | cut -d= -f2- || true; }
+# Retrieve meta fields recorded in a task file.
+meta_pane() { fm_meta_value "$1" pane; }
+meta_kind() { fm_meta_value "$1" kind; }
 
 recorded_panes() {
-  local meta pane seen=""
+  local meta pane kind task seen=""
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
-    pane=$(meta_pane "$meta")
+    task=$(basename "$meta" .meta)
+    pane=$(fm_resolve_live_pane "fm-$task" "$STATE" 2>/dev/null || meta_pane "$meta")
     [ -n "$pane" ] || continue
+    kind=$(meta_kind "$meta")
     case "$seen" in *"|$pane|"*) continue ;; esac
     seen="$seen|$pane|"
-    printf '%s\n' "$pane"
+    printf '%s\t%s\t%s\n' "$task" "${kind:-ship}" "$pane"
   done
 }
 
@@ -175,17 +177,8 @@ EOF
   # persisted in .herdr-prev-status-<key> files so transitions survive restarts.
   # Secondmates manage themselves; only ship/scout panes are polled here.
   turn_end_files=""
-  while IFS= read -r pane; do
-    # Find this pane's kind from its meta.
-    kind=ship
-    for meta in "$STATE"/*.meta; do
-      [ -e "$meta" ] || continue
-      mp=$(meta_pane "$meta")
-      [ "$mp" = "$pane" ] || continue
-      k=$(meta_kind "$meta")
-      [ -n "$k" ] && kind=$k
-      break
-    done
+  while IFS=$(printf '\t') read -r task kind pane; do
+    [ -n "$pane" ] || continue
     [ "$kind" = secondmate ] && continue
 
     key=$(pane_key "$pane")
