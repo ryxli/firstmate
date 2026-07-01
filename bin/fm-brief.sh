@@ -30,6 +30,10 @@
 # Identity context (supervisor name/role/parent, worker label, domain, status
 # path) is injected automatically from config/identity via fm-identity-lib.sh.
 # Override the worker label with FM_TASK_LABEL or the domain with FM_TASK_DOMAIN.
+# Lean-loop discipline (act once, report deltas, fork side-work to subagents)
+# is injected into every crewmate brief and secondmate charter automatically;
+# the crewmate variant adds a fork-side-work instruction while the secondmate
+# variant omits it (the manager-mode section already covers fork/delegate).
 # Refuses to overwrite an existing brief.
 set -eu
 
