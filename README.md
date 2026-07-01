@@ -38,7 +38,7 @@ There is no app to install; the whole orchestrator is an `AGENTS.md` file that a
   Watch any of them work, or type into their pane to intervene; the first mate reconciles.
 - **Persistent domain supervisors** - route natural-language scopes through `data/secondmates.md` when a domain deserves its own long-lived supervisor.
   Each secondmate has a separate `FM_HOME`, local state, local projects, and its own session lock, while the main first mate still supervises it like any other direct report.
-- **Guarded by construction** - the first mate is read-only over your projects except for clean local default-branch refreshes, safe pruning of local branches whose remote is gone, and approved `local-only` fast-forward merges; crewmates work in disposable git worktrees (`git worktree add`), each placed as its own named tab in a per-project herdr workspace.
+- **Guarded by construction** - the first mate is read-only over your projects except for clean local default-branch refreshes, safe pruning of local branches whose remote is gone, and approved `local-only` fast-forward merges; crewmates work in disposable git worktrees (`git worktree add`), each placed as its own named tab in the spawner's current herdr workspace.
   Ship tasks follow each project's delivery mode, and scout tasks produce local reports without pushing anything.
 
 This is not an agent harness. This is not a skill. This is not a CLI.
@@ -87,7 +87,7 @@ On first launch the first mate detects what its required toolchain is missing or
 If compatible `tasks-axi` is already on `PATH`, bootstrap records it as an optional capability fact and firstmate uses its verbs for routine backlog mutations; when it is absent or incompatible, firstmate keeps hand-editing `data/backlog.md` exactly as before.
 
 **Run it inside herdr for the best experience.**
-firstmate works from any terminal, but running your harness inside herdr puts every crewmate in its own tab within a per-project workspace, where you can watch the crew work in real time or type into any pane to intervene.
+firstmate works from any terminal, but running your harness inside herdr puts every crewmate in its own tab within the spawner's current workspace, where you can watch the crew work in real time or type into any pane to intervene.
 
 ## How It Works
 
@@ -107,7 +107,7 @@ firstmate works from any terminal, but running your harness inside herdr puts ev
  │ crewmate     │   │ crewmate     │      │ secondmate   │   one autonomous agent each
  └───┬──────────┘   └───┬──────────┘      └───┬──────────┘
      ▼                  ▼                      ▼
-  per-project herdr workspace  /  isolated secondmate home
+  spawner's current herdr workspace  /  isolated secondmate home
      │
      ├─ ship: project mode ► PR/local merge ► teardown
      │
@@ -217,7 +217,7 @@ FM_SEND_SLEEP=0.4       # seconds between fm-send submit checks
 # spawn placement (bin/fm-spawn.sh)
 FM_SHIP_WORKSPACE_LABEL=ship   # herdr workspace label for the shared "ship" workspace where secondmates land
 FM_TASK_LABEL=               # per-task worker label override (default: the task slug)
-FM_TASK_DOMAIN=              # per-task domain override for workspace resolution (default: project name)
+FM_TASK_DOMAIN=              # domain/workspace label override, effective only on the out-of-herdr fallback path (inside herdr the domain is taken from the spawner's live current workspace)
 # supervision extension (.omp/extensions/fm-supervisor.ts); away-mode via /afk
 FM_SIGNAL_GRACE=30                 # seconds a turn-end coalesces with a relevant status into one wake
 FM_STALE_ESCALATE_SECS=240         # idle seconds before a stale pane is escalated

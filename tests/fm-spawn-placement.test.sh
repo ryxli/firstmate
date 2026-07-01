@@ -7,8 +7,11 @@
 # captured for assertion. FM_SPAWN_NO_GUARD=1 keeps them off the live watcher.
 #
 # What is asserted:
-#   - a crewmate lands in a workspace LABELED by the project (not the task id),
-#     creating it when absent and REUSING it when it already exists;
+#   - a crewmate lands in the SPAWNER'S CURRENT herdr workspace as a new tab and
+#     NEVER creates a per-project workspace (main-home crew nest under firstmate's
+#     own workspace; a secondmate's crew nest under the mate's home workspace);
+#   - outside herdr (no live current workspace) crew fall back to a project-labeled
+#     workspace so the workspace is still sensibly named;
 #   - the crewmate gets its OWN tab + pane DISPLAY-labeled by the task slug
 #     (no supervisor-slug prefix; the random task id stays out of the visible
 #     label), while the herdr agent identity stays the integration-safe key
@@ -16,7 +19,7 @@
 #   - the tab ends as a SINGLE agent pane: the leftover root shell is closed;
 #   - the meta records tab=, supervisor lineage, and agent_identity=omp, but no
 #     workspace_id (so teardown does per-task cleanup, never destroying the shared
-#     domain workspace);
+#     workspace);
 #   - a --secondmate lands in its own workspace named after the secondmate (its home), its own tab labeled "home" so the space is not "Name . Name";
 #   - an omp secondmate home overlay at config/omp-overlay.yml is injected into the fresh launch, and absent overlay leaves the omp command unchanged;
 #   - a secondmate home missing AGENTS.md/bin is auto-linked, not rejected.
@@ -65,6 +68,17 @@ case "${1:-}" in
         printf '{"result":{"workspace":{"workspace_id":"%s"},"root_pane":{"pane_id":"%s"}}}\n' \
           "$wid" "${FM_FAKE_WS_INIT_PANE:-wX:p1}"
         exit 0 ;;
+      get)
+        # Resolve a workspace id to its label from the FM_FAKE_WS table so the
+        # parent-workspace path can record a human-readable workspace=/domain=.
+        want=${3:-}; lbl=
+        if [ -n "${FM_FAKE_WS:-}" ] && [ -f "$FM_FAKE_WS" ]; then
+          while IFS=$'\t' read -r l w; do
+            [ "$w" = "$want" ] && { lbl=$l; break; }
+          done < "$FM_FAKE_WS"
+        fi
+        printf '{"result":{"workspace":{"workspace_id":"%s","label":"%s"}}}\n' "$want" "$lbl"
+        exit 0 ;;
     esac ;;
   tab)
     case "${2:-}" in
@@ -80,7 +94,16 @@ case "${1:-}" in
         printf '{"result":{"agent":{"pane_id":"%s"}}}\n' "${FM_FAKE_AGENT_PANE:-wX:p10}"; exit 0 ;;
     esac ;;
   pane)
-    case "${2:-}" in close|run) exit 0 ;; get) printf '{"pane_id":"wX:p10"}\n'; exit 0 ;; esac ;;
+    case "${2:-}" in
+      close|run) exit 0 ;;
+      get) printf '{"pane_id":"wX:p10"}\n'; exit 0 ;;
+      current)
+        # The spawner's live current pane. FM_FAKE_CURRENT_WSID drives the
+        # parent-workspace placement rule; empty = spawned outside herdr.
+        printf '{"result":{"pane":{"pane_id":"wV:p1","workspace_id":"%s","tab_id":"wV:t1"}}}\n' \
+          "${FM_FAKE_CURRENT_WSID:-}"
+        exit 0 ;;
+    esac ;;
 esac
 exit 0
 SH
@@ -116,6 +139,7 @@ run_spawn() {
     FM_FAKE_HERDR_LOG="$home/herdr.log" \
     FM_FAKE_WS="$home/ws.tsv" \
     FM_FAKE_ROOT_PANE="wX:p9" FM_FAKE_AGENT_PANE="wX:p10" FM_FAKE_WS_INIT_PANE="wX:p1" \
+    HERDR_WORKSPACE_ID='' FM_FAKE_CURRENT_WSID="${FM_FAKE_CURRENT_WSID:-}" \
     FM_SPAWN_NO_GUARD=1 \
     FM_REAL_GIT="${FM_REAL_GIT:-}" FM_FAKE_WT="${FM_FAKE_WT:-}" FM_FAKE_TOPLEVEL="${FM_FAKE_TOPLEVEL:-}" \
     "$SPAWN" "$@" 2>&1
@@ -139,23 +163,24 @@ SH
   chmod +x "$fakebin/git"
 }
 
-test_crewmate_creates_domain_workspace_and_own_tab() {
+test_crewmate_lands_in_spawners_current_workspace() {
   local home fakebin out meta
   home=$(make_case crew-new myproj Mate)
   fakebin=$(make_fake_herdr "$home")
-  : > "$home/ws.tsv"
+  # The spawner (main firstmate) lives in workspace wV labeled "firstmate".
+  printf 'firstmate\twV\n' > "$home/ws.tsv"
   mkdir -p "$home/data/fix-login-k3"
   printf 'brief\n' > "$home/data/fix-login-k3/brief.md"
 
-  out=$(run_spawn "$home" "$fakebin" fix-login-k3 projects/myproj omp) \
+  out=$(FM_FAKE_CURRENT_WSID=wV run_spawn "$home" "$fakebin" fix-login-k3 projects/myproj omp) \
     || fail "spawn failed: $out"
 
-  grep -qF 'workspace create --label myproj' "$home/herdr.log" \
-    || fail "did not create a workspace labeled by project: $(cat "$home/herdr.log")"
-  ! grep -qF 'workspace create --label fix-login-k3' "$home/herdr.log" \
-    || fail "workspace was labeled by raw task id, not the project"
-  grep -qF 'tab create --workspace wNEW --label fix-login' "$home/herdr.log" \
-    || fail "tab not created in domain workspace with worker display label: $(cat "$home/herdr.log")"
+  # The whole point: a crewmate lands in the spawner's CURRENT workspace as a new
+  # tab. No project-named workspace is ever created (that was the old sprawl).
+  ! grep -qF 'workspace create' "$home/herdr.log" \
+    || fail "crew created a workspace instead of using the spawner's current one: $(cat "$home/herdr.log")"
+  grep -qF 'tab create --workspace wV --label fix-login' "$home/herdr.log" \
+    || fail "tab not created in the spawner's current workspace with worker display label: $(cat "$home/herdr.log")"
   # The herdr agent SLOT name is the UNIQUE task id (not the harness name), so
   # concurrent crewmates never collide on the agent name; the omp<->herdr status
   # binding survives via the integration's socket self-report (agent_identity=omp).
@@ -172,88 +197,89 @@ test_crewmate_creates_domain_workspace_and_own_tab() {
   [ -f "$meta" ] || fail "no meta written"
   grep -qF 'pane=wX:p10' "$meta" || fail "meta pane not the agent pane"
   grep -qF 'tab=wX:t9' "$meta" || fail "meta missing herdr tab id"
-  grep -qF 'workspace=myproj' "$meta" || fail "meta missing workspace label"
+  grep -qF 'workspace=firstmate' "$meta" || fail "meta workspace not the spawner's current workspace label"
   grep -qF 'worker=fix-login' "$meta" || fail "meta missing worker label"
-  grep -qF 'domain=myproj' "$meta" || fail "meta missing domain"
+  grep -qF 'domain=firstmate' "$meta" || fail "meta domain not the spawner's current workspace label"
   grep -qF 'supervisor=Mate' "$meta" || fail "meta missing supervisor name"
   grep -qF 'agent_identity=omp' "$meta" || fail "meta missing agent_identity=omp"
   ! grep -q '^workspace_id=' "$meta" \
     || fail "meta recorded workspace_id; teardown would destroy the shared workspace"
-  pass "crewmate creates project-labeled workspace, omp agent identity, worker display labels"
+  pass "crewmate lands in the spawner's current workspace as a new tab (no project workspace)"
 }
 
 test_crewmate_single_agent_pane() {
   local home fakebin out
   home=$(make_case crew-single myproj Mate)
   fakebin=$(make_fake_herdr "$home")
-  : > "$home/ws.tsv"
+  printf 'firstmate\twV\n' > "$home/ws.tsv"
   mkdir -p "$home/data/add-x-q7"
   printf 'brief\n' > "$home/data/add-x-q7/brief.md"
 
-  out=$(run_spawn "$home" "$fakebin" add-x-q7 projects/myproj omp) \
+  out=$(FM_FAKE_CURRENT_WSID=wV run_spawn "$home" "$fakebin" add-x-q7 projects/myproj omp) \
     || fail "spawn failed: $out"
 
   # The leftover tab root shell pane must be closed so the tab is a single agent pane.
   grep -qF 'pane close wX:p9' "$home/herdr.log" \
     || fail "tab root shell pane was not closed; tab would be a split beside a blank shell: $(cat "$home/herdr.log")"
-  # The freshly-created workspace also ships with its OWN default shell pane in a
-  # separate tab; spawning into a brand-new workspace must close that orphan too,
-  # leaving exactly one pane (the agent).
-  grep -qF 'pane close wX:p1' "$home/herdr.log" \
-    || fail "freshly-created workspace's orphan root shell was not closed: $(cat "$home/herdr.log")"
-  pass "spawned tab ends as a single agent pane (tab + workspace root shells closed)"
+  # On the parent-workspace path there is NO fresh workspace, hence no orphan
+  # workspace root shell to close - only the new tab's own root shell.
+  ! grep -qF 'pane close wX:p1' "$home/herdr.log" \
+    || fail "crew closed a workspace init pane, but no workspace was created on the parent-workspace path: $(cat "$home/herdr.log")"
+  pass "spawned tab ends as a single agent pane (only the tab root shell is closed)"
 }
 
-test_crewmate_reuses_existing_domain_workspace() {
-  local home fakebin out
-  home=$(make_case crew-reuse myproj Mate)
+test_crewmate_in_secondmate_home_nests_under_mate_workspace() {
+  local home fakebin out meta
+  home=$(make_case crew-in-sm myproj Anchor)
+  printf '%s' anchor > "$home/.fm-secondmate-home"
   fakebin=$(make_fake_herdr "$home")
-  printf 'myproj\twEXIST\n' > "$home/ws.tsv"
+  # A secondmate runs IN its own home workspace, so its current workspace is the
+  # mate's home space (here wANCHOR labeled "Anchor"). Its crew simply land there.
+  printf 'Anchor\twANCHOR\n' > "$home/ws.tsv"
+  mkdir -p "$home/data/probe-cache-z9"
+  printf 'brief\n' > "$home/data/probe-cache-z9/brief.md"
+
+  out=$(FM_FAKE_CURRENT_WSID=wANCHOR run_spawn "$home" "$fakebin" probe-cache-z9 projects/myproj omp) \
+    || fail "crewmate spawn in secondmate home failed: $out"
+
+  # A secondmate's crew nest under the mate's own workspace because that is the
+  # spawner's current workspace - the same parent-workspace rule, no special case,
+  # and never a per-project workspace.
+  ! grep -qF 'workspace create' "$home/herdr.log" \
+    || fail "secondmate crew created a workspace instead of using the mate's current one: $(cat "$home/herdr.log")"
+  grep -qF 'tab create --workspace wANCHOR --label probe-cache' "$home/herdr.log" \
+    || fail "crew did not nest under the secondmate's current workspace: $(cat "$home/herdr.log")"
+
+  meta="$home/state/probe-cache-z9.meta"
+  grep -qF 'workspace=Anchor' "$meta" || fail "meta workspace not the mate's current workspace label"
+  grep -qF 'domain=Anchor' "$meta" || fail "meta domain not the mate's current workspace label"
+  pass "crewmate from a secondmate home nests under the mate's current workspace"
+}
+
+test_crewmate_fallback_creates_project_workspace_outside_herdr() {
+  local home fakebin out meta
+  home=$(make_case crew-fallback myproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  : > "$home/ws.tsv"
+  # No live current workspace (spawned outside herdr): FM_FAKE_CURRENT_WSID unset
+  # AND HERDR_WORKSPACE_ID cleared by run_spawn. The documented fallback is the
+  # old per-project workspace so the workspace is still sensibly named.
   mkdir -p "$home/data/fix-bug-m2"
   printf 'brief\n' > "$home/data/fix-bug-m2/brief.md"
 
   out=$(run_spawn "$home" "$fakebin" fix-bug-m2 projects/myproj omp) \
     || fail "spawn failed: $out"
 
-  ! grep -qF 'workspace create' "$home/herdr.log" \
-    || fail "created a new workspace instead of reusing the existing labeled one"
-  grep -qF 'tab create --workspace wEXIST --label fix-bug' "$home/herdr.log" \
-    || fail "did not add the tab to the existing domain workspace: $(cat "$home/herdr.log")"
-  # Reuse has no orphan workspace shell to close. The only pane closed is the new
-  # tab's own root shell (wX:p9); the workspace's init pane (wX:p1) must be left
-  # untouched - it belongs to whatever already lives in the reused workspace.
-  ! grep -qF 'pane close wX:p1' "$home/herdr.log" \
-    || fail "reuse path closed the workspace's init pane; that pane is not an orphan here: $(cat "$home/herdr.log")"
-  pass "crewmate reuses the existing project-labeled workspace"
-}
-
-test_crewmate_in_secondmate_home_uses_mate_workspace() {
-  local home fakebin out meta
-  home=$(make_case crew-in-sm myproj Anchor)
-  printf '%s' anchor > "$home/.fm-secondmate-home"
-  fakebin=$(make_fake_herdr "$home")
-  : > "$home/ws.tsv"
-  mkdir -p "$home/data/probe-cache-z9"
-  printf 'brief\n' > "$home/data/probe-cache-z9/brief.md"
-
-  out=$(run_spawn "$home" "$fakebin" probe-cache-z9 projects/myproj omp) \
-    || fail "crewmate spawn in secondmate home failed: $out"
-
-  # A crewmate spawned from a secondmate home shares the secondmate's OWN named
-  # workspace (here Anchor), so its crew nest under it - NOT the project-named
-  # workspace, which for a domain secondmate is the firstmate repo and would
-  # collide with the main firstmate's space.
-  grep -qF 'workspace create --label Anchor' "$home/herdr.log" \
-    || fail "crew did not land in the secondmate's named workspace: $(cat "$home/herdr.log")"
-  ! grep -qF 'workspace create --label myproj' "$home/herdr.log" \
-    || fail "crew landed in the project-named workspace (the bug): $(cat "$home/herdr.log")"
-
-  meta="$home/state/probe-cache-z9.meta"
-  grep -qF 'workspace=Anchor' "$meta" || fail "meta workspace not the secondmate name"
-  grep -qF 'domain=Anchor' "$meta" || fail "meta domain not the secondmate name"
+  grep -qF 'workspace create --label myproj' "$home/herdr.log" \
+    || fail "fallback did not create the project-labeled workspace: $(cat "$home/herdr.log")"
+  grep -qF 'tab create --workspace wNEW --label fix-bug' "$home/herdr.log" \
+    || fail "fallback did not place the tab in the created project workspace: $(cat "$home/herdr.log")"
+  # A freshly-created workspace has an orphan root shell that must be closed.
   grep -qF 'pane close wX:p1' "$home/herdr.log" \
-    || fail "crew spawned in secondmate home did not close the fresh workspace's orphan root shell: $(cat "$home/herdr.log")"
-  pass "crewmate from a secondmate home lands in the mate's own workspace"
+    || fail "fallback did not close the fresh workspace's orphan root shell: $(cat "$home/herdr.log")"
+  meta="$home/state/fix-bug-m2.meta"
+  grep -qF 'workspace=myproj' "$meta" || fail "fallback meta workspace not the project label"
+  pass "outside herdr, crew fall back to a project-labeled workspace"
 }
 
 # Build a seeded secondmate home (marker + operational dirs), optionally missing
@@ -417,10 +443,10 @@ test_workspace_orphan_pane_closed_on_agent_start_failure() {
   pass "workspace orphan root shell closed even when agent start fails"
 }
 
-test_crewmate_creates_domain_workspace_and_own_tab
+test_crewmate_lands_in_spawners_current_workspace
 test_crewmate_single_agent_pane
-test_crewmate_reuses_existing_domain_workspace
-test_crewmate_in_secondmate_home_uses_mate_workspace
+test_crewmate_in_secondmate_home_nests_under_mate_workspace
+test_crewmate_fallback_creates_project_workspace_outside_herdr
 test_secondmate_lands_in_own_named_workspace
 test_secondmate_home_autolinks_missing_files
 test_secondmate_omp_overlay_is_injected_when_present

@@ -16,9 +16,11 @@
 #
 # Git worktrees are created with `git worktree add` at $FM_WORKTREE_BASE/<id>
 # (default: $FM_HOME/worktrees/<id>) for crewmate git isolation; secondmates launch
-# in their persistent home instead. Each project/domain gets a single shared herdr
-# workspace (label = project name), and each agent is placed in its own tab inside
-# that workspace via `herdr tab create` + `herdr agent start --tab`.
+# in their persistent home instead. A crewmate is placed in its OWN new tab inside
+# the SPAWNER'S CURRENT herdr workspace (firstmate's own workspace for main-home
+# crew, the secondmate's home workspace for a secondmate's crew) - never a
+# separate per-project workspace. A secondmate itself still gets its own named
+# home workspace. Placement uses `herdr tab create` + `herdr agent start --tab`.
 # herdr tracks agent status natively, so no per-harness turn-end hook files are installed.
 #
 # On success prints:
@@ -214,6 +216,27 @@ for w in d.get("result", {}).get("workspaces", []):
         print(w.get("workspace_id", ""))
         break
 ' "$1" 2>/dev/null || true
+}
+
+# herdr_current_workspace_id: print the workspace id the SPAWNER is currently in,
+# resolved live from herdr (its own pane's workspace_id), falling back to the
+# HERDR_WORKSPACE_ID env its pane inherited. Empty when running outside herdr.
+# This is the anchor for the parent-workspace placement rule: a crewmate lands in
+# whatever workspace its spawner is in, so main-home crew nest under firstmate's
+# own workspace and a secondmate's crew nest under the secondmate's home.
+herdr_current_workspace_id() {
+  local wsid
+  wsid=$(herdr pane current 2>/dev/null | herdr_json_get result pane workspace_id)
+  [ -n "$wsid" ] || wsid="${HERDR_WORKSPACE_ID:-}"
+  printf '%s' "$wsid"
+}
+
+# herdr_workspace_label_for_id <id>: print the display label of a workspace id,
+# or nothing. Used only to record a human-readable workspace=/domain= in meta
+# when a crewmate lands in the spawner's current workspace.
+herdr_workspace_label_for_id() {
+  [ -n "${1:-}" ] || return 0
+  herdr workspace get "$1" 2>/dev/null | herdr_json_get result workspace label
 }
 
 # herdr_resolve_workspace <label> <cwd>: resolve the domain/project workspace
@@ -446,7 +469,7 @@ fi
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
 # Resolve identity-driven placement labels.
-#   workspace label = the domain/project for crew (shared per domain), or the secondmate's own name (its home space) for a secondmate
+#   workspace label = for a crewmate, the spawner's CURRENT workspace label (main-home crew: firstmate's own workspace; secondmate crew: the mate's home) - resolved from the live workspace below, not from the project; for a secondmate, its own name (its home space)
 #   worker label    = the task slug for a crewmate, or "home" for a secondmate
 #                     (its workspace already carries the mate's name, so the tab
 #                     need not repeat it); the random task id stays in meta only.
@@ -460,19 +483,31 @@ if [ "$KIND" = secondmate ]; then
   WORKSPACE_CWD="$PROJ_ABS"
   DOMAIN="$WORKSPACE_LABEL"
 else
-  # A secondmate's crewmates share the secondmate's OWN home workspace (labelled by
-  # its name), so its crew nest under it in herdr instead of landing in the main
-  # firstmate's repo-named workspace. Ordinary (main-home) crew use the project name.
-  if [ -f "$FM_HOME/$SUB_HOME_MARKER" ]; then
-    sm_name=$(fm_identity_value "$CONFIG" name 2>/dev/null || true)
-    DOMAIN="${FM_TASK_DOMAIN:-${sm_name:-$(basename "$FM_HOME")}}"
-    WORKSPACE_CWD="$FM_HOME"
-  else
-    DOMAIN="${FM_TASK_DOMAIN:-$(basename "$PROJ_ABS")}"
-    WORKSPACE_CWD="$PROJ_ABS"
-  fi
-  WORKSPACE_LABEL="$DOMAIN"
+  # Crew land in the SPAWNER'S CURRENT herdr workspace - firstmate's own for
+  # main-home crew, the secondmate's home for a secondmate's crew - as a new tab
+  # there. This is deterministic from the spawner's live workspace, so no
+  # per-project workspace is ever created (that sprawl was the old behavior).
   WORKER_LABEL=$(fm_worker_label "$CONFIG" "$ID" "${FM_TASK_LABEL:-}")
+  WORKSPACE_ID_DIRECT=$(herdr_current_workspace_id)
+  if [ -n "$WORKSPACE_ID_DIRECT" ]; then
+    DOMAIN=$(herdr_workspace_label_for_id "$WORKSPACE_ID_DIRECT")
+    [ -n "$DOMAIN" ] || DOMAIN="$WORKSPACE_ID_DIRECT"
+    WORKSPACE_LABEL="$DOMAIN"
+    WORKSPACE_CWD="$PROJ_ABS"
+  else
+    # Fallback (spawned outside herdr, no live workspace): synthesize the old
+    # per-project label so the workspace is still sensibly named. Secondmate-home
+    # crew fall back to the home's name, ordinary crew to the project name.
+    if [ -f "$FM_HOME/$SUB_HOME_MARKER" ]; then
+      sm_name=$(fm_identity_value "$CONFIG" name 2>/dev/null || true)
+      DOMAIN="${FM_TASK_DOMAIN:-${sm_name:-$(basename "$FM_HOME")}}"
+      WORKSPACE_CWD="$FM_HOME"
+    else
+      DOMAIN="${FM_TASK_DOMAIN:-$(basename "$PROJ_ABS")}"
+      WORKSPACE_CWD="$PROJ_ABS"
+    fi
+    WORKSPACE_LABEL="$DOMAIN"
+  fi
 fi
 
 # Create the isolated git worktree for ship/scout tasks. herdr placement (below)
@@ -579,29 +614,35 @@ if [ "$KIND" != secondmate ]; then
   fi
 fi
 
-# Deterministic placement: resolve the domain/project workspace (creating it
-# when absent), then start the agent in its own tab inside that workspace so it
-# never lands as a split in whatever tab happens to be focused. The worker label
-# is a DISPLAY label only (workspace/tab/pane); the herdr agent identity stays
-# the integration-safe key (omp for OMP panes, otherwise the harness name) so
-# the omp<->herdr status binding survives. No workspace_id is recorded in meta:
-# the workspace is shared, so teardown must clean up only this task's pane + git
-# worktree, never the whole workspace.
-WS_RESOLVE=$(herdr_resolve_workspace "$WORKSPACE_LABEL" "$WORKSPACE_CWD") || { spawn_cleanup_worktree; exit 1; }
+# Deterministic placement. For a crewmate, WORKSPACE_ID_DIRECT already holds the
+# spawner's live current workspace, so we place the agent tab straight into it -
+# no create, no lock, no orphan shell (the workspace already exists and is in
+# use). For a secondmate (or the out-of-herdr fallback), resolve/create the named
+# workspace as before. The worker label is a DISPLAY label only (workspace/tab/
+# pane); the herdr agent identity stays the integration-safe key (omp for OMP
+# panes, otherwise the harness name) so the omp<->herdr status binding survives.
+# No workspace_id is recorded in meta: the workspace is shared, so teardown must
+# clean up only this task's pane + git worktree, never the whole workspace.
 WORKSPACE_ID=
 # init_pane is the freshly-created workspace's own default shell pane, non-empty
 # only when this spawn CREATED the workspace; it is closed below after the agent
-# tab is placed so a new workspace is not left with an orphan root shell.
+# tab is placed so a new workspace is not left with an orphan root shell. On the
+# parent-workspace path there is no fresh workspace, hence no orphan.
 WORKSPACE_INIT_PANE=
-while IFS= read -r _ws_line; do
-  case "$_ws_line" in
-    workspace=*) WORKSPACE_ID=${_ws_line#workspace=} ;;
-    init_pane=*) WORKSPACE_INIT_PANE=${_ws_line#init_pane=} ;;
-  esac
-done <<EOF
+if [ -n "${WORKSPACE_ID_DIRECT:-}" ]; then
+  WORKSPACE_ID="$WORKSPACE_ID_DIRECT"
+else
+  WS_RESOLVE=$(herdr_resolve_workspace "$WORKSPACE_LABEL" "$WORKSPACE_CWD") || { spawn_cleanup_worktree; exit 1; }
+  while IFS= read -r _ws_line; do
+    case "$_ws_line" in
+      workspace=*) WORKSPACE_ID=${_ws_line#workspace=} ;;
+      init_pane=*) WORKSPACE_INIT_PANE=${_ws_line#init_pane=} ;;
+    esac
+  done <<EOF
 $WS_RESOLVE
 EOF
-[ -n "$WORKSPACE_ID" ] || { echo "error: herdr_resolve_workspace did not return a workspace id" >&2; spawn_cleanup_worktree; exit 1; }
+  [ -n "$WORKSPACE_ID" ] || { echo "error: herdr_resolve_workspace did not return a workspace id" >&2; spawn_cleanup_worktree; exit 1; }
+fi
 # Slot name (herdr agent registration handle) must be unique per session: use the
 # task id. agent_identity (recorded in meta) is the harness integration key that
 # status binds to via the socket, independent of the slot name.
