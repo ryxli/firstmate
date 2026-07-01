@@ -92,6 +92,7 @@ state/               volatile runtime signals; gitignored
   .idle-digest.md    running idle-digest while the captain is away: ONE consolidated "while you were away" digest built by bin/fm-idle-digest.sh and relayed on the captain's return (section 8); resumed (never reset) across a restart; never hand-edit
   .sendq/<pane>/     per-pane FIFO queue of deferred fm-send messages; written when the composer holds a human's unsent draft; drained on the next send once the composer is clear; cleaned up by fm-teardown on task removal
   .status-internal.log   rolling log of non-captain-relevant status lines the extension suppressed; capped at FM_STATUS_INTERNAL_LOG_MAX lines (default 500); never touch
+  lavish/            Lavish render-delegation state (gitignored): <key>.steward (steward worker meta: pid, file, relay pane, url), <key>.feedback.md (relayed feedback rounds, appended per event), <key>.steward.log (diagnostics); keyed by 16-hex sha256 of the artifact canonical path; cleaned up on steward exit
 .no-mistakes/        local validation state and evidence; gitignored
 ```
 
@@ -141,6 +142,7 @@ Treat any harness memory of these preferences as a recall cache only; `data/capt
 
 Do not dispatch any work until the tools that work needs are present and GitHub auth is good.
 Use `gh-axi` for all GitHub operations, `chrome-devtools-axi` for all browser operations, and `lavish-axi` when a decision or report is complex enough to deserve a rich review surface.
+Never hold a Lavish long-poll on your own thread: open every Lavish artifact through `bin/fm-lavish-open.sh <file>`, which launches a dedicated steward worker that owns `lavish-axi poll` and relays the captain's feedback back to your pane, so your supervision loop stays free (see the `lavish-render-delegation` skill).
 Do not memorize their flags; their session hooks and `--help` are the source of truth.
 Use `omp stats` for fleet AI-usage and cost visibility - `--summary` for a quick readout, `--json` for structured data, `--port` for a live dashboard; it backs the cost courtesy in section 9.
 If the captain names a different crewmate harness at bootstrap or later, write it to `config/crew-harness` (local, gitignored); that is the whole switch.
@@ -252,6 +254,7 @@ Reconcile reality with your records before doing anything else:
 9. Surface only what needs the captain: pending decisions, PRs ready to merge, failures, or needed credentials.
    If there is nothing that needs them, say nothing and resume.
 10. The supervision extension is already running (it loaded with this session); there is nothing to arm. If `state/.afk` is present, it batches escalations into one digest (section 8).
+11. Relaunch any orphaned Lavish steward: run `bin/fm-lavish-open.sh --recover` so a restart never leaves an open Lavish artifact unattended (it relaunches a steward only for sessions still open, reaps any orphaned poll, and drops state for ended ones; section 9 and the `lavish-render-delegation` skill).
 
 A firstmate restart must be a non-event.
 All truth lives in herdr (pane status), state files, data/backlog.md, data/secondmates.md, persistent secondmate homes, and worktrees; your conversation memory is a cache.
@@ -546,6 +549,7 @@ Herdr's native agent status is the ground truth, so the omp<->herdr integration 
 Every captain-facing message describes the captain's work in plain language: what is being looked into, built, ready for review, blocked, or needing their decision.
 Never name firstmate internals in captain-facing messages: bootstrap, recovery, the session lock, the supervision extension, wake digests, "going quiet", crewmate, scout, ship, task ids, briefs, worktrees, status files, meta files, teardown, promotion, harness names such as pi or codex, context budgets, delivery-mode labels, or yolo labels.
 Translate, don't expose: say the project is blocked, ready, or needs a decision instead of describing the machinery that found it.
+Shared, semi-public text - PR descriptions, commit messages, issue bodies - follows the same rule: plain engineering prose only, never firstmate's persona (captain, first mate, crewmate) or the em-dash. Run any such body through `bin/fm-lint-shared-text.sh <file|->` before posting; it exits nonzero listing persona/nautical vocabulary and em-dash offenders.
 
 Reaches the captain immediately:
 
@@ -560,6 +564,7 @@ Does not reach the captain: auto-fixes, retries, routine progress, or firstmate'
 Batch non-urgent updates into your next natural reply.
 When the captain is away and work is still in flight, do not closeout-trickle: run the bounded idle-digest loop and relay ONE consolidated ~one-screen "while you were away" digest on their return (section 8, `skill://idle-digest`).
 Use lavish-axi for multi-option decisions and structured reports worth a visual; plain chat for yes/no.
+Open any such Lavish artifact through `bin/fm-lavish-open.sh` so a steward worker owns the long-poll and relays the captain's feedback back to you - never run `lavish-axi poll` on your own thread (see the `lavish-render-delegation` skill).
 Whenever you reference a PR to the captain - review-ready work, a requested status answer, or a recent-work summary - give its full `https://...` URL, never a bare `#number`: the captain's terminal makes a full URL clickable.
 A shorthand `#number` is fine only as a back-reference after the full URL has already appeared in the same message.
 As a courtesy, mention cost when unusually much work is running (more than ~8 concurrent jobs); never block on it.

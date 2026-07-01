@@ -129,6 +129,7 @@ firstmate works from any terminal, but running your harness inside herdr puts ev
   Secondmates are idle by default: after startup recovery reconciles only work already in their own home, an empty queue waits silently for routed tasks, and they never self-initiate surveys or audits.
   After seeding a secondmate, `fm-backlog-handoff.sh` moves already-judged in-scope queued items from the main backlog into that secondmate home so the domain queue starts in the right place.
   Idle secondmate panes are healthy; teardown is explicit and refuses while the secondmate home has in-flight work unless the captain has approved discard with `--force`.
+- **Lavish review never blocks the first mate** - opening a Lavish artifact through `fm-lavish-open.sh` launches a detached steward worker that owns the blocking `lavish-axi poll` for that session, records every feedback round to `state/lavish/`, and wakes the originating pane; the first mate's supervision loop is never tied up polling. Replies post through a write-only HTTP endpoint (`fm-lavish-reply.sh`), so they never race the steward's poll, and `fm-lavish-open.sh --recover` re-attends any open session orphaned by a restart.
 - **Project modes are explicit** - `data/projects.md` records each project's delivery mode and optional `+yolo` autonomy flag.
   `no-mistakes` projects run the full validation pipeline, `direct-PR` projects open PRs without that pipeline, and `local-only` projects stay local until firstmate performs an approved fast-forward merge.
 - **Project memory belongs to projects** - durable project-intrinsic agent knowledge lives in each project's committed `AGENTS.md`, with `CLAUDE.md` as a symlink.
@@ -151,6 +152,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-backlog-handoff.sh`  | Move already-judged in-scope queued backlog items from the main home into a seeded secondmate home                 |
 | `fm-brief.sh`            | Scaffold a ship brief, a report-only scout brief with `--scout`, or a secondmate charter with `--secondmate`      |
 | `fm-classify-status.sh`  | Classify one status line as `captain` (exit 0) or `internal` (exit 1); the canonical relevance contract the supervisor extension mirrors |
+| `fm-lint-shared-text.sh` | Guard shared text (PR/commit/issue bodies) against firstmate persona vocabulary and the em-dash; exits nonzero listing offenders |
 | `fm-ensure-agents-md.sh` | Ensure project `AGENTS.md` is the real memory file and `CLAUDE.md` symlinks to it                                   |
 | `fm-home-seed.sh`        | Lease/provision a secondmate home transactionally, clone projects, initialize gates, and maintain `data/secondmates.md` |
 | `fm-spawn.sh`            | Spawn one task, several `id=repo` pairs, or a persistent secondmate with `--secondmate`                            |
@@ -174,6 +176,10 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-demo.sh`             | Self-cleaning dev demo: throwaway omp panes in an `fm-demo` workspace, showing lineage and a sample wake            |
 | `fm-kpi.sh`             | Firstmate workflow KPIs from `omp stats --json` + backlog (cost, tokens, cache, supervisor overhead, outcomes, North Star); `--json` agent surface, terminal table, `--snapshot`/`--history` trend log |
 | `fm-kpi-view.sh`        | Render `fm-kpi.sh --json` into a self-contained HTML KPI dashboard and open it with lavish; read-only               |
+| `fm-lavish-open.sh`     | Open/resume a Lavish artifact and launch a detached steward that owns the long-poll and relays feedback to your pane; `--recover` relaunches orphaned stewards. Keeps the first mate off `lavish-axi poll` |
+| `fm-lavish-steward.sh`  | The per-session Lavish poll worker (launched detached): holds `lavish-axi poll`, records each feedback round to `state/lavish/`, and wakes the originating pane                          |
+| `fm-lavish-reply.sh`    | Post an agent reply into a Lavish session via the write-only HTTP endpoint; non-blocking, never consumes feedback                                                                       |
+| `fm-lavish-lib.sh`      | Sourced library: Lavish session-key / base-URL / state-dir primitives mirroring the CLI, steward liveness, and orphan-poll reaping                                                      |
 
 ## Configuration
 
@@ -222,6 +228,10 @@ FM_IDLE_DIGEST_SILENCE_SECS=600    # passive-absence threshold before idle-diges
 FM_IDLE_DIGEST_WINDOW_SECS=1800    # refinement window before going idle; 0 = no active refinement
 FM_IDLE_DIGEST_MAX_PASSES=12       # max refinement passes per absence; 0 = no active refinement
 FM_IDLE_DIGEST_SECTION_MAX=6       # per-section bullet cap on the one-screen render (Needs you is never capped)
+# Lavish render-delegation (bin/fm-lavish-steward.sh)
+FM_LAVISH_FAIL_MAX=8               # consecutive poll failures before the steward gives up
+FM_LAVISH_BACKOFF_START=2          # initial backoff seconds on poll failure
+FM_LAVISH_BACKOFF_CAP=30           # maximum backoff seconds (exponential, capped)
 ```
 
 ## Development
@@ -240,6 +250,7 @@ for test_script in tests/*.test.sh; do "$test_script"; done   # behavior tests, 
 tests/fm-composer-ghost.test.sh           # dim-ghost stripping, ghost-only composer detection, and escape-free peek tests
 tests/fm-bootstrap.test.sh                # bootstrap dependency and feature-probe tests
 tests/fm-update.test.sh                   # fast-forward-only self-update, reread, nudge, dedup, and skip-safety tests
+tests/fm-lavish.test.sh                   # Lavish render-delegation: session key math, URL variants, canonical path, state-dir, steward liveness, orphan-poll selectivity, argument validation, recover empty, give-up on dead server
 tests/fm-secondmate-safety.test.sh        # secondmate routing, seeding, idle charter, backlog handoff, spawn, recovery, teardown, and FM_HOME safety
 tests/fm-teardown.test.sh                 # fm-teardown.sh safety and reminder checks: local-only fork-remote allow, truly-unpushed refuse, merged-to-main allow, no-mistakes regression, tasks-axi reminder, --force override
 tests/fm-idle-digest.test.sh              # bounded idle-digest state machine: begin idempotency and restart-resume, fold dedup and unknown-section rejection, active/pass loop self-termination at window/pass cap, screen Needs-you truncation guard, and clear
