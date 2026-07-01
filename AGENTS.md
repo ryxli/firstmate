@@ -76,6 +76,11 @@ config/identity      this instance's identity: name=, role=, and parent= lines; 
                      read at bootstrap before captain.md; written by fm-home-seed.sh for
                      secondmates, set manually for the main firstmate; sourced by fm-identity-lib.sh to
                      derive worker labels and supervision-chain context in briefs
+config/omp-overlay.yml  optional per-home omp model/config overlay; LOCAL, gitignored; when present,
+                     fm-spawn injects --config <home>/config/omp-overlay.yml immediately after
+                     --auto-approve in the omp launch command so a secondmate or crewmate runs a
+                     lighter model tier without touching the shared ~/.omp config; absent = launch
+                     command is left byte-for-byte unchanged; omp harness only, ignored for others
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
   captain.md         captain's curated personal preferences and working style - approval posture, communication style, release habits; LOCAL, gitignored; compact rewrite-and-prune counterpart to shared AGENTS.md; canonical harness-portable home, even if harness memory mirrors it as a recall cache
@@ -179,6 +184,7 @@ This workstation runs omp inside herdr, so omp is the default own-harness here.
 
 Detection: omp sets `OMPCODE=1` AND `CLAUDECODE=1` (Claude API compatibility), so `bin/fm-harness.sh` checks `OMPCODE` BEFORE the `CLAUDECODE` branch, otherwise omp misdetects as claude.
 The launch template is `omp --auto-approve "$(cat <brief>)"`; `--auto-approve` is omp's skip-all-approvals autonomy flag (the analog of claude's `--dangerously-skip-permissions`).
+When `config/omp-overlay.yml` exists in the spawn directory, fm-spawn injects `--config <home>/config/omp-overlay.yml` immediately after `--auto-approve` so the mate uses that model tier instead of the shared `~/.omp` config; absent = command is unchanged.
 No trust or permission dialog blocks a fresh worktree launch (an onboarding splash shows briefly, then the brief processes); still peek the pane within ~20s as for any spawn.
 Composer: omp draws a full rounded box (`╭── … ──╮` over `╰── … ──╯`) whose last visible line is the bottom border; `bin/fm-herdr-lib.sh` strips the full box-drawing set so a border-only idle composer reads as empty rather than pending input.
 
