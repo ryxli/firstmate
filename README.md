@@ -87,7 +87,7 @@ On first launch the first mate detects what its required toolchain is missing or
 If compatible `tasks-axi` is already on `PATH`, bootstrap records it as an optional capability fact and firstmate uses its verbs for routine backlog mutations; when it is absent or incompatible, firstmate keeps hand-editing `data/backlog.md` exactly as before.
 
 **Run it inside herdr for the best experience.**
-firstmate works from any terminal, but running your harness inside herdr puts every crewmate in its own tab within a per-project workspace, where you can watch the crew work in real time or type into any pane to intervene.
+firstmate works from any terminal, but running your harness inside herdr puts every crewmate in its own tab within the spawner's current workspace, where you can watch the crew work in real time or type into any pane to intervene.
 
 ## How It Works
 
