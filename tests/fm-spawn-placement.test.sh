@@ -169,13 +169,11 @@ test_crewmate_lands_in_spawners_current_workspace() {
   fakebin=$(make_fake_herdr "$home")
   # The spawner (main firstmate) lives in workspace wV labeled "firstmate".
   printf 'firstmate\twV\n' > "$home/ws.tsv"
-  export FM_FAKE_CURRENT_WSID=wV
   mkdir -p "$home/data/fix-login-k3"
   printf 'brief\n' > "$home/data/fix-login-k3/brief.md"
 
-  out=$(run_spawn "$home" "$fakebin" fix-login-k3 projects/myproj omp) \
+  out=$(FM_FAKE_CURRENT_WSID=wV run_spawn "$home" "$fakebin" fix-login-k3 projects/myproj omp) \
     || fail "spawn failed: $out"
-  unset FM_FAKE_CURRENT_WSID
 
   # The whole point: a crewmate lands in the spawner's CURRENT workspace as a new
   # tab. No project-named workspace is ever created (that was the old sprawl).
@@ -214,13 +212,11 @@ test_crewmate_single_agent_pane() {
   home=$(make_case crew-single myproj Mate)
   fakebin=$(make_fake_herdr "$home")
   printf 'firstmate\twV\n' > "$home/ws.tsv"
-  export FM_FAKE_CURRENT_WSID=wV
   mkdir -p "$home/data/add-x-q7"
   printf 'brief\n' > "$home/data/add-x-q7/brief.md"
 
-  out=$(run_spawn "$home" "$fakebin" add-x-q7 projects/myproj omp) \
+  out=$(FM_FAKE_CURRENT_WSID=wV run_spawn "$home" "$fakebin" add-x-q7 projects/myproj omp) \
     || fail "spawn failed: $out"
-  unset FM_FAKE_CURRENT_WSID
 
   # The leftover tab root shell pane must be closed so the tab is a single agent pane.
   grep -qF 'pane close wX:p9' "$home/herdr.log" \
@@ -240,13 +236,11 @@ test_crewmate_in_secondmate_home_nests_under_mate_workspace() {
   # A secondmate runs IN its own home workspace, so its current workspace is the
   # mate's home space (here wANCHOR labeled "Anchor"). Its crew simply land there.
   printf 'Anchor\twANCHOR\n' > "$home/ws.tsv"
-  export FM_FAKE_CURRENT_WSID=wANCHOR
   mkdir -p "$home/data/probe-cache-z9"
   printf 'brief\n' > "$home/data/probe-cache-z9/brief.md"
 
-  out=$(run_spawn "$home" "$fakebin" probe-cache-z9 projects/myproj omp) \
+  out=$(FM_FAKE_CURRENT_WSID=wANCHOR run_spawn "$home" "$fakebin" probe-cache-z9 projects/myproj omp) \
     || fail "crewmate spawn in secondmate home failed: $out"
-  unset FM_FAKE_CURRENT_WSID
 
   # A secondmate's crew nest under the mate's own workspace because that is the
   # spawner's current workspace - the same parent-workspace rule, no special case,
