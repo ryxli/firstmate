@@ -153,6 +153,7 @@ The first mate drives these; you rarely need to, but they work by hand too.
 | `fm-brief.sh`            | Scaffold a ship brief, a report-only scout brief with `--scout`, or a secondmate charter with `--secondmate`      |
 | `fm-classify-status.sh`  | Classify one status line as `captain` (exit 0) or `internal` (exit 1); the canonical relevance contract the supervisor extension mirrors |
 | `fm-lint-shared-text.sh` | Guard shared text (PR/commit/issue bodies) against firstmate persona vocabulary and the em-dash; exits nonzero listing offenders |
+| `fm-tooling-lint.sh`     | Guard firstmate's own shipped tooling surfaces (README, `SKILL.md`, `bin` help text) against non-bun JS invocation; enforces the bun/bunx house convention in CI |
 | `fm-ensure-agents-md.sh` | Ensure project `AGENTS.md` is the real memory file and `CLAUDE.md` symlinks to it                                   |
 | `fm-home-seed.sh`        | Lease/provision a secondmate home transactionally, clone projects, initialize gates, and maintain `data/secondmates.md` |
 | `fm-spawn.sh`            | Spawn one task, several `id=repo` pairs, or a persistent secondmate with `--secondmate`                            |
@@ -246,6 +247,7 @@ Supervision runs as an in-process omp extension (`.omp/extensions/fm-supervisor.
 ```sh
 bash -n bin/*.sh                          # syntax-check the toolbelt
 shellcheck bin/*.sh tests/*.sh            # lint the toolbelt and behavior tests; CI enforces this
+bin/fm-tooling-lint.sh                    # guard shipped tooling surfaces against non-bun JS invocation; CI enforces this in the invariants job
 for test_script in tests/*.test.sh; do "$test_script"; done   # behavior tests, matching CI
 tests/fm-composer-ghost.test.sh           # dim-ghost stripping, ghost-only composer detection, and escape-free peek tests
 tests/fm-bootstrap.test.sh                # bootstrap dependency and feature-probe tests
@@ -256,6 +258,7 @@ tests/fm-teardown.test.sh                 # fm-teardown.sh safety and reminder c
 tests/fm-idle-digest.test.sh              # bounded idle-digest state machine: begin idempotency and restart-resume, fold dedup and unknown-section rejection, active/pass loop self-termination at window/pass cap, screen Needs-you truncation guard, and clear
 tests/fm-resolve-spawn.test.sh            # spawn resolver preflight: harness binary check, unregistered-project warn, worktree base check, and abort-before-worktree integration with fm-spawn
 tests/fm-send-defer.test.sh              # peek-and-defer guard: empty-composer delivers, pending-draft defers (exit 75) without clobbering, queue drains FIFO on next clear send, idempotent re-defer, --key unguarded
+tests/fm-tooling-lint.test.sh            # house tooling guard: bun-clean passes, non-bun JS forms fail and are named, whole-word matching only, convention-definers and allow-marker exempt, real repo passes
 [ "$(readlink CLAUDE.md)" = "AGENTS.md" ]
 [ "$(readlink .claude/skills)" = "../.agents/skills" ]
 bun benchmarks/run.ts                     # OLD-vs-NEW supervision interface-efficiency benchmark
