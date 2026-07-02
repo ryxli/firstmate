@@ -6,3 +6,6 @@ data/
 .DS_Store
 .env
 config/crew-harness
+config/identity
+worktrees/
+.wb_query.py
