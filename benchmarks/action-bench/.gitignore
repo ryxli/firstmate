@@ -1,0 +1,7 @@
+# Transient per-run artifacts (regenerated on every run). The durable macro record
+# (results/milestones.{md,jsonl}) and the latest cross-model comparison + chart JSON are kept.
+results/actionbench-*.runs.json
+results/actionbench-*.md
+# stray python bytecode from a locally python-graded fixture run
+__pycache__/
+*.pyc
