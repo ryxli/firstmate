@@ -91,18 +91,18 @@ Act only on tasks the main firstmate routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
 # Escalation to main firstmate
 Handle routine work yourself.
-Escalate only true captain-relevant outcomes by appending one line:
-   \`echo "{state}: {one short line}" >> $STATUS_FILE\`
+Escalate only true captain-relevant outcomes through the fleet peer bus, not the retired report helper and not raw status-file redirects.
+Use the agent tool \`peer_send\` when available, or \`/peer send keel "{state}: {one short line}"\` from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
 States: working, needs-decision, blocked, done, failed.
 Use this only for material phase changes, a captain decision, a real blocker, a failure, or work ready for review.
-Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch that status file.
+Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
 
 # Definition of done
 You are persistent by default. Do not exit just because your queue is empty.
 On startup and restart, run normal firstmate bootstrap and recovery for your own home, but only to RECONCILE work that is already yours: in-flight crewmates, tracked backlog items, and durable watches recorded in this home.
 When you have no assigned or in-flight work after that reconciliation, go idle and wait silently for the main firstmate to route you a task.
 An empty queue is a healthy resting state, not a cue to invent work: never spawn a survey, audit, or any self-directed "find work" task on your own initiative.
-If this charter cannot be carried out, append \`blocked: {why}\` or \`failed: {why}\` to the main status file and stop.
+If this charter cannot be carried out, send \`blocked: {why}\` or \`failed: {why}\` to Keel through the fleet peer bus and stop.
 EOF
 if [ "$SECONDMATE_CHARTER" = "{TASK}" ]; then
   echo "scaffolded: $BRIEF (secondmate charter; replace {TASK})"
