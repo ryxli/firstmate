@@ -81,6 +81,12 @@ config/omp-overlay.yml  optional per-home omp model/config overlay; LOCAL, gitig
                      --auto-approve in the omp launch command so a secondmate or crewmate runs a
                      lighter model tier without touching the shared ~/.omp config; absent = launch
                      command is left byte-for-byte unchanged; omp harness only, ignored for others
+config/secondmate-harness  optional secondmate harness/model/effort pin; LOCAL, gitignored; a single
+                     line "<harness> [<model>] [<effort>]". fm-harness.sh resolves the secondmate
+                     harness from it (falling back to config/crew-harness -> own), and its optional
+                     model/effort tokens durably pin a secondmate's model tier and reasoning effort
+                     across respawns; an explicit --model/--effort at spawn overrides them; absent or a
+                     bare "<harness>" behaves exactly as before this knob existed (harness only)
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
   captain.md         captain's curated personal preferences and working style - approval posture, communication style, release habits; LOCAL, gitignored; compact rewrite-and-prune counterpart to shared AGENTS.md; canonical harness-portable home, even if harness memory mirrors it as a recall cache
@@ -423,7 +429,9 @@ bin/fm-spawn.sh <id1>=projects/<repo1> <id2>=projects/<repo2> [--scout]   # batc
 Dispatch several tasks in one call by passing `id=repo` pairs instead of a single `<id> <project>`; each pair is spawned through the same single-task path, a shared `--scout` applies to all, and the looping happens inside the script so you never hand-write a multi-task shell loop.
 If one pair fails, the rest still run and the batch exits non-zero.
 
-The script resolves the harness (`fm-harness.sh crew`), owns the verified launch templates, resolves the project's delivery mode (`fm-project-mode.sh`) for ship/scout tasks, and records `harness=`, `kind=`, `mode=`, `yolo=`, `pane=`, `domain=`, `workspace=`, and `worker=` in the task's meta; a non-flag third argument containing whitespace is treated as a raw launch command (only for verifying new adapters).
+Choose a model and reasoning effort per dispatch with `--model <name>` and `--effort <low|medium|high|xhigh|max>` (both apply to a crewmate or a secondmate spawn, and to every pair of a batch when passed once). This is firstmate's per-crew cost knob: spawn an easy task on a cheap model (e.g. `--model gpt-5.4-mini --effort low`) and reserve the strong default for hard work. `--model` is fuzzy where the harness supports it (omp resolves `opus` or `gpt-5.4-mini` itself); each axis is threaded only into harnesses whose CLI accepts it (omp: `--model` + `--thinking`) and omitted otherwise, so an unpinned spawn's launch command is unchanged. A secondmate resolved from `config/secondmate-harness` inherits that file's optional model/effort tokens durably across respawns, and an explicit `--model`/`--effort` overrides the pin.
+
+The script resolves the harness (`fm-harness.sh crew`, or `fm-harness.sh secondmate` for a `--secondmate` spawn), owns the verified launch templates, resolves the project's delivery mode (`fm-project-mode.sh`) for ship/scout tasks, and records `harness=`, `model=`, `effort=`, `kind=`, `mode=`, `yolo=`, `pane=`, `domain=`, `workspace=`, and `worker=` in the task's meta; a non-flag third argument containing whitespace is treated as a raw launch command (only for verifying new adapters).
 Here `worker=` is the visible per-task herdr tab and pane display label - the task slug for a crewmate, or `home` for a secondmate's own tab (its workspace already carries the mate's name, so the tab does not repeat it) - while the herdr agent identity stays `omp`; `agent_identity=`, when present in meta, is that integration binding (`omp` for omp panes) recorded for observability only, never a labeling source.
 For `kind=secondmate`, the same script launches in the registered or explicit firstmate home instead of creating a project worktree, records `home=` and `projects=`, and uses the charter brief as the launch prompt.
 

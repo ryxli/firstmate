@@ -1,18 +1,28 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a git worktree, or a secondmate in
 # its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> [harness|launch-command] [--scout]
-#        fm-spawn.sh <task-id> [<firstmate-home>] [harness|launch-command] --secondmate
+# Usage: fm-spawn.sh <task-id> <project-dir> [harness|launch-command] [--model <name>] [--effort <level>] [--scout]
+#        fm-spawn.sh <task-id> [<firstmate-home>] [harness|launch-command] [--model <name>] [--effort <level>] --secondmate
 #   With no harness arg, the harness comes from fm-harness.sh crew (config/crew-harness,
-#   falling back to firstmate's own harness). A bare adapter name (omp|claude|codex|
-#   opencode|pi) overrides it for this spawn. A non-flag string containing whitespace
-#   is treated as a RAW launch command - the escape hatch for verifying new adapters.
+#   falling back to firstmate's own harness); a --secondmate spawn resolves it from
+#   fm-harness.sh secondmate (config/secondmate-harness -> crew -> own). A bare adapter
+#   name (omp|claude|codex|opencode|pi) overrides it for this spawn. A non-flag string
+#   containing whitespace is treated as a RAW launch command - the escape hatch for
+#   verifying new adapters (model/effort flags are NOT injected into a raw command).
+#   --model <name> pins a concrete model for the crewmate/secondmate (fuzzy where the
+#   harness supports it, e.g. omp "opus" or "gpt-5.4-mini"); --effort <low|medium|high|
+#   xhigh|max> pins reasoning effort. Each axis is threaded only into harnesses whose
+#   CLI was verified to accept it (omp: --model + --thinking), omitted otherwise. For a
+#   --secondmate spawn resolved from config/secondmate-harness, that file's optional
+#   "<harness> [<model>] [<effort>]" tokens supply model/effort durably across respawns
+#   unless an explicit --model/--effort flag overrides them.
 #   --scout records kind=scout in the task's meta (report deliverable, scratch worktree;
 #   see AGENTS.md section 7); --secondmate records kind=secondmate and launches in a
 #   provisioned firstmate home; the default is kind=ship.
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>:
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
-#   Each pair re-execs this script in single-task mode.
+#   Each pair re-execs this script in single-task mode; a shared --scout/--model/--effort
+#   applies to every pair.
 #
 # Git worktrees are created with `git worktree add` at $FM_WORKTREE_BASE/<id>
 # (default: $FM_HOME/worktrees/<id>) for crewmate git isolation; secondmates launch
@@ -45,20 +55,50 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 
 KIND=ship
+MODEL=
+EFFORT=
+MODEL_SET=0
+EFFORT_SET=0
 POS=()
+want_value=
 for a in "$@"; do
+  if [ -n "$want_value" ]; then
+    case "$want_value" in
+      model) MODEL=$a; MODEL_SET=1 ;;
+      effort) EFFORT=$a; EFFORT_SET=1 ;;
+    esac
+    want_value=
+    continue
+  fi
   case "$a" in
     --scout) KIND=scout ;;
     --secondmate) KIND=secondmate ;;
+    --model) want_value=model ;;
+    --model=*) MODEL=${a#--model=}; MODEL_SET=1 ;;
+    --effort) want_value=effort ;;
+    --effort=*) EFFORT=${a#--effort=}; EFFORT_SET=1 ;;
     *) POS+=("$a") ;;
   esac
 done
+[ -z "$want_value" ] || { echo "error: --$want_value requires a value" >&2; exit 1; }
+[ "$MODEL_SET" -eq 0 ] || [ -n "$MODEL" ] || { echo "error: --model requires a non-empty value" >&2; exit 1; }
+[ "$EFFORT_SET" -eq 0 ] || [ -n "$EFFORT" ] || { echo "error: --effort requires a non-empty value" >&2; exit 1; }
+case "$EFFORT" in
+  ''|low|medium|high|xhigh|max) ;;
+  *) echo "error: --effort must be one of low, medium, high, xhigh, max" >&2; exit 1 ;;
+esac
 
 # Batch dispatch: each positional is an id=repo pair.
 idpart=${POS[0]:-}
 idpart=${idpart%%=*}
 if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in */*) false ;; *) true ;; esac; then
   rc=0
+  # Shared axes threaded onto every pair's single-task re-exec (kept out when
+  # unset so a plain batch stays byte-identical to before this knob existed).
+  batch_shared=()
+  [ "$KIND" != scout ] || batch_shared+=(--scout)
+  [ -z "$MODEL" ] || batch_shared+=(--model "$MODEL")
+  [ -z "$EFFORT" ] || batch_shared+=(--effort "$EFFORT")
   for pair in "${POS[@]}"; do
     case "$pair" in
       *=*) : ;;
@@ -68,11 +108,8 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
       echo "error: batch dispatch does not support --secondmate; spawn each secondmate explicitly" >&2
       rc=2
       continue
-    elif [ "$KIND" = scout ]; then
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" --scout; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
-    else
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
     fi
+    if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" ${batch_shared[@]+"${batch_shared[@]}"}; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
   done
   exit "$rc"
 fi
@@ -110,17 +147,73 @@ if [ "$KIND" != secondmate ]; then
 fi
 
 # Launch templates per adapter. No turn-end hook placeholders needed since
-# herdr tracks agent status natively. __BRIEF__ is still used.
+# herdr tracks agent status natively. __BRIEF__ is still used, and
+# __MODELFLAG__/__EFFORTFLAG__ are filled from --model/--effort (or a secondmate
+# pin) at build time - each collapses to nothing when its axis is unset, so a
+# plain spawn's command is byte-identical to before this knob existed.
 launch_template() {
   local harness=$1
   # shellcheck disable=SC2016
   case "$harness" in
-    omp)    printf '%s' 'omp --auto-approve "$(cat __BRIEF__)"' ;;
-    claude) printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions "$(cat __BRIEF__)"' ;;
-    codex)  printf '%s' 'codex --dangerously-bypass-approvals-and-sandbox "$(cat __BRIEF__)"' ;;
-    opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode --prompt "$(cat __BRIEF__)"' ;;
-    pi)     printf '%s' 'pi "$(cat __BRIEF__)"' ;;
+    omp)    printf '%s' 'omp --auto-approve __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"' ;;
+    claude) printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"' ;;
+    codex)  printf '%s' 'codex __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox "$(cat __BRIEF__)"' ;;
+    opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(cat __BRIEF__)"' ;;
+    pi)     printf '%s' 'pi __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"' ;;
     *) return 1 ;;
+  esac
+}
+
+# model_flag_for_harness <harness> <model>: CLI flag fragment (trailing space) that
+# pins <model> for <harness>, or nothing when <model> is empty/"default". Every
+# supported adapter accepts `--model`; omp resolves it fuzzily itself (verified:
+# `omp --help` documents `--model` fuzzy match, e.g. "opus" or "gpt-5.2").
+model_flag_for_harness() {
+  local harness=$1 model=$2
+  [ -n "$model" ] && [ "$model" != default ] || return 0
+  case "$harness" in
+    omp|claude|codex|opencode|pi)
+      printf -- '--model %s ' "$(fm_shell_quote "$model")"
+      ;;
+  esac
+}
+
+# effort_flag_for_harness <harness> <effort>: CLI flag fragment (trailing space)
+# that pins reasoning effort for <harness>, or nothing. Threaded only into
+# harnesses whose installed CLI was verified to accept the axis; an unsupported
+# axis is omitted rather than guessed. Shared vocabulary: low|medium|high|xhigh|max.
+effort_flag_for_harness() {
+  local harness=$1 effort=$2
+  [ -n "$effort" ] && [ "$effort" != default ] || return 0
+  case "$harness" in
+    omp)
+      # omp (oh-my-pi) exposes --thinking off|minimal|low|medium|high|xhigh|auto
+      # (verified: `omp --help`). It has no `max`, so map max to xhigh (its top).
+      case "$effort" in
+        low|medium|high|xhigh) printf -- '--thinking %s ' "$(fm_shell_quote "$effort")" ;;
+        max) printf -- '--thinking xhigh ' ;;
+      esac
+      ;;
+    pi)
+      # pi accepts --thinking low|medium|high|xhigh; it warns and ignores max, so
+      # omit max rather than passing a flag the installed CLI rejects.
+      case "$effort" in
+        low|medium|high|xhigh) printf -- '--thinking %s ' "$(fm_shell_quote "$effort")" ;;
+      esac
+      ;;
+    claude)
+      case "$effort" in
+        low|medium|high|xhigh|max) printf -- '--effort %s ' "$(fm_shell_quote "$effort")" ;;
+      esac
+      ;;
+    codex)
+      # codex config schema uses model_reasoning_effort low|medium|high|xhigh; omit max.
+      case "$effort" in
+        low|medium|high|xhigh) printf -- '-c %s ' "$(fm_shell_quote "model_reasoning_effort=\"$effort\"")" ;;
+      esac
+      ;;
+    # opencode's `opencode --prompt` launch has a verified --model flag but no
+    # verified effort flag, so effort is omitted for opencode.
   esac
 }
 
@@ -152,7 +245,11 @@ case "$ARG3" in
     HARNESS=$(fm_first_command_word "$LAUNCH" || true)
     ;;
   '')
-    HARNESS=$("$FM_ROOT/bin/fm-harness.sh" crew)
+    if [ "$KIND" = secondmate ]; then
+      HARNESS=$("$FM_ROOT/bin/fm-harness.sh" secondmate)
+    else
+      HARNESS=$("$FM_ROOT/bin/fm-harness.sh" crew)
+    fi
     LAUNCH=$(launch_template "$HARNESS") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     ;;
   *)
@@ -160,6 +257,27 @@ case "$ARG3" in
     LAUNCH=$(launch_template "$HARNESS") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     ;;
 esac
+
+# config/secondmate-harness may carry optional model/effort tokens alongside the
+# harness ("<harness> [<model>] [<effort>]"). They apply only for a --secondmate
+# spawn whose harness was resolved from that config chain (ARG3 empty: no explicit
+# per-spawn harness/raw launch). Re-resolving here makes the pin durable across
+# respawns. Precedence: explicit --model/--effort flags still win over the tokens.
+if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
+  if [ "$MODEL_SET" -eq 0 ]; then
+    SM_MODEL=$("$FM_ROOT/bin/fm-harness.sh" secondmate-model)
+    [ -z "$SM_MODEL" ] || MODEL=$SM_MODEL
+  fi
+  if [ "$EFFORT_SET" -eq 0 ]; then
+    SM_EFFORT=$("$FM_ROOT/bin/fm-harness.sh" secondmate-effort)
+    if [ -n "$SM_EFFORT" ]; then
+      case "$SM_EFFORT" in
+        low|medium|high|xhigh|max) EFFORT=$SM_EFFORT ;;
+        *) echo "warning: config/secondmate-harness effort token '$SM_EFFORT' is not one of low, medium, high, xhigh, max; ignoring" >&2 ;;
+      esac
+    fi
+  fi
+fi
 
 secondmate_registry_value() {
   local id=$1 key=$2 reg line value
@@ -541,9 +659,14 @@ $("$FM_ROOT/bin/fm-project-mode.sh" "$(basename "$PROJ_ABS")")
 EOF
 fi
 
-# Build the launch command with placeholders filled.
+# Build the launch command with placeholders filled. Model/effort flag fragments
+# are empty unless the axis was set, so an unpinned spawn's command is unchanged.
 sq_brief=$(fm_shell_quote "$BRIEF")
+MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
+EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT")
 LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
+LAUNCH_CMD=${LAUNCH_CMD//__MODELFLAG__/$MODELFLAG}
+LAUNCH_CMD=${LAUNCH_CMD//__EFFORTFLAG__/$EFFORTFLAG}
 if [ "$HARNESS" = omp ]; then
   LAUNCH_CMD=$(apply_omp_overlay "$LAUNCH_CMD" "$WT")
 fi
@@ -674,6 +797,8 @@ mkdir -p "$STATE"
   echo "worktree=$WT"
   echo "project=$PROJ_ABS"
   echo "harness=$HARNESS"
+  echo "model=${MODEL:-default}"
+  echo "effort=${EFFORT:-default}"
   echo "kind=$KIND"
   echo "mode=$MODE"
   echo "yolo=$YOLO"
