@@ -499,6 +499,95 @@ test_secondmate_reuses_existing_named_workspace() {
     || fail "secondmate reuse path closed a workspace init pane, but no workspace was created: $(cat "$home/herdr.log")"
   pass "secondmate reuses its existing named workspace on respawn instead of leaking one"
 }
+# --model/--effort are threaded into the crewmate's launch command (omp: --model
+# + --thinking) and recorded in meta, so an easy task can spawn on a cheap model.
+test_crewmate_model_effort_threaded_into_launch() {
+  local home fakebin out
+  home=$(make_case crew-model myproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  printf 'firstmate\twV\n' > "$home/ws.tsv"
+  mkdir -p "$home/data/easy-fix-k3"
+  printf 'brief\n' > "$home/data/easy-fix-k3/brief.md"
+
+  out=$(FM_FAKE_CURRENT_WSID=wV run_spawn "$home" "$fakebin" easy-fix-k3 projects/myproj omp --model gpt-5.4-mini --effort low) \
+    || fail "spawn failed: $out"
+
+  grep -qF -- "--model 'gpt-5.4-mini'" "$home/herdr.log" \
+    || fail "launch command did not carry the fuzzy --model: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF -- "--thinking 'low'" "$home/herdr.log" \
+    || fail "launch command did not map --effort to omp --thinking: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF 'model=gpt-5.4-mini' "$home/state/easy-fix-k3.meta" || fail "meta missing model="
+  grep -qF 'effort=low' "$home/state/easy-fix-k3.meta" || fail "meta missing effort="
+  pass "crewmate --model/--effort thread into the launch command and meta"
+}
+
+# A default spawn (no --model/--effort) produces the byte-identical baseline
+# command and records the default sentinels, so the knob is opt-in only.
+test_crewmate_no_model_effort_is_baseline() {
+  local home fakebin out
+  home=$(make_case crew-baseline myproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  printf 'firstmate\twV\n' > "$home/ws.tsv"
+  mkdir -p "$home/data/plain-q7"
+  printf 'brief\n' > "$home/data/plain-q7/brief.md"
+
+  out=$(FM_FAKE_CURRENT_WSID=wV run_spawn "$home" "$fakebin" plain-q7 projects/myproj omp) \
+    || fail "spawn failed: $out"
+
+  ! grep -qF -- '--model' "$home/herdr.log" \
+    || fail "unpinned spawn leaked a --model flag: $(grep 'agent start' "$home/herdr.log")"
+  ! grep -qF -- '--thinking' "$home/herdr.log" \
+    || fail "unpinned spawn leaked a --thinking flag: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF 'model=default' "$home/state/plain-q7.meta" || fail "meta missing model=default"
+  grep -qF 'effort=default' "$home/state/plain-q7.meta" || fail "meta missing effort=default"
+  pass "an unpinned spawn stays at the baseline command (no model/effort flags)"
+}
+
+# A secondmate resolved from config/secondmate-harness inherits its pinned
+# model/effort tokens durably (this is the #180 intent on this ship).
+test_secondmate_pin_from_config_threaded() {
+  local home fakebin smhome out
+  home=$(make_case sm-pin shipproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  : > "$home/ws.tsv"
+  # Primary's own config pins the harness + model + effort for its secondmates.
+  printf 'omp gpt-5.4-mini low\n' > "$home/config/secondmate-harness"
+  smhome=$(make_secondmate_home sm-pin anchor Anchor 1)
+
+  # No explicit harness arg, so the harness (and its pinned model/effort) come
+  # from config/secondmate-harness.
+  out=$(run_spawn "$home" "$fakebin" anchor "$smhome" --secondmate) \
+    || fail "secondmate spawn failed: $out"
+
+  grep -qF -- "--model 'gpt-5.4-mini'" "$home/herdr.log" \
+    || fail "secondmate launch did not carry the config-pinned model: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF -- "--thinking 'low'" "$home/herdr.log" \
+    || fail "secondmate launch did not carry the config-pinned effort: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF 'model=gpt-5.4-mini' "$home/state/anchor.meta" || fail "secondmate meta missing pinned model="
+  grep -qF 'effort=low' "$home/state/anchor.meta" || fail "secondmate meta missing pinned effort="
+  pass "a secondmate inherits its config/secondmate-harness model/effort pin"
+}
+
+# An explicit --model/--effort at spawn overrides the config pin.
+test_secondmate_explicit_flags_override_pin() {
+  local home fakebin smhome out
+  home=$(make_case sm-pin-override shipproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  : > "$home/ws.tsv"
+  printf 'omp gpt-5.4-mini low\n' > "$home/config/secondmate-harness"
+  smhome=$(make_secondmate_home sm-pin-override anchor Anchor 1)
+
+  out=$(run_spawn "$home" "$fakebin" anchor "$smhome" --secondmate --model opus --effort high) \
+    || fail "secondmate spawn failed: $out"
+
+  grep -qF -- "--model 'opus'" "$home/herdr.log" \
+    || fail "explicit --model did not override the config pin: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF -- "--thinking 'high'" "$home/herdr.log" \
+    || fail "explicit --effort did not override the config pin: $(grep 'agent start' "$home/herdr.log")"
+  ! grep -qF -- "--model 'gpt-5.4-mini'" "$home/herdr.log" \
+    || fail "config-pinned model leaked despite an explicit override"
+  pass "explicit --model/--effort override the config/secondmate-harness pin"
+}
 
 test_crewmate_lands_in_spawners_current_workspace
 test_crewmate_single_agent_pane
@@ -512,3 +601,7 @@ test_secondmate_omp_overlay_is_injected_when_present
 test_secondmate_omp_overlay_is_omitted_when_absent
 test_spawn_refuses_when_worktree_resolves_to_primary_checkout
 test_workspace_orphan_pane_closed_on_agent_start_failure
+test_crewmate_model_effort_threaded_into_launch
+test_crewmate_no_model_effort_is_baseline
+test_secondmate_pin_from_config_threaded
+test_secondmate_explicit_flags_override_pin
