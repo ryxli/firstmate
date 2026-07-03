@@ -75,9 +75,21 @@
  *     inject ONE combined digest.
  *   - state/.status-internal.log: non-relevant status lines appended here, no
  *     wake (trimmed to the last STATUS_INTERNAL_LOG_MAX lines like bash).
- *   - stale wakes are SKIPPED for kind=secondmate panes and for ship tasks
- *     parked on a green PR (pr= set AND last status line is a terminal
+ *   - the periodic stale NAG is SKIPPED for kind=secondmate panes and for ship
+ *     tasks parked on a green PR (pr= set AND last status line is a terminal
  *     done-PR / PR-ready line); see benchmarks/model-lib.ts isParkedOnGreenPR.
+ *     A secondmate working->idle transition instead arms a short, corroborated
+ *     completion backstop (FM_SECONDMATE_IDLE_SECS) so a secondmate finishing
+ *     routed work and going idle without a terminal status line still wakes.
+ *   - live panes are resolved by DURABLE herdr agent identity (the agent slot is
+ *     the task id): refreshFleet resolves each task's current pane via
+ *     `herdr agent get <task>` and refreshes a drifted state/<task>.meta pane=,
+ *     so a state change on a re-identified pane still wakes.
+ *   - before any idle-backstop wake (stale or secondmate completion) the pane's
+ *     existence is confirmed and herdr's idle verdict is corroborated against the
+ *     pane's rendered busy banner (a crew mid long foreground tool call reads
+ *     idle to herdr while its banner is up), so neither a gone nor a still-busy
+ *     pane is acted on.
  *
  * The PURE export `classifyAndDigest` below is the single source of truth for
  * relevance + digest building (mirrors bin/fm-classify-status.sh and
@@ -262,9 +274,11 @@ interface Tunables {
 	flushGraceMs: number; // FM_SIGNAL_GRACE: non-afk coalescing window (default 30s)
 	flushAfkMs: number; // FM_ESCALATE_BATCH_SECS: afk batch window (default 90s)
 	staleMs: number; // FM_STALE_ESCALATE_SECS: idle-without-status backstop (default 240s)
+	secondmateIdleMs: number; // FM_SECONDMATE_IDLE_SECS: secondmate working->idle completion backstop (default 20s)
 	checkIntervalMs: number; // FM_CHECK_INTERVAL: *.check.sh cadence (default 300s)
 	checkTimeoutMs: number; // FM_CHECK_TIMEOUT: per-check timeout (default 30s)
 	herdrGetTimeoutMs: number; // herdr agent get seed timeout (fixed)
+	busyReadTimeoutMs: number; // herdr pane read busy-banner corroboration timeout (fixed)
 }
 
 function envSec(name: string, defSec: number): number {
@@ -279,9 +293,11 @@ function readTunables(): Tunables {
 		flushGraceMs: envSec("FM_SIGNAL_GRACE", 30),
 		flushAfkMs: envSec("FM_ESCALATE_BATCH_SECS", 90),
 		staleMs: envSec("FM_STALE_ESCALATE_SECS", 240),
+		secondmateIdleMs: envSec("FM_SECONDMATE_IDLE_SECS", 20),
 		checkIntervalMs: envSec("FM_CHECK_INTERVAL", 300),
 		checkTimeoutMs: envSec("FM_CHECK_TIMEOUT", 30),
 		herdrGetTimeoutMs: 5_000,
+		busyReadTimeoutMs: 5_000,
 	};
 }
 
@@ -426,7 +442,10 @@ async function refreshFleet(sup: Supervisor): Promise<void> {
 		const task = f.slice(0, -".meta".length);
 		const meta = await parseMeta(join(sup.stateDir, f));
 		if (!meta.pane) continue;
-		next.set(meta.pane, { ...meta, task, pane: meta.pane });
+		// Durable-identity resolution: key on the CURRENT live pane, not a
+		// possibly-drifted recorded pane= (see resolveLivePane).
+		const pane = await resolveLivePane(sup, task, meta.pane);
+		next.set(pane, { ...meta, task, pane });
 	}
 
 	let changed = next.size !== sup.crewByPane.size;
@@ -622,10 +641,18 @@ function handleHerdrPush(sup: Supervisor, push: HerdrPush): void {
 		});
 		return;
 	}
-	// idle / unknown: turn-end. NOT a wake by itself; arm the stale backstop.
-	// A status line written right after the turn-end is caught by fs.watch and
-	// supersedes the stale timer (it calls clearStaleTimer).
-	armStaleTimer(sup, crew);
+	// idle / unknown / done: turn-end.
+	// - secondmate: a working->idle after routed work is the completion signal
+	//   the main firstmate misses today (a resting secondmate never transitions,
+	//   so arming on the TRANSITION does not nag one). Arm a short, corroborated
+	//   completion backstop (target-existence + herdr-idle corroboration +
+	//   status-log check) so a genuine completion wakes without spuriously
+	//   flagging a mid-tool-call or resting secondmate.
+	// - ship/scout: arm the stale backstop as before. A status line written
+	//   right after the turn-end is caught by fs.watch and supersedes the timer
+	//   (it calls clearStaleTimer).
+	if (crew.kind === "secondmate") armCompletionTimer(sup, crew);
+	else armStaleTimer(sup, crew);
 }
 
 function dropPane(sup: Supervisor, pane: string): void {
@@ -712,6 +739,20 @@ async function fireStale(sup: Supervisor, crew: Crewmate, idleStart: number): Pr
 	if (sup.abort.signal.aborted) return;
 	const cur = sup.prevStatus.get(crew.pane);
 	if (cur !== "idle" && cur !== "unknown") return; // no longer idle
+	// Target-existence (port of kun #188-adjacent): never fire a "peek" wake for
+	// a pane that no longer exists; a missed exit event means the pane is gone.
+	if (!(await paneReachable(sup, crew.pane))) {
+		dropPane(sup, crew.pane);
+		return;
+	}
+	// herdr idle-state corroboration (port of kun #207): herdr agent_status
+	// reports generation state, so a crew blocked on its own long foreground
+	// tool call reads idle while its pane still shows the busy banner. Re-arm
+	// instead of spuriously flagging it stale.
+	if (await paneShowsBusyBanner(sup, crew.pane)) {
+		armStaleTimer(sup, crew);
+		return;
+	}
 	if (await isAwaitingMerge(sup, crew)) return; // parked on a green PR: by design
 	const last = await lastStatusLine(sup, crew.task);
 	if (last && CAPTAIN_RE.test(last)) return; // already reported something captain-worthy
@@ -730,6 +771,129 @@ async function isAwaitingMerge(sup: Supervisor, crew: Crewmate): Promise<boolean
 	// awaiting-merge rule (see benchmarks/model-lib.ts isParkedOnGreenPR):
 	// terminal "done:...<space>PR<space>" line, or a "PR ready" line.
 	return /^done:.*\bPR\b/i.test(last) || /PR ready/i.test(last);
+}
+
+// ---------------------- secondmate completion backstop ----------------------
+
+// A secondmate is idle-by-default for routed work, so it is excluded from the
+// stale nag (an idle secondmate is healthy). But a secondmate that FINISHES
+// routed work and goes idle without leaving a terminal captain-relevant status
+// line was not waking the main firstmate at all - the awareness gap this closes.
+// A working->idle transition (armed only on the TRANSITION, never periodically)
+// is that completion signal: arm a short, corroborated backstop.
+function armCompletionTimer(sup: Supervisor, crew: Crewmate): void {
+	clearStaleTimer(sup, crew.pane); // reuse the per-pane timer slot (a pane is crew XOR secondmate)
+	const timer = setTimeout(() => {
+		sup.staleTimers.delete(crew.pane);
+		void fireCompletion(sup, crew);
+	}, sup.tunables.secondmateIdleMs);
+	sup.staleTimers.set(crew.pane, timer);
+}
+
+async function fireCompletion(sup: Supervisor, crew: Crewmate): Promise<void> {
+	if (sup.abort.signal.aborted) return;
+	const cur = sup.prevStatus.get(crew.pane);
+	if (cur !== "idle" && cur !== "unknown" && cur !== "done") return; // resumed working
+	// target-existence (#188): a gone secondmate pane is dropped, not woken on.
+	if (!(await paneReachable(sup, crew.pane))) {
+		dropPane(sup, crew.pane);
+		return;
+	}
+	// herdr idle corroboration (#207): still-busy pane (mid long tool call) is
+	// not a real completion - re-arm and re-check.
+	if (await paneShowsBusyBanner(sup, crew.pane)) {
+		armCompletionTimer(sup, crew);
+		return;
+	}
+	// status log: if the secondmate already wrote a captain-relevant line, the
+	// status-file watcher woke the captain; do not double-wake.
+	const last = await lastStatusLine(sup, crew.task);
+	if (last && CAPTAIN_RE.test(last)) return;
+	const lineage = crew.worker ? ` ${crew.worker}` : "";
+	enqueueStale(
+		sup,
+		`[wake] ${crew.task}${lineage} ${crew.pane} - secondmate idle after routed work, no status \u00b7 action: review + close out`,
+	);
+}
+
+// ---------------------- durable-identity pane resolution ---------------------
+
+// Resolve the CURRENT live pane for a task by its durable herdr agent identity.
+// bin/fm-spawn.sh registers every direct report under an agent SLOT named for
+// the task id, so `herdr agent get <task>` resolves the live pane even after the
+// pane is re-identified (restart/reopen), when the recorded pane= has drifted.
+// Port of origin/fm-live-pane-refresh: refresh state/<task>.meta pane= when it
+// drifts so a state change on the re-identified pane still wakes. Falls back to
+// the recorded pane when herdr is unreachable or the agent slot is gone.
+async function resolveLivePane(sup: Supervisor, task: string, recordedPane: string): Promise<string> {
+	let live: string | undefined;
+	try {
+		const res = await sup.pi.exec("herdr", ["agent", "get", task], {
+			timeout: sup.tunables.herdrGetTimeoutMs,
+			signal: sup.abort.signal,
+			cwd: sup.ctx.cwd,
+		});
+		live = res.stdout.match(/"pane_id":"([^"]*)"/)?.[1];
+	} catch {
+		return recordedPane;
+	}
+	if (!live) return recordedPane;
+	if (live !== recordedPane) await writeMetaPane(sup, task, live);
+	return live;
+}
+
+// Rewrite state/<task>.meta pane= in place (last pane= wins, matching parseMeta).
+async function writeMetaPane(sup: Supervisor, task: string, pane: string): Promise<void> {
+	const path = join(sup.stateDir, `${task}.meta`);
+	try {
+		const txt = await readFile(path, "utf8");
+		const lines = txt.split("\n");
+		let found = false;
+		const out = lines.map((l) => {
+			if (l.startsWith("pane=")) {
+				found = true;
+				return `pane=${pane}`;
+			}
+			return l;
+		});
+		if (!found) out.push(`pane=${pane}`);
+		await writeFile(path, out.join("\n"));
+	} catch {
+		// best-effort meta refresh; a failed write just leaves the drifted pane=
+	}
+}
+
+// ------------------------ busy-banner corroboration -------------------------
+
+// Corroborate a herdr `idle` verdict against the pane's own rendered text (port
+// of kun #207). Returns true when the pane still renders the harness busy banner
+// (BUSY_REGEX / FM_BUSY_REGEX), i.e. it is NOT genuinely idle (a crew mid long
+// foreground tool call). Best-effort: an unreadable pane reads not-busy so the
+// other corroboration signals still apply.
+async function paneShowsBusyBanner(sup: Supervisor, pane: string): Promise<boolean> {
+	let text: string;
+	try {
+		const res = await sup.pi.exec("herdr", ["pane", "read", pane, "--lines", "6", "--source", "visible"], {
+			timeout: sup.tunables.busyReadTimeoutMs,
+			signal: sup.abort.signal,
+			cwd: sup.ctx.cwd,
+		});
+		text = res.stdout;
+	} catch {
+		return false;
+	}
+	const source = process.env.FM_BUSY_REGEX ?? "esc (to )?interrupt|Working\\.\\.\\.";
+	let re: RegExp;
+	try {
+		re = new RegExp(source, "i");
+	} catch {
+		re = /esc (to )?interrupt|Working\.\.\./i;
+	}
+	return text
+		.split("\n")
+		.map((l) => l.replace(/[\u2502\u2503|\u2500\u2501\u256d\u256e\u2570\u256f\u250c\u2510\u2514\u2518]/g, "").trim()) // strip composer box-drawing chrome (mirrors bin/fm-herdr-lib.sh)
+		.filter((l) => l.length > 0)
+		.some((l) => re.test(l));
 }
 
 // ---------------------------- status files ----------------------------
