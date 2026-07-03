@@ -29,11 +29,17 @@ command -v herdr >/dev/null || { echo "SKIP: herdr not available"; exit 0; }
 command -v omp   >/dev/null || { echo "SKIP: omp not available"; exit 0; }
 command -v git   >/dev/null || { echo "SKIP: git not available"; exit 0; }
 
-# The OLD baseline is the extension as committed at HEAD, extracted to a temp file
-# so the A/B compares the pre-change and post-change surfaces byte-for-byte.
+# The OLD baseline is the extension as it was BEFORE this branch's fix, i.e. at
+# the fork point with the base branch - NOT HEAD, which already carries the fix
+# once committed. Resolve it from `merge-base HEAD <base>` (base = FM_TEST_BASE_REF,
+# default origin/herdr) and extract that revision's extension to a temp file so
+# the A/B compares the pre-change and post-change surfaces byte-for-byte.
+BASE_REF="${FM_TEST_BASE_REF:-origin/herdr}"
 OLD_EXT="$(mktemp "${TMPDIR:-/tmp}/fm-old-ext.XXXXXX.ts")"
-if ! git -C "$REPO" show HEAD:.omp/extensions/fm-supervisor.ts > "$OLD_EXT" 2>/dev/null; then
-  echo "SKIP: cannot extract HEAD baseline extension"; rm -f "$OLD_EXT"; exit 0
+BASE_SHA="$(git -C "$REPO" merge-base HEAD "$BASE_REF" 2>/dev/null || true)"
+[ -n "$BASE_SHA" ] || { echo "SKIP: cannot resolve merge-base of HEAD and $BASE_REF (set FM_TEST_BASE_REF)"; rm -f "$OLD_EXT"; exit 0; }
+if ! git -C "$REPO" show "$BASE_SHA:.omp/extensions/fm-supervisor.ts" > "$OLD_EXT" 2>/dev/null; then
+  echo "SKIP: cannot extract baseline extension at $BASE_SHA"; rm -f "$OLD_EXT"; exit 0
 fi
 
 SOCK="${HERDR_SOCKET_PATH:-$HOME/.config/herdr/herdr.sock}"
@@ -114,7 +120,7 @@ echo "=== A/B: secondmate finishes routed work, goes idle, no status line ==="
 echo "--- NEW ($NEW_EXT) ---"
 NEW_VERDICT="$(run_leg NEW "$NEW_EXT" | tail -1)"
 echo "NEW: $NEW_VERDICT"
-echo "--- OLD (HEAD baseline) ---"
+echo "--- OLD (fork-point baseline $BASE_SHA) ---"
 OLD_VERDICT="$(run_leg OLD "$OLD_EXT" | tail -1)"
 echo "OLD: $OLD_VERDICT"
 rm -f "$OLD_EXT"
