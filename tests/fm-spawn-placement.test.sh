@@ -443,11 +443,70 @@ test_workspace_orphan_pane_closed_on_agent_start_failure() {
   pass "workspace orphan root shell closed even when agent start fails"
 }
 
+# Reuse regression (ports upstream #202 "reuse the workspace instead of leaking
+# one per spawn" onto this ship's resolve path): outside herdr, when the
+# project-labeled workspace ALREADY exists, the spawn REUSES it - it must NOT
+# create a second workspace, and there is no fresh workspace, hence no orphan
+# root shell to close.
+test_crewmate_fallback_reuses_existing_project_workspace() {
+  local home fakebin out meta
+  home=$(make_case crew-fallback-reuse myproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  # No live current workspace (spawned outside herdr), but the project-labeled
+  # workspace already exists from a prior spawn.
+  printf 'myproj\twEXIST\n' > "$home/ws.tsv"
+  mkdir -p "$home/data/fix-again-p3"
+  printf 'brief\n' > "$home/data/fix-again-p3/brief.md"
+
+  out=$(run_spawn "$home" "$fakebin" fix-again-p3 projects/myproj omp) \
+    || fail "spawn failed: $out"
+
+  ! grep -qF 'workspace create' "$home/herdr.log" \
+    || fail "reused-workspace spawn created a second workspace instead of reusing the existing one: $(cat "$home/herdr.log")"
+  grep -qF 'tab create --workspace wEXIST --label fix-again' "$home/herdr.log" \
+    || fail "tab not created in the existing project workspace: $(cat "$home/herdr.log")"
+  # Reuse path yields no fresh workspace, so there is no orphan workspace init
+  # pane to close (only the new tab's own root shell wX:p9).
+  ! grep -qF 'pane close wX:p1' "$home/herdr.log" \
+    || fail "reuse path closed a workspace init pane, but no workspace was created: $(cat "$home/herdr.log")"
+  grep -qF 'pane close wX:p9' "$home/herdr.log" \
+    || fail "the new tab's own root shell was not closed: $(cat "$home/herdr.log")"
+  meta="$home/state/fix-again-p3.meta"
+  grep -qF 'workspace=myproj' "$meta" || fail "reuse meta workspace not the project label"
+  ! grep -q '^workspace_id=' "$meta" \
+    || fail "meta recorded workspace_id; teardown would destroy the shared workspace"
+  pass "outside herdr, crew reuse an existing project workspace instead of leaking one"
+}
+
+# Reuse regression for a secondmate (recovery respawn): a secondmate whose named
+# home workspace already exists reuses it rather than minting a second one.
+test_secondmate_reuses_existing_named_workspace() {
+  local home fakebin smhome out
+  home=$(make_case sm-reuse shipproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  smhome=$(make_secondmate_home sm-reuse anchor Anchor 1)
+  # The secondmate's own named workspace already exists (as after a restart).
+  printf 'Anchor\twSM\n' > "$home/ws.tsv"
+
+  out=$(run_spawn "$home" "$fakebin" anchor "$smhome" omp --secondmate) \
+    || fail "secondmate respawn failed: $out"
+
+  ! grep -qF 'workspace create' "$home/herdr.log" \
+    || fail "secondmate respawn created a second named workspace instead of reusing it: $(cat "$home/herdr.log")"
+  grep -qF 'tab create --workspace wSM --label home' "$home/herdr.log" \
+    || fail "secondmate did not reuse its existing named workspace: $(cat "$home/herdr.log")"
+  ! grep -qF 'pane close wX:p1' "$home/herdr.log" \
+    || fail "secondmate reuse path closed a workspace init pane, but no workspace was created: $(cat "$home/herdr.log")"
+  pass "secondmate reuses its existing named workspace on respawn instead of leaking one"
+}
+
 test_crewmate_lands_in_spawners_current_workspace
 test_crewmate_single_agent_pane
 test_crewmate_in_secondmate_home_nests_under_mate_workspace
 test_crewmate_fallback_creates_project_workspace_outside_herdr
+test_crewmate_fallback_reuses_existing_project_workspace
 test_secondmate_lands_in_own_named_workspace
+test_secondmate_reuses_existing_named_workspace
 test_secondmate_home_autolinks_missing_files
 test_secondmate_omp_overlay_is_injected_when_present
 test_secondmate_omp_overlay_is_omitted_when_absent
