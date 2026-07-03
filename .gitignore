@@ -8,3 +8,4 @@ worktrees/
 .env
 config/
 *.py
+benchmarks/results/
