@@ -2,13 +2,17 @@
 # Behavior tests for bin/fm-reload.sh.
 #
 # Covers:
-#   (a) explicit pane + session-id in output   -> omp --resume <id>
-#   (b) explicit pane + no session-id          -> omp -c (fallback)
-#   (c) pane from herdr pane current           -> auto-detected, resume used
-#   (d) --cmd template with {id}              -> substituted correctly
-#   (e) --cmd literal (no {id})               -> used verbatim
-#   (f) --cmd {id} but no session-id found    -> error, non-zero exit
-#   (g) no pane determinable                  -> error, non-zero exit
+#   (a) explicit pane + session-id captured pre-quit  -> omp --resume <id> + proof passes
+#   (b) explicit pane + no session-id, no --allow-fresh -> fail closed BEFORE /quit
+#   (c) pane from herdr pane current                  -> auto-detected, resume used
+#   (d) --cmd template with {id}                      -> substituted correctly
+#   (e) --cmd literal (no {id})                       -> used verbatim
+#   (f) --cmd {id} but no session-id found            -> error, non-zero exit (before /quit)
+#   (g) no pane determinable                          -> error, non-zero exit
+#   (h) --allow-fresh + no session-id                 -> omp -c used (not error)
+#   (i) fm-<name> durable target                      -> resolved via state meta, resume used
+#   (j) post-reload proof timeout                     -> omp does not restart -> exit 1
+#   (k) session id mismatch after reload              -> continuity proof fails -> exit 1
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,14 +41,19 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-reload-tests.XXXXXX")
 # ---------------------------------------------------------------------------
 # Fake herdr factory.
 #
-# Behaviours controlled by env vars set before running fm-reload.sh:
-#   FM_FAKE_HERDR_LOG     - path where every herdr call is appended
-#   FM_FAKE_HERDR_AGENT   - value returned by pane get .result.pane.agent
-#                           (default ""; "omp" means still running)
-#   FM_FAKE_HERDR_SESSION - omp session id embedded in pane read output
-#                           (empty = no session id found)
-#   FM_FAKE_HERDR_CURRENT - pane_id returned by pane current
-#                           (empty = simulate lookup failure)
+# The fake is file-system stateful: once a non-/quit 'pane run' is recorded
+# (the resume command), a "resumed" marker file is created. Subsequent
+# 'pane get' calls return FM_FAKE_HERDR_POST_AGENT (default "omp") and
+# 'pane read' returns FM_FAKE_HERDR_POST_SESSION (default FM_FAKE_HERDR_SESSION).
+#
+# Env vars:
+#   FM_FAKE_HERDR_LOG          - path where every herdr call is appended
+#   FM_FAKE_HERDR_STATE_DIR    - directory for the "resumed" marker file
+#   FM_FAKE_HERDR_AGENT        - pane get .agent BEFORE resume (default "")
+#   FM_FAKE_HERDR_POST_AGENT   - pane get .agent AFTER resume (default "omp")
+#   FM_FAKE_HERDR_SESSION      - session id in pane read BEFORE resume (default "")
+#   FM_FAKE_HERDR_POST_SESSION - session id in pane read AFTER resume (default: FM_FAKE_HERDR_SESSION)
+#   FM_FAKE_HERDR_CURRENT      - pane_id returned by pane current (empty = failure)
 # ---------------------------------------------------------------------------
 make_fake_herdr() {
   local dir=$1 fakebin log
@@ -54,7 +63,10 @@ make_fake_herdr() {
   cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 set -u
-printf 'herdr %s\n' "$*" >> "${FM_FAKE_HERDR_LOG:-/dev/null}"
+STATE_DIR="${FM_FAKE_HERDR_STATE_DIR:-/tmp}"
+RESUMED_FILE="$STATE_DIR/resumed"
+LOG="${FM_FAKE_HERDR_LOG:-/dev/null}"
+printf 'herdr %s\n' "$*" >> "$LOG"
 case "${1:-}" in
   pane)
     case "${2:-}" in
@@ -64,11 +76,19 @@ case "${1:-}" in
         printf '{"id":"cli:pane:current","result":{"pane":{"pane_id":"%s"}}}\n' "$cur"
         exit 0 ;;
       get)
-        agent="${FM_FAKE_HERDR_AGENT:-}"
+        if [ -f "$RESUMED_FILE" ]; then
+          agent="${FM_FAKE_HERDR_POST_AGENT-omp}"
+        else
+          agent="${FM_FAKE_HERDR_AGENT:-}"
+        fi
         printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s"}}}\n' "$agent"
         exit 0 ;;
       read)
-        sid="${FM_FAKE_HERDR_SESSION:-}"
+        if [ -f "$RESUMED_FILE" ]; then
+          sid="${FM_FAKE_HERDR_POST_SESSION-${FM_FAKE_HERDR_SESSION:-}}"
+        else
+          sid="${FM_FAKE_HERDR_SESSION:-}"
+        fi
         if [ -n "$sid" ]; then
           printf 'session started\nomp --resume %s\nsome other line\n' "$sid"
         else
@@ -76,7 +96,20 @@ case "${1:-}" in
         fi
         exit 0 ;;
       run)
-        # Record the pane and command; always succeed.
+        # Non-slash commands = relaunch; create the resumed marker.
+        cmd="${4:-}"
+        case "$cmd" in
+          /*) ;;
+          ?*) touch "$RESUMED_FILE" ;;
+        esac
+        exit 0 ;;
+    esac ;;
+  agent)
+    case "${2:-}" in
+      get)
+        # fm_resolve_live_pane calls this for fm-* targets;
+        # return empty so it falls back to the state meta file.
+        printf ''
         exit 0 ;;
     esac ;;
 esac
@@ -88,16 +121,22 @@ SH
 }
 
 # Run fm-reload.sh with PATH mocked to fake herdr; guard skipped via env.
+# Caller sets FM_FAKE_HERDR_* vars before calling.
 # Args: case_dir [fm-reload.sh args...]
 run_reload() {
   local dir=$1; shift
   local fakebin="$dir/fakebin"
   local log="$dir/herdr.log"
+  local state_dir="$dir/fake-state"
+  mkdir -p "$state_dir"
   FM_FAKE_HERDR_LOG="$log" \
+  FM_FAKE_HERDR_STATE_DIR="$state_dir" \
   FM_ROOT_OVERRIDE="$ROOT" \
+  FM_STATE_OVERRIDE="${FM_STATE_OVERRIDE:-$dir/state}" \
   FM_RELOAD_NO_GUARD=1 \
   FM_RELOAD_QUIT_GRACE=0 \
   FM_RELOAD_TIMEOUT=1 \
+  FM_RELOAD_PROOF_TIMEOUT=1 \
     PATH="$fakebin:$PATH" \
     "$RELOAD" "$@"
 }
@@ -109,13 +148,12 @@ herdr_log() {
 }
 
 # ---------------------------------------------------------------------------
-# (a) Explicit pane + session id in recent output -> omp --resume <id>
+# (a) Explicit pane + session id -> omp --resume <id>; post-reload proof passes
 # ---------------------------------------------------------------------------
 test_resume_path() {
   local CASE="$TMP_ROOT/case-a"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
-  
 
   local sid="abcd1234-0000-0000-0000-000000000001"
   FM_FAKE_HERDR_AGENT="" \
@@ -125,26 +163,27 @@ test_resume_path() {
   herdr_log "$CASE" | grep -q "pane run w1:p1 omp --resume $sid" \
     || fail "(a) expected 'pane run w1:p1 omp --resume $sid' in herdr log"
 
-  pass "(a) explicit pane + session id -> omp --resume <id>"
+  pass "(a) explicit pane + session id -> omp --resume <id>; proof passed"
 }
 
 # ---------------------------------------------------------------------------
-# (b) Explicit pane + no session id -> omp -c fallback
+# (b) No session id, no --allow-fresh -> fail closed BEFORE /quit
 # ---------------------------------------------------------------------------
-test_fallback_path() {
+test_fail_closed_no_session() {
   local CASE="$TMP_ROOT/case-b"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
-  
 
   FM_FAKE_HERDR_AGENT="" \
   FM_FAKE_HERDR_SESSION="" \
-    run_reload "$CASE" w2:p1 >/dev/null || fail "(b) fm-reload.sh exited non-zero"
+    run_reload "$CASE" w2:p1 >/dev/null 2>/dev/null \
+    && fail "(b) expected non-zero exit when no session id and no --allow-fresh"
 
-  herdr_log "$CASE" | grep -q "pane run w2:p1 omp -c" \
-    || fail "(b) expected 'pane run w2:p1 omp -c' in herdr log"
+  # /quit must NOT have been sent: the pane was left untouched.
+  herdr_log "$CASE" | grep -q "pane run w2:p1 /quit" \
+    && fail "(b) /quit was sent despite fail-closed; pane should be untouched"
 
-  pass "(b) explicit pane + no session id -> omp -c"
+  pass "(b) no session id + no --allow-fresh -> fail closed before /quit"
 }
 
 # ---------------------------------------------------------------------------
@@ -154,7 +193,6 @@ test_auto_pane_current() {
   local CASE="$TMP_ROOT/case-c"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
-  
 
   local sid="abcd1234-0000-0000-0000-000000000003"
   FM_FAKE_HERDR_CURRENT="w3:p1" \
@@ -177,7 +215,6 @@ test_cmd_template_substitution() {
   local CASE="$TMP_ROOT/case-d"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
-  
 
   local sid="abcd1234-0000-0000-0000-000000000004"
   FM_FAKE_HERDR_AGENT="" \
@@ -198,7 +235,6 @@ test_cmd_literal() {
   local CASE="$TMP_ROOT/case-e"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
-  
 
   FM_FAKE_HERDR_AGENT="" \
   FM_FAKE_HERDR_SESSION="" \
@@ -212,20 +248,23 @@ test_cmd_literal() {
 }
 
 # ---------------------------------------------------------------------------
-# (f) --cmd {id} but no session id found -> error, non-zero exit
+# (f) --cmd {id} but no session id found -> error before /quit
 # ---------------------------------------------------------------------------
 test_cmd_template_no_session_id_errors() {
   local CASE="$TMP_ROOT/case-f"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
-  
 
   FM_FAKE_HERDR_AGENT="" \
   FM_FAKE_HERDR_SESSION="" \
     run_reload "$CASE" w6:p1 --cmd "omp --resume {id}" >/dev/null 2>/dev/null \
     && fail "(f) expected non-zero exit when {id} unreplaceable"
 
-  pass "(f) --cmd {id} with no session id -> non-zero exit"
+  # /quit must NOT have been sent.
+  herdr_log "$CASE" | grep -q "pane run w6:p1 /quit" \
+    && fail "(f) /quit was sent despite {id} substitution failure"
+
+  pass "(f) --cmd {id} with no session id -> non-zero exit before /quit"
 }
 
 # ---------------------------------------------------------------------------
@@ -235,7 +274,6 @@ test_no_pane_determinable_errors() {
   local CASE="$TMP_ROOT/case-g"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
-  
 
   FM_FAKE_HERDR_CURRENT="" \
     run_reload "$CASE" >/dev/null 2>/dev/null \
@@ -244,11 +282,107 @@ test_no_pane_determinable_errors() {
   pass "(g) no pane determinable -> non-zero exit"
 }
 
+# ---------------------------------------------------------------------------
+# (h) --allow-fresh + no session id -> omp -c used, not an error
+# ---------------------------------------------------------------------------
+test_allow_fresh_fallback() {
+  local CASE="$TMP_ROOT/case-h"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="" \
+    run_reload "$CASE" w7:p1 --allow-fresh >/dev/null \
+    || fail "(h) expected zero exit with --allow-fresh"
+
+  herdr_log "$CASE" | grep -q "pane run w7:p1 /quit" \
+    || fail "(h) expected /quit in herdr log"
+  herdr_log "$CASE" | grep -q "pane run w7:p1 omp -c" \
+    || fail "(h) expected 'omp -c' as relaunch command"
+
+  pass "(h) --allow-fresh + no session id -> omp -c used"
+}
+
+# ---------------------------------------------------------------------------
+# (i) fm-<name> durable target -> resolved via state meta, resume used
+# ---------------------------------------------------------------------------
+test_fm_name_target() {
+  local CASE="$TMP_ROOT/case-i"
+  mkdir -p "$CASE/state"
+  make_fake_herdr "$CASE" >/dev/null
+
+  # Seed a state meta file for "testmate" pointing to pane w9:p1.
+  printf 'pane=w9:p1\n' > "$CASE/state/testmate.meta"
+
+  local sid="abcd1234-0000-0000-0000-000000000009"
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_STATE_OVERRIDE="$CASE/state" \
+    run_reload "$CASE" fm-testmate >/dev/null \
+    || fail "(i) fm-reload.sh exited non-zero for fm-<name> target"
+
+  herdr_log "$CASE" | grep -q "pane run w9:p1 omp --resume $sid" \
+    || fail "(i) expected resume on pane w9:p1 resolved from fm-testmate"
+
+  pass "(i) fm-<name> target resolved via state meta, resume used"
+}
+
+# ---------------------------------------------------------------------------
+# (j) post-reload proof timeout: omp does not restart -> exit 1
+# ---------------------------------------------------------------------------
+test_proof_timeout_fails() {
+  local CASE="$TMP_ROOT/case-j"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-00000000000a"
+  # FM_FAKE_HERDR_POST_AGENT="" means pane get returns "" even after resume marker exists.
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_FAKE_HERDR_POST_AGENT="" \
+    run_reload "$CASE" wa:p1 >/dev/null 2>/dev/null \
+    && fail "(j) expected non-zero exit when omp does not restart"
+
+  # /quit must have been sent (we got past the pre-quit checks).
+  herdr_log "$CASE" | grep -q "pane run wa:p1 /quit" \
+    || fail "(j) expected /quit in herdr log before proof timeout"
+
+  pass "(j) post-reload proof timeout: omp does not restart -> exit 1"
+}
+
+# ---------------------------------------------------------------------------
+# (k) session id mismatch after reload -> continuity proof fails -> exit 1
+# ---------------------------------------------------------------------------
+test_session_id_mismatch_proof() {
+  local CASE="$TMP_ROOT/case-k"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-00000000000b"
+  local wrong_sid="ffff0000-0000-0000-0000-000000000000"
+  # Pre-quit pane read returns $sid; post-reload pane read returns $wrong_sid.
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_FAKE_HERDR_POST_SESSION="$wrong_sid" \
+    run_reload "$CASE" wb:p1 >/dev/null 2>/dev/null \
+    && fail "(k) expected non-zero exit on session id mismatch"
+
+  # The resume command must have targeted the correct (pre-quit) session id.
+  herdr_log "$CASE" | grep -q "pane run wb:p1 omp --resume $sid" \
+    || fail "(k) expected resume with original session id $sid"
+
+  pass "(k) session id mismatch after reload -> continuity proof exits 1"
+}
+
 # Run all tests.
 test_resume_path
-test_fallback_path
+test_fail_closed_no_session
 test_auto_pane_current
 test_cmd_template_substitution
 test_cmd_literal
 test_cmd_template_no_session_id_errors
 test_no_pane_determinable_errors
+test_allow_fresh_fallback
+test_fm_name_target
+test_proof_timeout_fails
+test_session_id_mismatch_proof
