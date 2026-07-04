@@ -447,7 +447,7 @@ Add the task to `data/backlog.md` under In flight.
 Covered by section 8.
 Steer a crewmate only with short single lines via `bin/fm-send.sh`; anything long belongs in a file the crewmate can read.
 Steer a secondmate the same way.
-Its charter retargets escalation to the main firstmate's status file, so routine internal churn stays inside the secondmate home and only `done`, `blocked`, `needs-decision`, `failed`, or captain-relevant phase changes wake the main firstmate.
+Its charter escalates only captain-relevant outcomes - `done`, `blocked`, `needs-decision`, `failed`, or a material phase change - to the main firstmate through the fleet peer bus, so routine internal churn stays inside the secondmate home and never touches the supervisor channel.
 `bin/fm-send.sh` never overwrites a draft the captain is mid-typing in a target pane: if that pane's composer holds an unsent human draft, the send is deferred (the message is queued under `state/.sendq/<pane>/` and `fm-send` exits 75) instead of clobbering it, and the queue drains in order on the next send once the composer is clear, so a deferred steer is delivered rather than lost.
 A `--key` control send (e.g. `--key Escape`) is exempt - it is an interrupt, not text that can clobber a draft.
 
@@ -647,7 +647,7 @@ For secondmates use `bin/fm-brief.sh <id> --secondmate <project>...`.
 The scaffold writes a charter brief instead of a task brief.
 Set `FM_SECONDMATE_CHARTER='<charter>'` to fill the charter text and `FM_SECONDMATE_SCOPE='<scope>'` when the routing scope differs.
 If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholder before seeding.
-Keep the charter focused on the persistent responsibility, available project clones, and escalation back to the main firstmate status file.
+Keep the charter focused on the persistent responsibility, available project clones, and peer-bus escalation back to the main firstmate.
 The scaffold's definition of done encodes the idle-by-default-plus-domain-grooming contract (section 6): on startup the secondmate reconciles only its own in-flight work, then tends its own domain (its health, standing watch-items, regressions to guard) while waiting for routed tasks, never self-initiating an org-wide survey or audit beyond its domain; preserve that wording when filling the charter.
 The scaffold also auto-injects an "Act once, report deltas - no churn" section (lean-loop discipline for the manager context) and the "House tooling conventions" block (bun/bunx rule and axi CLI grammar) into every charter; ship briefs get the house tooling conventions block too; you do not add either manually.
 `bin/fm-home-seed.sh` copies the charter into the secondmate home as `data/charter.md`; `bin/fm-spawn.sh --secondmate` launches it through the same launch-template path.

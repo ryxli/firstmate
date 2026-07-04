@@ -107,9 +107,10 @@ test_charter_has_manager_mode_defaults() {
 }
 
 test_briefs_report_status_via_helper() {
-  # The status-append idiom must be the fm-report.sh helper invocation, never a
-  # raw `echo ... >> <status file>` redirect: the omp bash tool blocks an
-  # agent's own redirection, so the brief routes status through the helper.
+  # Ship and scout briefs must route status through the fm-report.sh helper, never
+  # a raw `echo ... >> <status file>` redirect: the omp bash tool blocks an agent's
+  # own redirection. The secondmate charter instead escalates captain-relevant
+  # outcomes to the main firstmate through the fleet peer bus (not the report helper).
   local home out brief
 
   home=$(make_home report-ship)
@@ -135,11 +136,13 @@ test_briefs_report_status_via_helper() {
         run_brief "$home" rep-anchor --secondmate dashboard) \
     || fail "secondmate scaffold failed: $out"
   brief="$home/data/rep-anchor/brief.md"
+  grep -qF 'through the fleet peer bus' "$brief" \
+    || fail "secondmate charter does not instruct peer-bus escalation"
   grep -qF 'bin/fm-report.sh' "$brief" \
-    || fail "secondmate charter does not instruct status via fm-report.sh"
+    && fail "secondmate charter still routes escalation through the retired report helper"
   grep -qF '>> ' "$brief" && fail "secondmate charter still contains a raw >> status redirect"
 
-  pass "ship/scout/secondmate briefs report status via fm-report.sh, not a raw >> redirect"
+  pass "ship/scout briefs report status via fm-report.sh; secondmate charter escalates via the fleet peer bus"
 }
 
 test_ship_brief_has_identity_context
