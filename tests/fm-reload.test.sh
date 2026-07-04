@@ -54,6 +54,7 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-reload-tests.XXXXXX")
 #   FM_FAKE_HERDR_SESSION      - session id in pane read BEFORE resume (default "")
 #   FM_FAKE_HERDR_POST_SESSION - session id in pane read AFTER resume (default: FM_FAKE_HERDR_SESSION)
 #   FM_FAKE_HERDR_CURRENT      - pane_id returned by pane current (empty = failure)
+#   FM_FAKE_HERDR_CWD          - cwd in pane get response (default "")
 # ---------------------------------------------------------------------------
 make_fake_herdr() {
   local dir=$1 fakebin log
@@ -81,7 +82,7 @@ case "${1:-}" in
         else
           agent="${FM_FAKE_HERDR_AGENT:-}"
         fi
-        printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s"}}}\n' "$agent"
+        printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","cwd":"%s"}}}\n' "$agent" "${FM_FAKE_HERDR_CWD:-}"
         exit 0 ;;
       read)
         if [ -f "$RESUMED_FILE" ]; then
@@ -374,6 +375,38 @@ test_session_id_mismatch_proof() {
   pass "(k) session id mismatch after reload -> continuity proof exits 1"
 }
 
+# ---------------------------------------------------------------------------
+# (l) Scrollback empty -> deterministic lookup from omp session store succeeds
+# ---------------------------------------------------------------------------
+test_deterministic_session_lookup() {
+  local CASE="$TMP_ROOT/case-l"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="cccc0000-1111-7000-aaaa-000000000001"
+  local cwd="/fake/project/alpha"
+  local bucket="${cwd//\//-}"
+  local store="$CASE/fake-sessions/$bucket"
+  mkdir -p "$store"
+  # Seed a session file: the stem after the first '_' is the session id omp uses.
+  touch "$store/2026-07-04T00-00-00-000Z_${sid}.jsonl"
+
+  # Scrollback returns no session id; cwd points to the right bucket; store has the file.
+  # FM_FAKE_HERDR_POST_SESSION ensures the post-reload proof pane read returns the right id.
+  FM_OMP_SESSION_STORE="$CASE/fake-sessions" \
+  FM_FAKE_HERDR_CWD="$cwd" \
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="" \
+  FM_FAKE_HERDR_POST_SESSION="$sid" \
+    run_reload "$CASE" wl:p1 2>/dev/null \
+    || fail "(l) fm-reload.sh exited non-zero when deterministic lookup available"
+
+  herdr_log "$CASE" | grep -q "pane run wl:p1 omp --resume $sid" \
+    || fail "(l) expected 'pane run wl:p1 omp --resume $sid' in herdr log"
+
+  pass "(l) scrollback miss -> deterministic lookup from omp store recovers session id"
+}
+
 # Run all tests.
 test_resume_path
 test_fail_closed_no_session
@@ -386,3 +419,4 @@ test_allow_fresh_fallback
 test_fm_name_target
 test_proof_timeout_fails
 test_session_id_mismatch_proof
+test_deterministic_session_lookup
