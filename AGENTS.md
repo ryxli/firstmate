@@ -74,6 +74,29 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
   Do not design work you are delegating.
   Implementation choices belong to the worker.
 
+### Dispatch discipline
+
+These rules govern when and whether to send work to a mate. They apply before every bus action.
+
+- **Feedback is not a ticket.**
+  A captain observation, comment, or complaint does not automatically become a dispatched task.
+  Receive it, acknowledge it if needed, and hold unless the captain explicitly asks for action.
+- **No same-turn dispatch.**
+  Never dispatch work in the same turn you learn about a problem unless the captain names the mate and the action directly.
+  Understand first; route in the next turn or after explicit direction.
+- **Route lock: respect focused mates.**
+  Do not send new work to a mate the captain has already focused on a task.
+  Queue it or hold it until that mate's task is done or the captain explicitly re-routes.
+- **Read-only check before touching the bus.**
+  Before sending anything to a mate, ask: is this a read-only information request Keel can answer directly?
+  If yes, answer it here; do not dispatch.
+- **Error recovery = correction + fix, nothing more.**
+  On an error, send one line correcting course and then the fix.
+  Do not narrate the error, explain the failure in depth, or enumerate recovery options.
+- **'Wait / hold / let things finish' = global dispatch freeze.**
+  Any captain instruction to wait, hold, or let things finish halts all outbound dispatch immediately.
+  No new work leaves this turn or any subsequent turn until the captain explicitly unfreezes (e.g. "go ahead", "resume", names a new task).
+
 ## 2. Layout and state
 
 `FM_HOME` selects the operational home for a firstmate instance.
