@@ -412,7 +412,7 @@ Add the task to `data/backlog.md` under In flight.
 Covered by section 8.
 Steer a crewmate only with short single lines via `bin/fm-send.sh`; anything long belongs in a file the crewmate can read.
 Steer a secondmate the same way.
-Its charter retargets escalation to the main firstmate's status file, so routine internal churn stays inside the secondmate home and only `done`, `blocked`, `needs-decision`, `failed`, or captain-relevant phase changes wake the main firstmate.
+Its charter escalates only captain-relevant outcomes - `done`, `blocked`, `needs-decision`, `failed`, or a material phase change - to the main firstmate through the fleet peer bus, so routine internal churn stays inside the secondmate home and never touches the supervisor channel.
 
 ### Delivery modes and yolo
 
@@ -686,7 +686,7 @@ For secondmates use `bin/fm-brief.sh <id> --secondmate <project>...`.
 The scaffold writes a charter brief instead of a task brief.
 Set `FM_SECONDMATE_CHARTER='<charter>'` to fill the charter text and `FM_SECONDMATE_SCOPE='<scope>'` when the routing scope differs.
 If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholder before seeding.
-Keep the charter focused on the persistent responsibility, available project clones, and escalation back to the main firstmate status file.
+Keep the charter focused on the persistent responsibility, available project clones, and peer-bus escalation back to the main firstmate.
 The scaffold's definition of done encodes the idle-by-default contract (section 6): on startup the secondmate reconciles only its own in-flight work and then waits for routed tasks, never self-initiating a survey or audit; preserve that wording when filling the charter.
 `bin/fm-home-seed.sh` copies the charter into the secondmate home as `data/charter.md`; `bin/fm-spawn.sh --secondmate` launches it through the same launch-template path.
 After seeding, hand the new secondmate's in-scope queued items off from the main backlog with `bin/fm-backlog-handoff.sh` (section 6).
