@@ -52,6 +52,32 @@ PROOF_TIMEOUT="${FM_RELOAD_PROOF_TIMEOUT:-30}"
 ALLOW_FRESH="${FM_RELOAD_ALLOW_FRESH:-}"
 OMP_SESSION_STORE="${FM_OMP_SESSION_STORE:-${HOME}/.omp/agent/sessions}"
 
+
+session_id_from_store() {
+  _cwd="${1:-}"
+  [ -n "$_cwd" ] || return 0
+  _rel_cwd="$_cwd"
+  case "$_rel_cwd" in
+    "$HOME"/*) _rel_cwd="${_rel_cwd#$HOME}" ;;
+    "$HOME") _rel_cwd="/" ;;
+  esac
+  _bucket="${_rel_cwd//\//-}"
+  _store_path="$OMP_SESSION_STORE/$_bucket"
+  [ -d "$_store_path" ] || return 0
+  python3 -c '
+import os, sys
+store = sys.argv[1]
+try:
+    files = [f for f in os.listdir(store) if f.endswith(".jsonl")]
+    if files:
+        newest = max(files, key=lambda f: os.path.getmtime(os.path.join(store, f)))
+        stem = newest[:-6]
+        sid = stem.split("_", 1)[1] if "_" in stem else stem
+        print(sid)
+except Exception:
+    pass
+' "$_store_path" 2>/dev/null || true
+}
 _usage() {
   echo "usage: fm-reload.sh [target] [--cmd '<template>'] [--allow-fresh] [--timeout <sec>] [--proof-timeout <sec>]" >&2
 }
@@ -140,31 +166,13 @@ SESSION_ID="$(herdr pane read "$PANE" --source recent --lines 120 2>/dev/null \
   2>/dev/null || true)"
 
 # Deterministic fallback: when scrollback did not expose the session id, derive it
-# from the omp session store. The pane cwd maps to an exact per-project bucket so
-# we never pull a session belonging to a different project.
+# from the omp session store. The pane cwd maps to a per-project bucket relative
+# to $HOME (e.g. /Users/ryan/code/mates/riggs -> -code-mates-riggs), so we never
 if [ -z "$SESSION_ID" ]; then
   _PANE_CWD="$(herdr pane get "$PANE" 2>/dev/null \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("result",{}).get("pane",{}).get("cwd",""))' \
     2>/dev/null || true)"
-  if [ -n "$_PANE_CWD" ]; then
-    _SESSION_BUCKET="${_PANE_CWD//\//-}"
-    _SESSION_STORE_PATH="$OMP_SESSION_STORE/$_SESSION_BUCKET"
-    if [ -d "$_SESSION_STORE_PATH" ]; then
-      SESSION_ID="$(python3 -c '
-import os, sys
-store = sys.argv[1]
-try:
-    files = [f for f in os.listdir(store) if f.endswith(".jsonl")]
-    if files:
-        newest = max(files, key=lambda f: os.path.getmtime(os.path.join(store, f)))
-        stem = newest[:-6]  # strip .jsonl
-        sid = stem.split("_", 1)[1] if "_" in stem else stem
-        print(sid)
-except Exception:
-    pass
-' "$_SESSION_STORE_PATH" 2>/dev/null || true)"
-    fi
-  fi
+  SESSION_ID="$(session_id_from_store "$_PANE_CWD")"
 fi
 
 # Validate --cmd template before doing anything destructive.
@@ -254,13 +262,18 @@ if [ "$PROOF_AGENT" != "omp" ]; then
   echo "fm-reload.sh: omp did not restart in pane $PANE within ${PROOF_TIMEOUT}s" >&2
   exit 1
 fi
-
 # Session id continuity: only checked when we auto-generated 'omp --resume <id>'.
 # Skipped for --cmd (caller's responsibility) and --allow-fresh (no id to verify).
 if [ -n "$SESSION_ID" ] && [ -z "$RESUME_CMD" ] && [ -z "$ALLOW_FRESH" ]; then
+  _PROOF_CWD="$(herdr pane get "$PANE" 2>/dev/null \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("result",{}).get("pane",{}).get("cwd",""))' \
+    2>/dev/null || true)"
   PROOF_SID="$(herdr pane read "$PANE" --source recent --lines 60 2>/dev/null \
     | python3 -c 'import re,sys; t=sys.stdin.read(); m=re.search(r"omp --resume ([0-9a-fA-F-]+)", t); print(m.group(1) if m else "")' \
     2>/dev/null || true)"
+  if [ -z "$PROOF_SID" ]; then
+    PROOF_SID="$(session_id_from_store "$_PROOF_CWD")"
+  fi
   if [ "$PROOF_SID" != "$SESSION_ID" ]; then
     echo "fm-reload.sh: session id mismatch after reload (expected $SESSION_ID, saw ${PROOF_SID:-none})" >&2
     exit 1

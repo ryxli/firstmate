@@ -337,10 +337,10 @@ test_proof_timeout_fails() {
   make_fake_herdr "$CASE" >/dev/null
 
   local sid="abcd1234-0000-0000-0000-00000000000a"
-  # FM_FAKE_HERDR_POST_AGENT="" means pane get returns "" even after resume marker exists.
+  # FM_FAKE_HERDR_POST_AGENT="shell" means the pane never becomes omp again after relaunch.
   FM_FAKE_HERDR_AGENT="" \
   FM_FAKE_HERDR_SESSION="$sid" \
-  FM_FAKE_HERDR_POST_AGENT="" \
+  FM_FAKE_HERDR_POST_AGENT="shell" \
     run_reload "$CASE" wa:p1 >/dev/null 2>/dev/null \
     && fail "(j) expected non-zero exit when omp does not restart"
 
@@ -384,15 +384,18 @@ test_deterministic_session_lookup() {
   make_fake_herdr "$CASE" >/dev/null
 
   local sid="cccc0000-1111-7000-aaaa-000000000001"
-  local cwd="/fake/project/alpha"
-  local bucket="${cwd//\//-}"
+  local fake_home="$CASE/home"
+  local cwd="$fake_home/fake/project/alpha"
+  local rel="/fake/project/alpha"
+  local bucket="${rel//\//-}"
   local store="$CASE/fake-sessions/$bucket"
   mkdir -p "$store"
   # Seed a session file: the stem after the first '_' is the session id omp uses.
   touch "$store/2026-07-04T00-00-00-000Z_${sid}.jsonl"
 
-  # Scrollback returns no session id; cwd points to the right bucket; store has the file.
-  # FM_FAKE_HERDR_POST_SESSION ensures the post-reload proof pane read returns the right id.
+  # Scrollback returns no session id; cwd points to the right bucket under HOME;
+  # store has the file. FM_FAKE_HERDR_POST_SESSION makes the continuity proof pass.
+  HOME="$fake_home" \
   FM_OMP_SESSION_STORE="$CASE/fake-sessions" \
   FM_FAKE_HERDR_CWD="$cwd" \
   FM_FAKE_HERDR_AGENT="" \
