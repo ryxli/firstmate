@@ -121,7 +121,7 @@ SH
   printf '%s\n' "$fakebin"
 }
 
-# Run fm-reload.sh with PATH mocked to fake herdr; guard skipped via env.
+# Run fm-reload.sh with PATH mocked to fake herdr.
 # Caller sets FM_FAKE_HERDR_* vars before calling.
 # Args: case_dir [fm-reload.sh args...]
 run_reload() {
@@ -134,7 +134,6 @@ run_reload() {
   FM_FAKE_HERDR_STATE_DIR="$state_dir" \
   FM_ROOT_OVERRIDE="$ROOT" \
   FM_STATE_OVERRIDE="${FM_STATE_OVERRIDE:-$dir/state}" \
-  FM_RELOAD_NO_GUARD=1 \
   FM_RELOAD_QUIT_GRACE=0 \
   FM_RELOAD_TIMEOUT=1 \
   FM_RELOAD_PROOF_TIMEOUT=1 \
