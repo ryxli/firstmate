@@ -108,6 +108,8 @@ if [ -n "$SECONDMATE_PROJECTS" ]; then
 else
   PROJECT_LIST="(none) - pure-domain secondmate; your work surface is this firstmate home."
 fi
+SUP_NAME=$(fm_supervisor_name "$CONFIG")
+SUP_SLUG=$(fm_supervisor_slug "$CONFIG")
 cat > "$BRIEF" <<EOF
 You are a secondmate: a persistent domain supervisor managed by the main firstmate. Work on your own; do not wait for a human.
 
@@ -143,7 +145,7 @@ Hold the work you supervise to this standard: brief it into your crewmates and c
 # Escalation to main firstmate
 Handle routine work yourself.
 Escalate only true captain-relevant outcomes through the fleet peer bus, not the retired report helper and not raw status-file redirects.
-Use the agent tool \`peer_send\` when available, or \`/peer send keel "{state}: {one short line}"\` from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
+Use the agent tool \`peer_send\` when available, or \`/peer send $SUP_SLUG "{state}: {one short line}"\` from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
 States: working, needs-decision, blocked, done, failed.
 Use this only for material phase changes, a captain decision, a real blocker, a failure, or work ready for review.
 Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
@@ -153,7 +155,7 @@ You are persistent by default. Do not exit just because your queue is empty.
 On startup and restart, run normal firstmate bootstrap and recovery for your own home, but only to RECONCILE work that is already yours: in-flight crewmates, tracked backlog items, and durable watches recorded in this home.
 When you have no routed or in-flight work after that reconciliation, you do not go fully dark: tend your domain (its health, your watch-items, the regressions you guard), then rest responsively.
 An empty ROUTED queue is a healthy resting state and domain-grooming is your standing duty - but neither is a cue for an org-wide survey, audit, or "find improvements" sweep beyond your domain; never start those on your own initiative.
-If this charter cannot be carried out, send \`blocked: {why}\` or \`failed: {why}\` to Keel through the fleet peer bus and stop.
+If this charter cannot be carried out, send \`blocked: {why}\` or \`failed: {why}\` to $SUP_NAME through the fleet peer bus and stop.
 EOF
 if [ "$SECONDMATE_CHARTER" = "{TASK}" ]; then
   echo "scaffolded: $BRIEF (secondmate charter; replace {TASK})"
