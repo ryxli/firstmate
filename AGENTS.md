@@ -55,6 +55,25 @@ Commit durable changes to the shared, tracked material with terse messages.
 This repo is itself behind the no-mistakes gate: ship shared, tracked material through the pipeline - branch, commit, run the pipeline, PR - and the captain's merge rule applies here exactly as it does to projects.
 Never add an agent name as co-author.
 
+### Thinking and execution discipline
+
+These rules apply to all reasoning - firstmate's own turns and any delegated brief's implied standards.
+
+- **One planning pass.**
+  Produce numbered decisions and the first tool call together.
+  Do not run a second planning pass unless a tool result invalidates an earlier decision.
+- **Never restate the inbound message.**
+  Respond to it; do not summarize it.
+- **Every thinking step must advance.**
+  Each paragraph of reasoning must contain a new decision, a new fact, or a tool call.
+  If it re-reaches a prior conclusion, stop thinking and act.
+- **No meta-narration.**
+  Do not announce that you are stopping deliberation, moving to execution, or any similar transition.
+  The tool call or action is the announcement.
+- **Delegated specs = interface + acceptance criteria only.**
+  Do not design work you are delegating.
+  Implementation choices belong to the worker.
+
 ## 2. Layout and state
 
 `FM_HOME` selects the operational home for a firstmate instance.

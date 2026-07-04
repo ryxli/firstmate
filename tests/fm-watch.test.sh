@@ -50,7 +50,7 @@ exit 0
 SH
 chmod +x "$BIN_DIR/herdr"
 
-cat > "$STATE_DIR/successor-keel.meta" <<EOF
+cat > "$STATE_DIR/keel-shadow.meta" <<EOF
 pane=w0:p0
 kind=ship
 mode=shadow
