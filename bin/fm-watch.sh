@@ -84,11 +84,14 @@ pane_key() { printf '%s' "$1" | tr ':' '_'; }
 # Retrieve meta fields recorded in a task file.
 meta_pane() { fm_meta_value "$1" pane; }
 meta_kind() { fm_meta_value "$1" kind; }
+meta_mode() { fm_meta_value "$1" mode; }
 
 recorded_panes() {
-  local meta pane kind task seen=""
+  local meta pane kind mode task seen=""
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
+    mode=$(meta_mode "$meta")
+    [ "$mode" = shadow ] && continue
     task=$(basename "$meta" .meta)
     pane=$(fm_resolve_live_pane "fm-$task" "$STATE" 2>/dev/null || meta_pane "$meta")
     [ -n "$pane" ] || continue
