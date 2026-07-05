@@ -223,7 +223,7 @@ make_case() {
   local name=$1 proj=$2 home
   home="$TMP_ROOT/$name"
   mkdir -p "$home/state" "$home/data" "$home/config" "$home/worktrees" "$home/projects/$proj"
-  printf 'name=Keel\n' > "$home/config/identity"
+  printf 'name=Mate\n' > "$home/config/identity"
   (
     cd "$home/projects/$proj" || exit 1
     git init -q

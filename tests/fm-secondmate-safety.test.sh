@@ -449,7 +449,7 @@ test_home_seed_uses_herdr_worktree_create() {
     FM_SECONDMATE_CHARTER='dash acquired scope' FM_SECONDMATE_SCOPE='dash acquired scope' \
     "$ROOT/bin/fm-home-seed.sh" dash - alpha) \
     || fail "seed failed for a herdr-managed home"
-  auto_home="$sm_base_abs/fm-sm-dash"
+  auto_home="$sm_base_abs/dash"
   printf '%s\n' "$out" | grep -F "home=$auto_home" >/dev/null || fail "seed did not report herdr-created home"
   grep -F 'worktree create' "$log" >/dev/null || fail "seed did not call herdr worktree create"
   grep -F 'workspace: wT' "$home/data/secondmates.md" >/dev/null || fail "registry did not record herdr workspace id"
@@ -471,7 +471,7 @@ test_home_seed_removes_herdr_workspace_on_assignment_failure() {
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/dash-fail-alpha.git"
   printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   # Pre-mark the auto-path for another secondmate so validate_home_assignment fails.
-  auto_home="$sm_base_abs/fm-sm-dash"
+  auto_home="$sm_base_abs/dash"
   mkdir -p "$auto_home"
   printf 'other\n' > "$auto_home/.fm-secondmate-home"
   fakebin=$(make_fake_herdr "$TMP_ROOT/dash-fail-fake")
@@ -505,7 +505,7 @@ test_home_seed_warns_when_herdr_workspace_remove_fails() {
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/dash-return-fail-alpha.git"
   printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   # Pre-mark the auto-path for another secondmate so validate_home_assignment fails.
-  auto_home="$sm_base_abs/fm-sm-dash"
+  auto_home="$sm_base_abs/dash"
   mkdir -p "$auto_home"
   printf 'other\n' > "$auto_home/.fm-secondmate-home"
   fakebin=$(make_fake_herdr "$TMP_ROOT/dash-return-fail-fake")
@@ -528,12 +528,12 @@ test_home_seed_warns_when_herdr_workspace_remove_fails() {
 
 test_home_seed_does_not_remove_herdr_workspace_for_unsafe_home() {
   local home sm_base_eq sm_base_inside fakebin log err
-  # Case 1: auto_path equals FM_HOME (sm_base set so fm-sm-dash = FM_HOME).
-  # FM_HOME must end with /fm-sm-dash for auto_path to equal it.
-  mkdir -p "$TMP_ROOT/dash-active-sm-base/fm-sm-dash/projects" \
-           "$TMP_ROOT/dash-active-sm-base/fm-sm-dash/data" \
-           "$TMP_ROOT/dash-active-sm-base/fm-sm-dash/state"
-  home=$(cd "$TMP_ROOT/dash-active-sm-base/fm-sm-dash" && pwd -P)
+  # Case 1: auto_path equals FM_HOME (sm_base set so dash = FM_HOME).
+  # FM_HOME must end with /dash for auto_path to equal it.
+  mkdir -p "$TMP_ROOT/dash-active-sm-base/dash/projects" \
+           "$TMP_ROOT/dash-active-sm-base/dash/data" \
+           "$TMP_ROOT/dash-active-sm-base/dash/state"
+  home=$(cd "$TMP_ROOT/dash-active-sm-base/dash" && pwd -P)
   sm_base_eq=$(cd "$TMP_ROOT/dash-active-sm-base" && pwd -P)
   err="$TMP_ROOT/dash-active.err"
   make_git_project "$home/projects/alpha"
@@ -2137,7 +2137,7 @@ EOF
 # A herdr-managed (`-`) home must be LEASED at a detached HEAD on the canonical
 # default branch, never on a per-mate branch (sm/<id>). A non-default branch is
 # SKIPPED by fm-update.sh, so such a home silently drops out of fleetwide
-# fast-forward updates (this bit Plum: its home sat behind on sm/plum, invisible
+# fast-forward updates (this once bit a mate: its home sat behind on sm/<id>, invisible
 # to updates). This test proves the seed leases detached-on-default AND that
 # fm-update.sh fast-forwards that home rather than skipping it.
 test_home_seed_leases_home_at_detached_head_on_canonical_default() {
@@ -2203,7 +2203,7 @@ SH
     FM_SECONDMATE_CHARTER='detach scope' FM_SECONDMATE_SCOPE='detach scope' \
     "$ROOT/bin/fm-home-seed.sh" dash - alpha) \
     || fail "seed failed for a herdr-managed home"
-  auto_home="$sm_base_abs/fm-sm-dash"
+  auto_home="$sm_base_abs/dash"
 
   # Leased at a DETACHED HEAD, not on any branch.
   git -C "$auto_home" symbolic-ref -q HEAD >/dev/null \

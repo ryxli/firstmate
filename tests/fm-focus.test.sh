@@ -33,7 +33,7 @@ wmeta "$H" add-tests ship w1:p2;  wstatus "$H" add-tests "needs-decision: which 
 wmeta "$H" wire-api ship w1:p3;   wstatus "$H" wire-api "needs-decision: which auth?"
 wmeta "$H" refactor ship w1:p4;   wstatus "$H" refactor "done: PR https://x/9 checks green"
 wmeta "$H" cleanup ship w1:p5;    wstatus "$H" cleanup "done: PR merged"
-wmeta "$H" plum secondmate w15:p2; wstatus "$H" plum "done: independent audit confirms adopt"
+wmeta "$H" mate-a secondmate w15:p2; wstatus "$H" mate-a "done: independent audit confirms adopt"
 
 # secondmate home: a forwarded (depth 1) escalation
 wmeta "$SM" grandkid ship w20:p1; wstatus "$SM" grandkid "needs-decision: deep choice"
@@ -71,7 +71,7 @@ ok &= check(idx["wire-api"] < idx["grandkid"], "direct report ranks above forwar
 ok &= check(cls["refactor"] == "REVIEW-READY" and cls["cleanup"] == "REVIEW-READY", "done/merged -> REVIEW-READY")
 ok &= check(idx["refactor"] < idx["cleanup"], "PR-green (sev1) above merged-teardown (sev0) within review-ready")
 ok &= check(all(idx[c] < idx["refactor"] for c in ("fix-login","add-tests","wire-api","grandkid")), "every captain-blocked outranks every review-ready")
-ok &= check(cls["plum"] == "DORMANT", "secondmate with a done line is DORMANT, not review-ready")
+ok &= check(cls["mate-a"] == "DORMANT", "secondmate with a done line is DORMANT, not review-ready")
 ranks = [r["rank"] for r in rows]
 ok &= check(ranks == list(range(1, len(rows)+1)), "ranks are a dense total order 1..N (no ties)")
 sys.exit(0 if ok else 1)

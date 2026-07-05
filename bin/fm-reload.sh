@@ -189,7 +189,7 @@ SESSION_ID="$(herdr pane read "$PANE" --source recent --lines 120 2>/dev/null \
 
 # Deterministic fallback: when scrollback did not expose the session id, derive it
 # from the omp session store. The pane cwd maps to a per-project bucket relative
-# to $HOME (e.g. /Users/ryan/code/mates/riggs -> -code-mates-riggs), so we never
+# to $HOME (e.g. $HOME/code/mates/demo -> -code-mates-demo), so we never
 if [ -z "$SESSION_ID" ]; then
   _PANE_CWD="$(herdr pane get "$PANE" 2>/dev/null \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("result",{}).get("pane",{}).get("cwd",""))' \

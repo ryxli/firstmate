@@ -88,7 +88,7 @@ setup_omp_bun_ancestry() {
   export FM_PS_ARGS_DEFAULT='bash /tmp/tool-call.sh'
   export FM_PS_PPID_DEFAULT=222
   export FM_PS_COMM_222=bun
-  export FM_PS_ARGS_222='bun /Users/ryan/code/harness/oh-my-pi/packages/coding-agent/scripts/omp.ts --auto-approve /Users/ryan/code/harness/oh-my-pi/packages/coding-agent/dist/cli.js'
+  export FM_PS_ARGS_222='bun /opt/omp/packages/coding-agent/scripts/omp.ts --auto-approve /opt/omp/packages/coding-agent/dist/cli.js'
   export FM_PS_PPID_222=333
   export FM_PS_COMM_333='-zsh'
   export FM_PS_ARGS_333='-zsh'
