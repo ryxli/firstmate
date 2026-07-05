@@ -61,6 +61,7 @@ MODEL_SET=0
 EFFORT_SET=0
 POS=()
 want_value=
+EMERGENCY_FLAG="${FM_STATE_OVERRIDE:-$FM_HOME/state}/emergency-limit-mode"
 for a in "$@"; do
   if [ -n "$want_value" ]; then
     case "$want_value" in
@@ -141,6 +142,29 @@ else
   PROJ=${POS[1]}
   ARG3=${POS[2]:-}
 fi
+limit_mode_active=0
+if [ -f "$EMERGENCY_FLAG" ]; then
+  limit_mode_active=1
+fi
+
+if [ "$limit_mode_active" -eq 1 ]; then
+  case "${ARG3:-}" in
+    *' '*)
+      mkdir -p "$STATE"
+      "$FM_ROOT/bin/fm-report.sh" "$STATE/$ID.status" "blocked: emergency limit-mode - raw launch commands are disabled; remove $(basename "$EMERGENCY_FLAG") or use OpenAI Codex via omp"
+      printf 'error: emergency limit-mode - raw launch commands are disabled; remove %s or use OpenAI Codex via omp\n' "$(basename "$EMERGENCY_FLAG")" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+if [ "$limit_mode_active" -eq 1 ] && ! command -v omp >/dev/null 2>&1; then
+  mkdir -p "$STATE"
+  "$FM_ROOT/bin/fm-report.sh" "$STATE/$ID.status" "blocked: emergency limit-mode - omp command not found; install omp or remove $(basename "$EMERGENCY_FLAG")"
+  printf 'error: emergency limit-mode - omp command not found; install omp or remove %s\n' "$(basename "$EMERGENCY_FLAG")" >&2
+  exit 1
+fi
+
 
 if [ "$KIND" != secondmate ]; then
   "$FM_ROOT/bin/fm-resolve-spawn.sh" "$PROJ" "$ARG3"
@@ -258,11 +282,12 @@ case "$ARG3" in
     ;;
 esac
 
-# config/secondmate-harness may carry optional model/effort tokens alongside the
-# harness ("<harness> [<model>] [<effort>]"). They apply only for a --secondmate
-# spawn whose harness was resolved from that config chain (ARG3 empty: no explicit
-# per-spawn harness/raw launch). Re-resolving here makes the pin durable across
-# respawns. Precedence: explicit --model/--effort flags still win over the tokens.
+if [ "$limit_mode_active" -eq 1 ]; then
+  HARNESS=omp
+  LAUNCH=$(launch_template "$HARNESS") || { echo "error: emergency limit-mode requires an omp launch template" >&2; exit 1; }
+  MODEL=openai-codex/gpt-5.4-mini
+  EFFORT=low
+fi
 if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
   if [ "$MODEL_SET" -eq 0 ]; then
     SM_MODEL=$("$FM_ROOT/bin/fm-harness.sh" secondmate-model)
@@ -678,8 +703,9 @@ EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT")
 LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
 LAUNCH_CMD=${LAUNCH_CMD//__MODELFLAG__/$MODELFLAG}
 LAUNCH_CMD=${LAUNCH_CMD//__EFFORTFLAG__/$EFFORTFLAG}
-if [ "$HARNESS" = omp ]; then
-  LAUNCH_CMD=$(apply_omp_overlay "$LAUNCH_CMD" "$WT")
+if [ "$HARNESS" = omp ] && [ "$KIND" = secondmate ]; then
+  LAUNCH_CMD=$(apply_omp_overlay "$LAUNCH_CMD" "$PROJ_ABS")
+  LAUNCH_CMD=${LAUNCH_CMD/omp --auto-approve /omp --auto-approve --approval-mode=write }
 fi
 
 
