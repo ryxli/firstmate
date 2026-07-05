@@ -468,15 +468,35 @@ seeded_origin_url() {
   normalize_origin_url "$dst" "$url"
 }
 
+# Resolve the firstmate repo's canonical default branch name (herdr in
+# production). Prefer origin/HEAD, then the checked-out branch, then main/master.
+seed_default_branch() {
+  local ref b
+  ref=$(git -C "$FM_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [ -n "$ref" ]; then printf '%s\n' "${ref#origin/}"; return 0; fi
+  ref=$(git -C "$FM_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  if [ -n "$ref" ]; then printf '%s\n' "$ref"; return 0; fi
+  for b in main master; do
+    if git -C "$FM_ROOT" show-ref --verify --quiet "refs/heads/$b"; then printf '%s\n' "$b"; return 0; fi
+  done
+  return 1
+}
+
 acquire_herdr_home() {
-  local id=$1 auto_path json workspace_id home sm_base
+  local id=$1 auto_path json workspace_id home sm_base default_ref created_branch detach_target
   # Create a herdr-managed git worktree of the firstmate repo at a predictable
   # path alongside the repo. The herdr workspace ID is returned so the caller
   # can store it in the registry and use it for clean removal on teardown.
   # FM_HERDR_SM_BASE overrides the parent directory (useful in tests).
   sm_base="${FM_HERDR_SM_BASE:-$(dirname "$(cd "$FM_ROOT" && pwd -P)")}"
   auto_path="$sm_base/fm-sm-$id"
-  json=$(herdr worktree create --cwd "$FM_ROOT" --branch "sm/$id" --path "$auto_path" --no-focus --json 2>&1) || {
+  # Do NOT request a per-mate branch. herdr always leaves the new worktree on
+  # some branch, so we detach HEAD onto the canonical default branch below and
+  # delete herdr's transient auto-branch. A leased home on a per-mate branch
+  # (e.g. sm/<id>) is a non-default branch that fm-update.sh SKIPS, silently
+  # dropping the home out of fleetwide fast-forward updates; a detached HEAD on
+  # the default branch is a fast-forward target instead (AGENTS.md section 2).
+  json=$(herdr worktree create --cwd "$FM_ROOT" --path "$auto_path" --no-focus --json 2>&1) || {
     echo "error: herdr worktree create failed for secondmate home $auto_path" >&2
     return 1
   }
@@ -484,9 +504,35 @@ acquire_herdr_home() {
   [ -n "$workspace_id" ] || { echo "error: herdr worktree create did not return a workspace_id" >&2; return 1; }
   home=$(printf '%s' "$json" | herdr_json_get result workspace worktree checkout_path)
   [ -n "$home" ] || home="$auto_path"
+  # Detach HEAD onto the canonical default branch. The main checkout owns the
+  # default branch ref, so a worktree cannot check it out as a branch; --detach
+  # points HEAD at that commit and is allowed even while the branch is checked
+  # out elsewhere. Prefer the local ref, fall back to origin/<default>.
+  default_ref=$(seed_default_branch) || default_ref=""
+  if [ -n "$default_ref" ]; then
+    if git -C "$home" rev-parse --verify --quiet "refs/heads/$default_ref^{commit}" >/dev/null 2>&1; then
+      detach_target="refs/heads/$default_ref"
+    elif git -C "$home" rev-parse --verify --quiet "refs/remotes/origin/$default_ref^{commit}" >/dev/null 2>&1; then
+      detach_target="refs/remotes/origin/$default_ref"
+    else
+      detach_target=""
+    fi
+    if [ -n "$detach_target" ]; then
+      git -C "$home" checkout --quiet --detach "$detach_target" 2>/dev/null || {
+        echo "error: failed to detach secondmate home $home onto $default_ref" >&2
+        return 1
+      }
+    fi
+  fi
+  # Delete herdr's transient auto-branch now that HEAD is detached, so no
+  # per-mate branch lingers in the shared object store.
+  created_branch=$(printf '%s' "$json" | herdr_json_get result worktree branch)
+  if [ -n "$created_branch" ]; then
+    git -C "$home" branch -D "$created_branch" >/dev/null 2>&1 || true
+  fi
   # Print workspace_id on line 1, home path on line 2.
   # Caller must split; using a subshell means SEED_HERDR_WORKSPACE_ID cannot be
-  # set directly — the caller reads line 1 and assigns it instead.
+  # set directly - the caller reads line 1 and assigns it instead.
   printf '%s\n%s\n' "$workspace_id" "$home"
 }
 

@@ -2134,6 +2134,115 @@ EOF
   pass "fm-backlog-handoff creates absent sections and refuses unsafe homes"
 }
 
+# A herdr-managed (`-`) home must be LEASED at a detached HEAD on the canonical
+# default branch, never on a per-mate branch (sm/<id>). A non-default branch is
+# SKIPPED by fm-update.sh, so such a home silently drops out of fleetwide
+# fast-forward updates (this bit Plum: its home sat behind on sm/plum, invisible
+# to updates). This test proves the seed leases detached-on-default AND that
+# fm-update.sh fast-forwards that home rather than skipping it.
+test_home_seed_leases_home_at_detached_head_on_canonical_default() {
+  local base origin fmroot mainhome sm_base sm_base_abs auto_home fakebin log out upstream
+  base="$TMP_ROOT/detach"
+  origin="$base/origin.git"
+  fmroot="$base/fmroot"
+  mainhome="$base/mainhome"
+  sm_base="$base/sm-base"
+  mkdir -p "$base" "$sm_base" "$mainhome/projects" "$mainhome/data" "$mainhome/state"
+  sm_base_abs=$(cd "$sm_base" && pwd -P)
+
+  # A bare origin with one commit; fmroot is the "firstmate repo" clone on the
+  # default branch with origin/HEAD set (so seed_default_branch resolves it) and
+  # a .gitignore matching production (operational dirs ignored, marker is not).
+  git init -q --bare "$origin"
+  git -C "$origin" symbolic-ref HEAD refs/heads/main
+  git clone -q "$origin" "$fmroot" 2>/dev/null
+  cp -R "$ROOT/bin" "$fmroot/bin"
+  printf '# Firstmate\n' > "$fmroot/AGENTS.md"
+  ln -s AGENTS.md "$fmroot/CLAUDE.md"
+  printf 'data/\nstate/\nconfig/\nprojects/\n.no-mistakes/\n' > "$fmroot/.gitignore"
+  git -C "$fmroot" -c user.name=fmtest -c user.email=fm@example.invalid add -A
+  git -C "$fmroot" -c user.name=fmtest -c user.email=fm@example.invalid commit -qm c1
+  git -C "$fmroot" push -q origin main
+  git -C "$fmroot" remote set-head origin main >/dev/null 2>&1 || true
+
+  # A remote-backed project to clone into the home.
+  make_git_project "$mainhome/projects/alpha"
+  add_file_origin "$mainhome/projects/alpha" "$base/remotes/alpha.git"
+  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$mainhome/data/projects.md"
+
+  # Fake herdr whose `worktree create` makes a REAL linked worktree of fmroot on
+  # an auto-named branch (herdr never leaves a fresh worktree detached),
+  # returning the branch name so seed can detach and delete it.
+  fakebin="$base/fakebin"; mkdir -p "$fakebin"
+  log="$base/herdr.log"; : > "$log"
+  cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf 'herdr %s\n' "$*" >> "${FM_FAKE_HERDR_LOG:-/dev/null}"
+case "${1:-}" in
+  worktree)
+    case "${2:-}" in
+      create)
+        cwd=; path=; shift 2
+        while [ $# -gt 0 ]; do
+          case "$1" in --cwd) shift; cwd=${1:-} ;; --path) shift; path=${1:-} ;; esac; shift
+        done
+        slug="auto-$(basename "$path")"
+        git -C "$cwd" worktree add --quiet -b "worktree/$slug" "$path" HEAD >/dev/null 2>&1
+        printf '{"result":{"workspace":{"workspace_id":"wT","worktree":{"checkout_path":"%s"}},"worktree":{"branch":"worktree/%s"}}}\n' "$path" "$slug"
+        exit 0 ;;
+      remove) exit 0 ;;
+    esac ;;
+esac
+exit 0
+SH
+  chmod +x "$fakebin/herdr"
+
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$mainhome" FM_ROOT_OVERRIDE="$fmroot" \
+    FM_HERDR_SM_BASE="$sm_base_abs" FM_FAKE_HERDR_LOG="$log" \
+    FM_SECONDMATE_CHARTER='detach scope' FM_SECONDMATE_SCOPE='detach scope' \
+    "$ROOT/bin/fm-home-seed.sh" dash - alpha) \
+    || fail "seed failed for a herdr-managed home"
+  auto_home="$sm_base_abs/fm-sm-dash"
+
+  # Leased at a DETACHED HEAD, not on any branch.
+  git -C "$auto_home" symbolic-ref -q HEAD >/dev/null \
+    && fail "seeded home is on a branch, expected detached HEAD"
+  # No per-mate sm/<id> branch was created.
+  [ -z "$(git -C "$auto_home" branch --list 'sm/dash')" ] \
+    || fail "seed created a per-mate sm/dash branch"
+  # herdr's transient auto-branch was deleted; no branch lingers.
+  [ -z "$(git -C "$auto_home" branch --list 'worktree/*')" ] \
+    || fail "seed left herdr's transient auto-branch behind"
+  # HEAD is the canonical default-branch commit.
+  [ "$(git -C "$auto_home" rev-parse HEAD)" = "$(git -C "$fmroot" rev-parse main)" ] \
+    || fail "seeded home HEAD is not the default-branch commit"
+
+  # Advance origin so a fast-forward has something to land, then assert
+  # fm-update.sh treats the detached-HEAD home as a fast-forward target, never a
+  # skipped non-default branch.
+  upstream="$base/upstream"
+  git clone -q "$origin" "$upstream" 2>/dev/null
+  printf 'v2\n' > "$upstream/AGENTS.md"
+  git -C "$upstream" -c user.name=fmtest -c user.email=fm@example.invalid add -A
+  git -C "$upstream" -c user.name=fmtest -c user.email=fm@example.invalid commit -qm c2
+  git -C "$upstream" push -q origin main
+
+  out=$(FM_HOME="$mainhome" FM_ROOT_OVERRIDE="$fmroot" "$ROOT/bin/fm-update.sh" 2>/dev/null)
+  printf '%s\n' "$out" | grep -F 'secondmate dash: updated' >/dev/null \
+    || fail "fm-update did not fast-forward the detached-HEAD home; got: $out"
+  if printf '%s\n' "$out" | grep -Ei 'secondmate dash: skipped' >/dev/null; then
+    fail "fm-update skipped the detached-HEAD home: $out"
+  fi
+  # The fast-forward landed and the home stayed detached.
+  [ "$(git -C "$auto_home" rev-parse HEAD)" = "$(git -C "$fmroot" rev-parse origin/main)" ] \
+    || fail "detached-HEAD home did not fast-forward to origin/main"
+  git -C "$auto_home" symbolic-ref -q HEAD >/dev/null \
+    && fail "fast-forward left the home on a branch"
+
+  pass "seeded home is leased at detached HEAD on the default branch and fm-update fast-forwards it"
+}
+
 test_fm_home_parameterization
 test_lock_status_is_per_home
 test_home_seed_registry_scope_and_overlapping_projects
@@ -2143,6 +2252,7 @@ test_home_seed_validate_rejects_duplicate_homes
 test_home_seed_validate_rejects_duplicate_ids
 test_home_seed_validate_rejects_nested_homes
 test_home_seed_uses_herdr_worktree_create
+test_home_seed_leases_home_at_detached_head_on_canonical_default
 test_home_seed_removes_herdr_workspace_on_assignment_failure
 test_home_seed_warns_when_herdr_workspace_remove_fails
 test_home_seed_does_not_remove_herdr_workspace_for_unsafe_home
