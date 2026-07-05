@@ -32,7 +32,7 @@ bin/fm-brief.sh <id> --secondmate <project>...
 The scaffold writes a charter brief instead of a task brief.
 Set `FM_SECONDMATE_CHARTER='<charter>'` to fill the charter text and `FM_SECONDMATE_SCOPE='<scope>'` when the routing scope differs.
 If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholder before seeding.
-Keep the charter focused on the persistent responsibility, available project clones, and escalation back to the main firstmate status file.
+Keep the charter focused on the persistent responsibility, available project clones, and escalation back to the main firstmate through the fleet peer bus.
 The scaffold's definition of done encodes the idle-plus-domain-grooming contract: on startup the secondmate reconciles only its own in-flight work, then tends its own domain (health, standing watch-items, regressions to guard) while waiting for routed tasks, never self-initiating an org-wide survey or audit beyond its domain.
 Preserve that wording when filling the charter.
 The scaffold also auto-injects an "Act once, report deltas - no churn" section (lean-loop discipline) and a "House tooling conventions" block (bun/bunx rule and axi CLI grammar) into every charter; you do not add either manually.

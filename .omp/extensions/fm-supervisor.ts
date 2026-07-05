@@ -133,9 +133,16 @@ export interface ClassifyResult {
 	detected: number; // distinct relevant events that produced a wake
 }
 
-// Matches bin/fm-classify-status.sh byte-for-byte (case-insensitive).
-const CAPTAIN_RE =
-	/done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged/i;
+// Matches bin/fm-classify-status.sh: optional ISO-ish timestamp prefix, then
+// captain-relevant status prefixes or whole status phrases. Avoid substring
+// matches such as "already", "unmerged", or "readying".
+const STATUS_PREFIX_RE = /^(done|blocked|failed|needs-decision):/i;
+const STATUS_PHRASE_RE = /(^|[^A-Za-z])(PR ready|checks green|ready in branch|merged)([^A-Za-z]|$)/i;
+
+function captainRelevantStatusLine(line: string): boolean {
+	const stripped = line.replace(/^\d{4}-\d{2}-\d{2}T\S+\s+/, "");
+	return STATUS_PREFIX_RE.test(stripped) || STATUS_PHRASE_RE.test(stripped);
+}
 
 // Same grace as bash FM_SIGNAL_GRACE (30s): same-pane relevant events within
 // this window coalesce into ONE wake (one digest), latest state wins.
@@ -149,7 +156,7 @@ const GRACE_MS = 30_000;
 function isRelevant(e: FleetEvent): boolean {
 	switch (e.kind) {
 		case "status":
-			return e.status_line !== undefined && CAPTAIN_RE.test(e.status_line);
+			return e.status_line !== undefined && captainRelevantStatusLine(e.status_line);
 		case "check":
 			return (e.check_out ?? "").length > 0;
 		case "herdr":
@@ -755,7 +762,7 @@ async function fireStale(sup: Supervisor, crew: Crewmate, idleStart: number): Pr
 	}
 	if (await isAwaitingMerge(sup, crew)) return; // parked on a green PR: by design
 	const last = await lastStatusLine(sup, crew.task);
-	if (last && CAPTAIN_RE.test(last)) return; // already reported something captain-worthy
+	if (last && captainRelevantStatusLine(last)) return; // already reported something captain-worthy
 	const mins = Math.max(1, Math.round((Date.now() - idleStart) / 60_000));
 	const lineage = crew.worker ? ` ${crew.worker}` : "";
 	enqueueStale(
@@ -808,7 +815,7 @@ async function fireCompletion(sup: Supervisor, crew: Crewmate): Promise<void> {
 	// status log: if the secondmate already wrote a captain-relevant line, the
 	// status-file watcher woke the captain; do not double-wake.
 	const last = await lastStatusLine(sup, crew.task);
-	if (last && CAPTAIN_RE.test(last)) return;
+	if (last && captainRelevantStatusLine(last)) return;
 	const lineage = crew.worker ? ` ${crew.worker}` : "";
 	enqueueStale(
 		sup,
@@ -925,7 +932,7 @@ async function onStatusFileChange(sup: Supervisor, filename: string): Promise<vo
 	const crew = findCrewByTask(sup, task);
 	const pane = crew?.pane ?? "?";
 
-	if (CAPTAIN_RE.test(last)) {
+	if (captainRelevantStatusLine(last)) {
 		clearStaleTimer(sup, pane); // a real status supersedes the stale backstop
 		enqueueEvent(sup, {
 			t: Date.now(),
