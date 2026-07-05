@@ -898,9 +898,9 @@ seed_home() {
   if [ ! -e "$home/AGENTS.md" ] && [ -f "$FM_ROOT/AGENTS.md" ]; then
     ln -s "$FM_ROOT/AGENTS.md" "$home/AGENTS.md" 2>/dev/null || true
   fi
-  [ -L "$home/bin" ] && [ ! -e "$home/bin" ] && rm -f "$home/bin" 2>/dev/null || true
-  if [ ! -e "$home/bin" ] && [ -d "$FM_ROOT/bin" ]; then
-    ln -s "$FM_ROOT/bin" "$home/bin" 2>/dev/null || true
+  [ -L "$home/config/omp-overlay.yml" ] && [ ! -e "$home/config/omp-overlay.yml" ] && rm -f "$home/config/omp-overlay.yml" 2>/dev/null || true
+  if [ ! -e "$home/config/omp-overlay.yml" ] && [ -f "$FM_ROOT/.omp/supervisor-overlay.yml" ]; then
+    ln -s "$FM_ROOT/.omp/supervisor-overlay.yml" "$home/config/omp-overlay.yml" 2>/dev/null || true
   fi
   if [ -f "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] && [ ! -s "$home/CLAUDE.md" ]; then
     rm -f "$home/CLAUDE.md"

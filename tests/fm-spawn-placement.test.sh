@@ -353,7 +353,7 @@ test_secondmate_home_autolinks_missing_files() {
 }
 
 test_secondmate_omp_overlay_is_injected_when_present() {
-  local home fakebin smhome smhome_abs out overlay_cmd
+  local home fakebin smhome smhome_abs out
   home=$(make_case sm-overlay shipproj Mate)
   fakebin=$(make_fake_herdr "$home")
   : > "$home/ws.tsv"
@@ -364,9 +364,10 @@ test_secondmate_omp_overlay_is_injected_when_present() {
   out=$(run_spawn "$home" "$fakebin" anchor3 "$smhome" omp --secondmate) \
     || fail "secondmate spawn with overlay failed: $out"
 
-  overlay_cmd="omp --auto-approve --config '$smhome_abs/config/omp-overlay.yml' \"\$(cat '$smhome_abs/data/charter.md')\""
-  grep -qF -- "$overlay_cmd" "$home/herdr.log" \
-    || fail "omp overlay was not injected into the secondmate launch: $(cat "$home/herdr.log")"
+  grep -qF -- "--config '$smhome_abs/config/omp-overlay.yml'" "$home/herdr.log" \
+    || fail "omp overlay config path was not injected into the secondmate launch: $(cat "$home/herdr.log")"
+  grep -qF -- "--approval-mode=write" "$home/herdr.log" \
+    || fail "secondmate omp launch did not raise approval friction for hands-on tools: $(cat "$home/herdr.log")"
   pass "secondmate omp overlay is injected into the fresh launch"
 }
 
@@ -377,11 +378,10 @@ test_secondmate_omp_overlay_is_omitted_when_absent() {
   : > "$home/ws.tsv"
   smhome=$(make_secondmate_home sm-no-overlay anchor4 Anchor 1)
   smhome_abs=$(cd "$smhome" && pwd -P)
-
   out=$(run_spawn "$home" "$fakebin" anchor4 "$smhome" omp --secondmate) \
     || fail "secondmate spawn without overlay failed: $out"
 
-  base_cmd="omp --auto-approve \"\$(cat '$smhome_abs/data/charter.md')\""
+  base_cmd="omp --auto-approve --approval-mode=write \"\$(cat '$smhome_abs/data/charter.md')\""
   grep -qF -- "$base_cmd" "$home/herdr.log" \
     || fail "omp launch changed despite no overlay file: $(cat "$home/herdr.log")"
   ! grep -qF -- '--config ' "$home/herdr.log" \
@@ -559,16 +559,16 @@ test_secondmate_pin_from_config_threaded() {
   out=$(run_spawn "$home" "$fakebin" anchor "$smhome" --secondmate) \
     || fail "secondmate spawn failed: $out"
 
-  grep -qF -- "--model 'gpt-5.4-mini'" "$home/herdr.log" \
+  grep -qF 'gpt-5.4-mini' "$home/herdr.log" \
     || fail "secondmate launch did not carry the config-pinned model: $(grep 'agent start' "$home/herdr.log")"
-  grep -qF -- "--thinking 'low'" "$home/herdr.log" \
-    || fail "secondmate launch did not carry the config-pinned effort: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF -- '--thinking' "$home/herdr.log" \
+    || fail "secondmate launch did not carry the config-pinned effort flag: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF 'low' "$home/herdr.log" \
+    || fail "secondmate launch did not carry the config-pinned low effort: $(grep 'agent start' "$home/herdr.log")"
   grep -qF 'model=gpt-5.4-mini' "$home/state/anchor.meta" || fail "secondmate meta missing pinned model="
   grep -qF 'effort=low' "$home/state/anchor.meta" || fail "secondmate meta missing pinned effort="
   pass "a secondmate inherits its config/secondmate-harness model/effort pin"
 }
-
-# An explicit --model/--effort at spawn overrides the config pin.
 test_secondmate_explicit_flags_override_pin() {
   local home fakebin smhome out
   home=$(make_case sm-pin-override shipproj Mate)
@@ -580,14 +580,76 @@ test_secondmate_explicit_flags_override_pin() {
   out=$(run_spawn "$home" "$fakebin" anchor "$smhome" --secondmate --model opus --effort high) \
     || fail "secondmate spawn failed: $out"
 
-  grep -qF -- "--model 'opus'" "$home/herdr.log" \
+  grep -qF -- '--model' "$home/herdr.log" \
+    || fail "explicit --model did not reach the launch command: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF -- 'opus' "$home/herdr.log" \
     || fail "explicit --model did not override the config pin: $(grep 'agent start' "$home/herdr.log")"
-  grep -qF -- "--thinking 'high'" "$home/herdr.log" \
+  grep -qF -- '--thinking' "$home/herdr.log" \
+    || fail "explicit --effort did not reach the launch command: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF -- 'high' "$home/herdr.log" \
     || fail "explicit --effort did not override the config pin: $(grep 'agent start' "$home/herdr.log")"
-  ! grep -qF -- "--model 'gpt-5.4-mini'" "$home/herdr.log" \
+  ! grep -qF -- 'gpt-5.4-mini' "$home/herdr.log" \
     || fail "config-pinned model leaked despite an explicit override"
   pass "explicit --model/--effort override the config/secondmate-harness pin"
 }
+
+
+# Emergency limit-mode forces the OpenAI Codex lane through omp, low effort, and ignores
+# ordinary harness/model/effort requests. This is the deterministic supervisor
+# fallback profile.
+test_emergency_limit_mode_forces_openai_codex_lane() {
+  local home fakebin smhome out
+  home=$(make_case sm-limit-mode shipproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  mkdir -p "$fakebin"
+  cat > "$fakebin/omp" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$fakebin/omp"
+  : > "$home/ws.tsv"
+  smhome=$(make_secondmate_home sm-limit-mode anchor Anchor 1)
+  : > "$home/state/emergency-limit-mode"
+
+  out=$(PATH="$fakebin:/usr/bin:/bin" FM_SPAWN_NO_GUARD=1 run_spawn "$home" "$fakebin" anchor "$smhome" claude --secondmate --model opus --effort high) \
+    || fail "emergency-mode secondmate spawn failed: $out"
+
+  grep -qF -- 'omp --auto-approve' "$home/herdr.log" \
+    || fail "emergency mode did not force the OpenAI Codex GPT lane through omp: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF -- "openai-codex/gpt-5.4-mini" "$home/herdr.log" \
+    || fail "emergency mode did not use a provider-qualified GPT model: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF -- "--thinking 'low'" "$home/herdr.log" \
+    || fail "emergency mode did not force low effort: $(grep 'agent start' "$home/herdr.log")"
+  ! grep -qF -- 'claude --dangerously-skip-permissions' "$home/herdr.log" \
+    || fail "emergency mode leaked the requested non-omp harness: $(grep 'agent start' "$home/herdr.log")"
+  ! grep -qF -- "--model 'opus'" "$home/herdr.log" \
+    || fail "emergency mode leaked the requested model override: $(grep 'agent start' "$home/herdr.log")"
+  grep -qF 'model=openai-codex/gpt-5.4-mini' "$home/state/anchor.meta" \
+    || fail "emergency mode did not record the forced OpenAI Codex model"
+  grep -qF 'effort=low' "$home/state/anchor.meta" \
+    || fail "emergency mode did not record the forced low effort"
+  pass "emergency limit-mode forces the OpenAI Codex GPT lane through omp and low effort"
+}
+
+# If omp is unavailable, emergency mode parks the launch and reports
+# the exact unblock condition instead of trying an alternate harness.
+test_emergency_limit_mode_reports_blocking_condition() {
+  local home fakebin smhome out
+  home=$(make_case sm-limit-block shipproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  : > "$home/ws.tsv"
+  smhome=$(make_secondmate_home sm-limit-block anchor Anchor 1)
+  : > "$home/state/emergency-limit-mode"
+
+  if PATH="$fakebin:/usr/bin:/bin" FM_SPAWN_NO_GUARD=1 run_spawn "$home" "$fakebin" anchor "$smhome" omp --secondmate >/dev/null 2>&1; then
+    fail "emergency mode should have blocked without an omp binary"
+  fi
+
+  grep -qF 'blocked: emergency limit-mode - omp command not found; install omp or remove emergency-limit-mode' "$home/state/anchor.status" \
+    || fail "emergency mode did not report the exact omp unblock condition"
+  pass "emergency limit-mode parks and reports the omp unblock condition"
+}
+
 
 test_crewmate_lands_in_spawners_current_workspace
 test_crewmate_single_agent_pane
@@ -605,3 +667,5 @@ test_crewmate_model_effort_threaded_into_launch
 test_crewmate_no_model_effort_is_baseline
 test_secondmate_pin_from_config_threaded
 test_secondmate_explicit_flags_override_pin
+test_emergency_limit_mode_forces_openai_codex_lane
+test_emergency_limit_mode_reports_blocking_condition
