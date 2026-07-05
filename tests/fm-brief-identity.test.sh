@@ -121,6 +121,10 @@ test_briefs_report_status_via_helper() {
     || fail "ship brief does not instruct status via fm-report.sh"
   grep -qF '"{state}: {one short line}"' "$brief" \
     || fail "ship brief lost the {state}: {one short line} status idiom"
+  grep -qF 'state the diagnostic intent first, then send short human-legible expert commands one by one' "$brief" \
+    || fail "ship brief missing visible-pane command discipline"
+  grep -qF 'Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane' "$brief" \
+    || fail "ship brief missing noisy visible-pane command guard"
   grep -qF '>> ' "$brief" \
     && fail "ship brief still contains a raw >> status redirect"
 
@@ -130,6 +134,10 @@ test_briefs_report_status_via_helper() {
   grep -qF 'bin/fm-report.sh' "$brief" \
     || fail "scout brief does not instruct status via fm-report.sh"
   grep -qF '>> ' "$brief" && fail "scout brief still contains a raw >> status redirect"
+  grep -qF 'state the diagnostic intent first, then send short human-legible expert commands one by one' "$brief" \
+    || fail "scout brief missing visible-pane command discipline"
+  grep -qF 'Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane' "$brief" \
+    || fail "scout brief missing noisy visible-pane command guard"
 
   home=$(make_home report-secondmate)
   out=$(FM_SECONDMATE_CHARTER='Own the dashboard domain.' \
@@ -141,6 +149,8 @@ test_briefs_report_status_via_helper() {
   grep -qF 'bin/fm-report.sh' "$brief" \
     && fail "secondmate charter still routes escalation through the retired report helper"
   grep -qF '>> ' "$brief" && fail "secondmate charter still contains a raw >> status redirect"
+  ! grep -qF 'state the diagnostic intent first, then send short human-legible expert commands one by one' "$brief" \
+    || fail "secondmate charter should not copy visible-pane discipline from fleet-wide rules"
 
   pass "ship/scout briefs report status via fm-report.sh; secondmate charter escalates via the fleet peer bus"
 }

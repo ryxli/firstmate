@@ -94,6 +94,9 @@ This workstation runs bun. Use \`bun\` / \`bunx\` for all JS/TS tooling; never \
 A new CLI joins the axi family (gh-axi, slack-axi, chrome-devtools-axi, lavish-axi): match their command grammar, lean TOON output, on-demand \`SKILL.md\` (no per-session injection), \`NO_TOKEN\` auth boundary, and invocation form. Do not invent a divergent convention.
 Any PR you open must help the reviewer VISUALIZE the change: a copy-paste of the command and its real output, a short before/after, or a demo snippet. Trim it to what shows the change, not an exhaustive dump."
 
+VISIBLE_PANE_DISCIPLINE="When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
+Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane."
+
 if [ "$KIND" = secondmate ]; then
 SECONDMATE_PROJECTS=""
 idx=1
@@ -199,14 +202,15 @@ The report is the only thing that survives, so anything worth keeping must be in
 1. Never push to any remote and never open a PR.
 2. Stay inside this worktree; the only files you may write outside it are the report and the status file below.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
-4. Report status by appending one line:
+4. $VISIBLE_PANE_DISCIPLINE
+5. Report status by appending one line:
    \`$REPORT $STATUS_FILE "{state}: {one short line}"\`
    States: working, needs-decision, blocked, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on and the needs-decision/blocked/done/failed states. No step-by-step
    FYI progress lines; firstmate reads your pane for that.
-5. If you hit the same obstacle twice, run \`$REPORT $STATUS_FILE "blocked: {why}"\` and stop; firstmate will help.
-6. If a decision belongs to a human (product choices, destructive actions),
+6. If you hit the same obstacle twice, run \`$REPORT $STATUS_FILE "blocked: {why}"\` and stop; firstmate will help.
+7. If a decision belongs to a human (product choices, destructive actions),
    run \`$REPORT $STATUS_FILE "needs-decision: {summary of options}"\` and stop. Firstmate will reply with the decision.
 
 $LEAN_LOOP_CREW
@@ -291,15 +295,16 @@ You are in a disposable git worktree of $REPO, already on your own \`fm/$ID\` br
 $RULE1
 2. Stay inside this worktree; modify nothing outside it.
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
-4. Report status by appending one line:
+4. $VISIBLE_PANE_DISCIPLINE
+5. Report status by appending one line:
    \`$REPORT $STATUS_FILE "{state}: {one short line}"\`
    States: working, needs-decision, blocked, done, failed.
    Each append wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on (setup done, bug reproduced, fix implemented, validation passed) and the
    needs-decision/blocked/done/failed states. No step-by-step FYI progress lines;
    firstmate reads your pane for that.
-5. If you hit the same obstacle twice, run \`$REPORT $STATUS_FILE "blocked: {why}"\` and stop; firstmate will help.
-6. If a decision belongs to a human (product choices, destructive actions, ask-user findings),
+6. If you hit the same obstacle twice, run \`$REPORT $STATUS_FILE "blocked: {why}"\` and stop; firstmate will help.
+7. If a decision belongs to a human (product choices, destructive actions, ask-user findings),
    run \`$REPORT $STATUS_FILE "needs-decision: {summary of options}"\` and stop. Firstmate will reply with the decision.
 
 $LEAN_LOOP_CREW
