@@ -451,6 +451,17 @@ herdr_place_agent_tab() {
   if [ -n "${HERDR_SOCKET_PATH:-}" ]; then
     start_env+=(--env "HERDR_SOCKET_PATH=$HERDR_SOCKET_PATH")
   fi
+  # Idempotent respawn: a herdr session restore can bring this task's tab back as
+  # a husk (pane restored, agent process gone) while its agent SLOT stays
+  # registered, so `herdr agent start "$slot"` would fail agent_name_taken and
+  # need a manual close. The replacement tab above already exists, so reaping the
+  # husk here cannot take the workspace down even if the husk was its only tab.
+  # Only a CONFIRMED husk is reaped; a live or unclassifiable slot refuses (no
+  # concurrent-crew guard regression) and we release the just-created tab.
+  if ! fm_herdr_reap_husk_slot "$slot"; then
+    herdr tab close "$tab_id" >/dev/null 2>&1 || true
+    return 1
+  fi
   start_json=$(herdr agent start "$slot" --tab "$tab_id" --cwd "$cwd" --no-focus "${start_env[@]}" -- sh -c "$cmd" 2>&1) || {
     echo "error: herdr agent start failed in tab $tab_id" >&2
     echo "$start_json" >&2
