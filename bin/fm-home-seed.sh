@@ -4,8 +4,8 @@
 # Usage:
 #   fm-home-seed.sh <id> <home|-> [<project>...]
 #       Provision <home> as an isolated firstmate home. If <home> is "-", create
-#       a fresh herdr-managed git worktree of the firstmate repo alongside the
-#       repo (at <parent-of-repo>/fm-sm-<id>). The herdr workspace ID is stored
+#       a fresh herdr-managed git worktree of the firstmate repo under the
+#       shared mates dir (at <code-root>/mates/<id>, e.g. ~/code/mates/<id>). The herdr workspace ID is stored
 #       in data/secondmates.md so teardown can remove the workspace cleanly.
 #       Projects are cloned from the active home into the secondmate home's
 #       projects/ directory. That project list is non-exclusive provisioning data
@@ -485,11 +485,14 @@ seed_default_branch() {
 acquire_herdr_home() {
   local id=$1 auto_path json workspace_id home sm_base default_ref created_branch detach_target
   # Create a herdr-managed git worktree of the firstmate repo at a predictable
-  # path alongside the repo. The herdr workspace ID is returned so the caller
+  # path under the shared mates dir (a "mates" sibling of the harness dir, so
+  # mates live at <code-root>/mates/<id>, e.g. ~/code/mates/<id> - matching the
+  # cross-ship convention). The herdr workspace ID is returned so the caller
   # can store it in the registry and use it for clean removal on teardown.
-  # FM_HERDR_SM_BASE overrides the parent directory (useful in tests).
-  sm_base="${FM_HERDR_SM_BASE:-$(dirname "$(cd "$FM_ROOT" && pwd -P)")}"
-  auto_path="$sm_base/fm-sm-$id"
+  # FM_HERDR_SM_BASE overrides the mates base directory (useful in tests).
+  sm_base="${FM_HERDR_SM_BASE:-$(dirname "$(dirname "$(cd "$FM_ROOT" && pwd -P)")")/mates}"
+  auto_path="$sm_base/$id"
+  mkdir -p "$sm_base"
   # Do NOT request a per-mate branch. herdr always leaves the new worktree on
   # some branch, so we detach HEAD onto the canonical default branch below and
   # delete herdr's transient auto-branch. A leased home on a per-mate branch
