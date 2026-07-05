@@ -64,6 +64,131 @@ fm_pane_is_busy() {
   [ "$status" = "working" ]
 }
 
+# --- Idempotent respawn: husk classification + reap ---------------------------
+#
+# herdr persists/restores its session layout across a server restart, so a task
+# tab can come back as a "husk": the tab/pane are restored but the agent process
+# is gone, while the agent SLOT name (the task id passed to `herdr agent start`)
+# stays registered. A respawn onto that slot then fails with `agent_name_taken`
+# (herdr rejects a duplicate agent name), which today needs a manual pane close.
+# These helpers let a respawn reuse such a slot - but ONLY when the leftover is a
+# CONFIRMED husk. A live agent (a real concurrent worker) or anything not
+# confidently classifiable still refuses, so the concurrent-crew guard never
+# regresses. See the herdr-omp-agent-status-binding skill for the slot/identity
+# split this relies on.
+
+# fm_herdr_pane_agent_process_verdict <pane>: inspect a pane's live foreground
+# process tree and print exactly one verdict:
+#   agent  a known coding-agent/harness process is running (omp|claude|codex|
+#          opencode|pi, or a node|bun|deno runtime hosting one) - a live or
+#          still-booting agent, NOT a husk.
+#   shell  the process tree is readable and holds no such process (only a plain
+#          shell / benign command, or nothing) - no live agent is present.
+#   err    the process tree could not be read - cannot tell.
+# This is the decisive disambiguator when agent_status is "unknown", which a
+# freshly-started agent also reports briefly before its integration binds.
+fm_herdr_pane_agent_process_verdict() {
+  local pane=$1 pinfo
+  pinfo=$(herdr pane process-info --pane "$pane" 2>/dev/null || true)
+  [ -n "$pinfo" ] || { printf 'err'; return 0; }
+  printf '%s' "$pinfo" | python3 -c '
+import sys, json, re
+try:
+    procs = json.load(sys.stdin)["result"]["process_info"]["foreground_processes"]
+except Exception:
+    print("err"); sys.exit(0)
+if not isinstance(procs, list):
+    print("err"); sys.exit(0)
+harness = re.compile(r"\b(omp|claude|codex|opencode|pi|node|bun|deno)\b")
+for p in procs:
+    hay = " ".join(str(p.get(k, "")) for k in ("argv0", "name", "cmdline"))
+    if harness.search(hay):
+        print("agent"); sys.exit(0)
+print("shell")
+' 2>/dev/null || printf 'err'
+}
+
+# fm_herdr_classify_slot <slot>: classify an existing herdr agent registration by
+# slot name so a respawn can decide whether it may reuse the slot. Prints exactly
+# one verdict on stdout:
+#   free    slot is not registered; `herdr agent start <slot>` will not collide.
+#   husk    slot registered but its pane holds NO live agent - the pane is gone
+#           (dead) or runs only a plain shell with no agent process. Safe to
+#           close-and-replace.
+#   live    slot registered AND a live, bound agent occupies the pane
+#           (agent_status working|idle|blocked|done, or a harness process is
+#           running under it). A concurrent worker owns this slot - MUST refuse.
+#   unknown registered but not confidently classifiable - fail closed, refuse.
+# Conservative by construction: only the unambiguous husk shape returns "husk";
+# every uncertainty degrades to "unknown" (refuse) or "free" (let agent start
+# arbitrate), so the concurrent-crew guard never regresses.
+fm_herdr_classify_slot() {
+  local slot=$1 info pane pget status
+  info=$(herdr agent get "$slot" 2>/dev/null) || { printf 'free'; return 0; }
+  # An error payload or an unparseable/agent-less response means nothing usable
+  # is registered; let `herdr agent start` arbitrate (it refuses if truly taken).
+  case "$info" in *'"error"'*) printf 'free'; return 0 ;; esac
+  pane=$(printf '%s' "$info" | herdr_json_get result agent pane_id)
+  [ -n "$pane" ] || { printf 'free'; return 0; }
+  pget=$(herdr pane get "$pane" 2>/dev/null || true)
+  case "$pget" in
+    '' | *'"error"'*)
+      # Slot registered but its pane is gone: a dead husk, no live agent possible.
+      printf 'husk'; return 0 ;;
+  esac
+  status=$(printf '%s' "$pget" | herdr_json_get result pane agent_status)
+  case "$status" in
+    working | idle | blocked | done)
+      # A bound, live agent occupies the slot.
+      printf 'live'; return 0 ;;
+  esac
+  # agent_status is unknown/empty: a husk (agent-less restored shell) OR a live
+  # agent still booting before its integration reports. The live process tree
+  # decides: a running harness => still live/booting (refuse); no agent process
+  # (only a plain shell) => confirmed husk.
+  case "$(fm_herdr_pane_agent_process_verdict "$pane")" in
+    shell) printf 'husk' ;;
+    agent) printf 'unknown' ;;
+    *)     printf 'unknown' ;;
+  esac
+}
+
+# fm_herdr_reap_husk_slot <slot>: make <slot> safe to (re)use by `herdr agent
+# start <slot>`. If the slot is a CONFIRMED husk, close its leftover tab (which
+# removes the orphan pane too) so the name is freed. Returns:
+#   0  slot is free to reuse (was free, or a husk was reaped)
+#   1  slot is occupied by a live/unclassifiable agent - caller MUST refuse
+# The caller is expected to have ALREADY created the replacement tab, so reaping
+# even a husk that was its workspace's only tab cannot take the workspace down.
+# Diagnostics go to stderr for the spawn log; only the verdict drives control.
+fm_herdr_reap_husk_slot() {
+  local slot=$1 verdict info tabid pane
+  verdict=$(fm_herdr_classify_slot "$slot")
+  case "$verdict" in
+    free) return 0 ;;
+    husk)
+      info=$(herdr agent get "$slot" 2>/dev/null || true)
+      tabid=$(printf '%s' "$info" | herdr_json_get result agent tab_id)
+      pane=$(printf '%s' "$info" | herdr_json_get result agent pane_id)
+      if [ -n "$tabid" ]; then
+        herdr tab close "$tabid" >/dev/null 2>&1 || true
+      elif [ -n "$pane" ]; then
+        herdr pane close "$pane" >/dev/null 2>&1 || true
+      fi
+      # A tab/pane close can release the slot registration asynchronously; a brief
+      # settle avoids racing the retry into a still-registered name.
+      sleep "${FM_HUSK_REAP_SETTLE:-0.3}"
+      echo "info: reaped husk agent slot '$slot' (herdr session-restore leftover) before respawn" >&2
+      return 0 ;;
+    live)
+      echo "error: agent slot '$slot' is held by a live agent - refusing to replace" >&2
+      return 1 ;;
+    *)
+      echo "error: agent slot '$slot' is occupied and not confidently a husk - refusing to replace" >&2
+      return 1 ;;
+  esac
+}
+
 # fm_pane_input_pending: 0 (pending) if the pane's visible last line looks
 # like real unsubmitted text a human typed. An idle composer, a bare prompt
 # glyph, or a busy footer is NOT pending. With herdr we read the raw visible
