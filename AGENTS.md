@@ -52,7 +52,7 @@ Hands-on firstmate work competes with live supervision for the same single threa
 This repo is a shared template, not the captain's personal project.
 The tracking principle: shared, tracked material is tracked under git; anything personal to this captain's fleet (data/, state/, config/, projects/, .no-mistakes/) is not.
 Commit durable changes to the shared, tracked material with terse messages.
-This repo is itself behind the no-mistakes gate: ship shared, tracked material through the pipeline - branch, commit, run the pipeline, PR - and the captain's merge rule applies here exactly as it does to projects.
+This repo follows a main-only workflow for the captain's personal harness work. Commit durable shared changes directly to `main`, verify them proportionately, and push `origin main` unless the captain explicitly asks for a branch or PR.
 Never add an agent name as co-author.
 
 ### Thinking and execution discipline
@@ -739,7 +739,7 @@ Adjust the other sections only when the task genuinely deviates from the standar
 
 ## 12. Self-update
 
-firstmate is its own repo behind the no-mistakes gate, so improvements to `AGENTS.md`, `bin/`, and skills reach `main` and then wait for each running firstmate to pull them.
+firstmate now follows a main-only workflow for its own shared repo, so improvements to `AGENTS.md`, `bin/`, and skills land on `main` directly and then wait for each running firstmate to pull them.
 The `/updatefirstmate` skill performs that pull in place for the running main firstmate and every secondmate.
 It runs `bin/fm-update.sh`, which fast-forwards this firstmate repo's default branch from origin and then fast-forwards every registered secondmate home (resolved from `state/*.meta` and `data/secondmates.md`) the same way.
 The mechanics mirror `bin/fm-fleet-sync.sh` exactly: fast-forward only, never forcing, never creating a merge commit, never stashing, and skipping with a reported reason anything dirty, diverged, offline, or on a non-default branch, so prime directive #3 holds and no unlanded work is ever discarded.
