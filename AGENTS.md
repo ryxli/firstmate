@@ -461,6 +461,10 @@ A ship task's path from `done` to landed on `main` is set by the project's `mode
 
 When reviewing any crewmate branch diff, use `bin/fm-review-diff.sh <id>` rather than `git diff <default>...branch` directly.
 Pooled clones keep their local default refs frozen at clone time and can lag `origin`; the helper always compares against the authoritative base.
+In a target project repo shipped through that project's own no-mistakes pipeline, commits under `.no-mistakes/evidence/` in a crew branch are the pipeline's own PR-viewable validation evidence, committed by design so it rides along with the change.
+Do not steer a crewmate to strip them, do not count them against the change or treat them as pollution during firstmate's own pre-merge review, and do not have them rebased away.
+Evidence-hosting end-state (gists, an orphan evidence branch, or similar) is a deferred design decision; until that changes, committed evidence in the branch is correct behavior.
+Firstmate's own repo stays the exception described in section 1: its `.no-mistakes/` remains gitignored, untracked local state, and this do-not-fight rule never licenses evidence commits there.
 
 **yolo (orthogonal).** With `yolo=off` (default) every approval is the captain's: ask-user findings, PR merges, the local-only merge. With `yolo=on`, firstmate makes those calls itself without asking - resolve ask-user findings on your judgment, and run `gh-axi pr merge` / `bin/fm-merge-local.sh` once the work is green/approved - EXCEPT anything destructive, irreversible, or security-sensitive, which still escalates to the captain. Never merge a red PR even under yolo. After any merge you perform without asking the captain, post a one-line "merged <full PR URL or local main> after checks passed" FYI so the captain keeps a trail.
 
@@ -625,6 +629,12 @@ Map firstmate's real backlog operations to the approved commands:
 - Read an item's full notes: `tasks-axi show <id> --full`.
 - Hand a task off to a secondmate home: keep using `bin/fm-backlog-handoff.sh <secondmate-id> <item-key>...`; do not call bare `tasks-axi mv` for this path, because the helper resolves and validates the secondmate home before moving anything.
 - Normalize the file: `tasks-axi render` rewrites every id'd task in canonical form and leaves free-form lines untouched.
+
+**Note hygiene.** Keep free-form backlog and task note/status prose free of volatile incidental specifics that rot: temp paths, in-flight versions, moving state locations, and ephemeral IDs.
+Reference the authoritative source instead of duplicating it into prose - "state per the module's backend config", not a literal path.
+Before acting on a note's volatile detail, verify it against the source of truth (the config, the live system, the API); notes drift.
+The structured fields above are different: task IDs, blocked-by IDs, and Done-entry PR URLs or report paths are the durable record this schema requires.
+Correct or delete stale free-form notes the moment you catch them, and put durable facts in the curated memory homes of section 6, not scattered across one-off task notes.
 
 `tasks-axi done` auto-prunes Done to `done_keep = 10` and archives the pruned entries to `data/done-archive.md`, which supersedes the manual "keep Done to the 10 most recent" pruning above: when compatible `tasks-axi` is present you do not hand-prune Done, and nothing is lost because pruned entries are archived rather than deleted.
 When `tasks-axi` is absent or fails the compatibility probe, every firstmate home (main and each secondmate) hand-edits `data/backlog.md` exactly as this section describes, including the manual Done pruning.
