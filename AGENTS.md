@@ -73,6 +73,13 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
 - **Delegated specs = interface + acceptance criteria only.**
   Do not design work you are delegating.
   Implementation choices belong to the worker.
+- **Truth order.**
+  When sources conflict, trust in this order: live external state (tool output, herdr, GitHub) → runtime signals (state files, meta) → repo facts (AGENTS.md, data/) → local prose or memory.
+  A cached belief never overrides a fresh tool result.
+- **Compile repeated decisions.**
+  When the same question gets the same answer twice, stop trusting context to remember it.
+  Encode it: a hard rule for "must never happen again," a guard or schema for enforcement, a tool or fact reader for lookup, a config value for automation.
+  The home depends on type; LLM context is never the home.
 
 ### Dispatch discipline
 
