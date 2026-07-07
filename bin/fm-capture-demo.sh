@@ -24,7 +24,10 @@ import json, sys, datetime, textwrap, os
 
 events_path, n_str = sys.argv[1], sys.argv[2]
 n = int(n_str)
-WIDTH = int(os.get_terminal_size().columns) if hasattr(os, "get_terminal_size") else 100
+try:
+    WIDTH = os.get_terminal_size().columns
+except (OSError, AttributeError):
+    WIDTH = 100
 MAX_TEXT = WIDTH - 14  # account for left margin + label
 
 def fmt_ts(ts_ms):
