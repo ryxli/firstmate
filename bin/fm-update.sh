@@ -353,7 +353,7 @@ process_secondmate() {
 
   ff_target "$home_real" "secondmate $id" yes yes
   if [ "$FF_STATUS" = "updated" ] && [ -n "$pane" ]; then
-    nudge_windows="$nudge_windows $pane"
+    nudge_windows="$nudge_windows fm-$id"
   fi
 }
 

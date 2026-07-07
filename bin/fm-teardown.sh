@@ -32,6 +32,8 @@ SECONDMATE_REG="$DATA/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-herdr-lib.sh
+. "$SCRIPT_DIR/fm-herdr-lib.sh"
 "$FM_ROOT/bin/fm-guard.sh" || true
 ID=$1
 FORCE=${2:-}
@@ -40,6 +42,9 @@ META="$STATE/$ID.meta"
 [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
 WT=$(grep '^worktree=' "$META" | cut -d= -f2-)
 PANE=$(grep '^pane=' "$META" | cut -d= -f2-)
+# Resolve the live pane (updates meta if the pane drifted after a restart).
+# Falls back to the stored value when herdr cannot find a live session.
+PANE=$(fm_resolve_live_pane "fm-$ID" "$STATE" 2>/dev/null || printf '%s' "$PANE")
 PROJ=$(grep '^project=' "$META" | cut -d= -f2-)
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
@@ -356,7 +361,7 @@ cleanup_firstmate_home_children() {
     child_kind=$(meta_value "$child_meta" kind)
     [ -n "$child_kind" ] || child_kind=ship
     local child_pane
-    child_pane=$(meta_value "$child_meta" pane)
+    child_pane=$(fm_resolve_live_pane "fm-$child_id" "$sub_state" 2>/dev/null || meta_value "$child_meta" pane)
     if [ -n "$child_pane" ]; then
       herdr pane close "$child_pane" 2>/dev/null || true
     fi
@@ -377,7 +382,7 @@ cleanup_firstmate_home_children() {
       fi
     fi
     local ck
-    ck=$(printf '%s' "$(meta_value "$child_meta" pane)" | tr ':' '_')
+    ck=$(printf '%s' "$child_pane" | tr ':' '_')
     rm -f "$sub_state/$child_id.status" "$sub_state/$child_id.check.sh" "$sub_state/$child_id.meta"
     rm -f "$sub_state/.herdr-prev-status-$ck" "$sub_state/.herdr-idle-count-$ck" "$sub_state/.herdr-turn-$ck" "$sub_state/.stale-$ck"
   done

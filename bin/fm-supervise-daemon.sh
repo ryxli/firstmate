@@ -284,14 +284,18 @@ _oldest_line_age() {
 
 # Find a live crewmate pane for a given task key.
 pane_for_task() {
-  local key=$1 meta mp task
+  local key=$1 meta mp task resolved
   local state="${FM_STATE_DIR:-$(_state_root)}"
   for meta in "$state"/*.meta; do
     [ -e "$meta" ] || continue
     mp=$(grep '^pane=' "$meta" | cut -d= -f2- || true)
     [ -n "$mp" ] || continue
     task=$(basename "$meta" .meta)
-    [ "$(_stale_key "$task")" = "$key" ] && { printf '%s' "$mp"; return 0; }
+    if [ "$(_stale_key "$task")" = "$key" ]; then
+      resolved=$(fm_resolve_live_pane "fm-$task" "$state" 2>/dev/null || printf '%s' "$mp")
+      printf '%s' "$resolved"
+      return 0
+    fi
   done
   return 1
 }

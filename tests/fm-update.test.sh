@@ -135,7 +135,7 @@ test_updates_main_and_secondmate() {
   assert_contains "$out" "firstmate: updated " "firstmate fast-forwarded"
   assert_contains "$out" "secondmate sm1: updated " "secondmate fast-forwarded"
   assert_contains "$out" "reread-firstmate: yes" "instruction change triggers reread"
-  assert_contains "$out" "nudge-secondmates: w1:p1" "updated secondmate is nudged"
+  assert_contains "$out" "nudge-secondmates: fm-sm1" "updated secondmate is nudged by fm-id"
 
   # Fast-forward landed: HEAD == origin/main on both targets.
   [ "$(git -C "$w/main" rev-parse HEAD)" = "$(git -C "$w/main" rev-parse origin/main)" ] \
@@ -178,7 +178,7 @@ test_reread_gate_is_instruction_only() {
   assert_contains "$out" "firstmate: updated " "firstmate still advanced"
   assert_contains "$out" "reread-firstmate: no" "non-instruction change skips reread"
   # The secondmate still advanced, so it is still nudged (update-based nudge).
-  assert_contains "$out" "nudge-secondmates: w1:p1" "advanced secondmate still nudged"
+  assert_contains "$out" "nudge-secondmates: fm-sm1" "advanced secondmate still nudged by fm-id"
   pass "T3 reread gates on instruction surface, nudge on advancement"
 }
 
