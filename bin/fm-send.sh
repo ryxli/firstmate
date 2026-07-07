@@ -35,6 +35,7 @@ shift
 # Parse --steer: steering messages bypass the dispatch gate.
 _steer=0
 [ "${1:-}" = "--steer" ] && { _steer=1; shift; }
+_steer_text="${*}"
 
 # Dispatch gate: block new work during a freeze or focus lock.
 # Bypass with FM_DISPATCH_OVERRIDE=1 or --steer.
@@ -74,4 +75,9 @@ else
       exit 1
       ;;
   esac
+fi
+
+# Capture steer events: log to the events journal when a steering message was sent.
+if [ "$_steer" = "1" ] && [ "${1:-}" != "--key" ] && [ -n "${_steer_text:-}" ]; then
+  "${SCRIPT_DIR}/fm-capture.sh" steer "$_target" "$_steer_text" "" 2>/dev/null || true
 fi
