@@ -1352,7 +1352,7 @@ test_fm_peek_resolves_stale_meta_pane_and_refreshes_meta() {
     FM_FAKE_HERDR_ALIVE_DIR="$alive_dir" \
     FM_FAKE_HERDR_PANE_DIR="$pane_dir" \
     FM_STATE_OVERRIDE="$state" \
-    "$ROOT/bin/fm-peek.sh" fm-peek 5 > "$out" 2>"$err" \
+    "$ROOT/bin/fm-peek.sh" fm-peek > "$out" 2>"$err" \
     || fail "fm-peek failed to resolve the live pane from stale meta: $(cat "$err")"
   grep -F 'done: live pane output' "$out" >/dev/null || fail "fm-peek did not read from the live pane id"
   grep -Fx "pane=$new_pane" "$state/peek.meta" >/dev/null || fail "fm-peek did not refresh peek.meta to the live pane id"
