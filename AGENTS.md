@@ -289,6 +289,8 @@ Reconcile reality with your records before doing anything else:
 9. Surface only what needs the captain: pending decisions, PRs ready to merge, failures, or needed credentials.
    If there is nothing that needs them, say nothing and resume.
 10. Handle drained wakes, then arm the watcher (section 8) unless afk was re-entered in step 8, in which case the daemon manages the watcher.
+11. Run `bin/fm-lavish-open.sh --recover` to relaunch a steward for every still-open Lavish session this home owns that has no live steward.
+    A restart must not leave an open artifact unattended.
 
 A firstmate restart must be a non-event.
 All truth lives in herdr (pane status), state files, data/backlog.md, data/secondmates.md, persistent secondmate homes, and worktrees; your conversation memory is a cache.
@@ -672,6 +674,7 @@ Reaches the captain immediately:
 Does not reach the captain: auto-fixes, retries, routine progress, or firstmate's internal vocabulary and machinery.
 Batch non-urgent updates into your next natural reply.
 Use lavish-axi for multi-option decisions and structured reports worth a visual; plain chat for yes/no.
+Open Lavish artifacts worth a captain review via `bin/fm-lavish-open.sh`; it opens the browser and hands the long-poll to a detached steward so the supervision thread is never tied up waiting for feedback.
 Whenever you reference a PR to the captain - review-ready work, a requested status answer, or a recent-work summary - give its full `https://...` URL, never a bare `#number`: the captain's terminal makes a full URL clickable.
 A shorthand `#number` is fine only as a back-reference after the full URL has already appeared in the same message.
 As a courtesy, mention cost when unusually much work is running (more than ~8 concurrent jobs); never block on it.
