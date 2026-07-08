@@ -15,8 +15,6 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 # shellcheck source=bin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
-"$SCRIPT_DIR/fm-guard.sh" || true
-
 FULL=0
 STATUS_ONLY=0
 PANE_ARG=

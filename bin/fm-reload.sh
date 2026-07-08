@@ -42,8 +42,6 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 # shellcheck source=bin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
-[ -n "${FM_RELOAD_NO_GUARD:-}" ] || "$SCRIPT_DIR/fm-guard.sh" || true
-
 TARGET=""
 RESUME_CMD="${FM_RELOAD_CMD:-}"
 TIMEOUT="${FM_RELOAD_TIMEOUT:-8}"

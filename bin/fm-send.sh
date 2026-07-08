@@ -26,8 +26,6 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 # shellcheck source=bin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
-"$SCRIPT_DIR/fm-guard.sh" || true
-
 _target="$1"
 P=$(fm_resolve_live_pane "$1" "$STATE")
 shift

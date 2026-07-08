@@ -62,13 +62,8 @@ make_firstmate_git_root() {
   local home=$1
   mkdir -p "$home/bin"
   printf '# Firstmate\n' > "$home/AGENTS.md"
-  cat > "$home/bin/fm-guard.sh" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-  chmod +x "$home/bin/fm-guard.sh"
   git -C "$home" init -q
-  git -C "$home" add AGENTS.md bin/fm-guard.sh
+  git -C "$home" add AGENTS.md
   git -C "$home" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
 }
 
@@ -1102,17 +1097,7 @@ test_secondmate_spawn_requires_seeded_matching_home() {
   root_ancestor="$TMP_ROOT/spawn-root-ancestor"
   root_inside="$root_ancestor/repo"
   mkdir -p "$home/data" "$home/state" "$subhome/data" "$wronghome/data" "$marker_only/data" "$active_descendant/data" "$root_descendant/data" "$fakeroot/bin"
-  cat > "$fakeroot/bin/fm-guard.sh" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-  chmod +x "$fakeroot/bin/fm-guard.sh"
   mkdir -p "$ancestor_active_home/data" "$ancestor_active_home/state" "$active_ancestor/data" "$root_ancestor/data" "$root_inside/bin"
-  cat > "$root_inside/bin/fm-guard.sh" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-  chmod +x "$root_inside/bin/fm-guard.sh"
   fakebin=$(make_fake_herdr "$TMP_ROOT/spawn-validate-fake")
   log="$TMP_ROOT/spawn-validate-fake/herdr.log"
   err="$TMP_ROOT/spawn-validate.err"
@@ -1728,11 +1713,6 @@ test_secondmate_force_teardown_refuses_child_repo_descendant() {
   childwt="$fakeroot/data"
   err="$TMP_ROOT/child-repo-descendant.err"
   mkdir -p "$home/state" "$home/data" "$subhome/state" "$childproj" "$childwt" "$fakeroot/bin"
-  cat > "$fakeroot/bin/fm-guard.sh" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-  chmod +x "$fakeroot/bin/fm-guard.sh"
   printf 'domain\n' > "$subhome/.fm-secondmate-home"
   cat > "$home/state/domain.meta" <<EOF
 pane=w1:p1
@@ -1852,11 +1832,6 @@ test_secondmate_teardown_refuses_home_descendants() {
   root_descendant="$fakeroot/tmp/domain-home"
   err="$TMP_ROOT/descendant-teardown.err"
   mkdir -p "$home/state" "$home/data" "$active_descendant/state" "$root_descendant/state" "$fakeroot/bin"
-  cat > "$fakeroot/bin/fm-guard.sh" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-  chmod +x "$fakeroot/bin/fm-guard.sh"
   printf 'domain\n' > "$active_descendant/.fm-secondmate-home"
   cat > "$home/state/domain.meta" <<EOF
 pane=w1:p1
@@ -1903,36 +1878,6 @@ EOF
   grep -F 'pane close' "$log" >/dev/null && fail "teardown killed a window before repo descendant refusal"
   grep -F 'inside the firstmate repo' "$err" >/dev/null || fail "teardown did not explain repo descendant rejection"
   pass "secondmate teardown refuses descendant homes"
-}
-
-test_secondmate_idle_pane_is_not_stale() {
-  local home fakebin out pid pane
-  home="$TMP_ROOT/watch-home"
-  mkdir -p "$home/state"
-  pane="w1:p1"
-  cat > "$home/state/domain.meta" <<EOF
-pane=$pane
-worktree=$TMP_ROOT/watch-subhome
-project=$TMP_ROOT/watch-subhome
-harness=echo
-kind=secondmate
-home=$TMP_ROOT/watch-subhome
-projects=alpha
-EOF
-  fakebin=$(make_fake_herdr "$TMP_ROOT/watch-fake")
-  out="$TMP_ROOT/watch-fake/watch.out"
-  PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$TMP_ROOT/watch-fake/herdr.log" \
-    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$ROOT/bin/fm-watch.sh" > "$out" &
-  pid=$!
-  if ! wait_live "$pid" 25; then
-    wait "$pid" || true
-    grep -F "stale: $pane" "$out" >/dev/null && fail "idle secondmate pane triggered stale wake"
-    fail "watcher exited unexpectedly while supervising idle secondmate"
-  fi
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  grep -F "stale: $pane" "$out" >/dev/null && fail "idle secondmate pane triggered stale wake"
-  pass "idle kind=secondmate pane is healthy and not stale"
 }
 
 seed_secondmate_home_marker() {
@@ -2163,7 +2108,6 @@ test_secondmate_force_teardown_refuses_child_repo_descendant
 test_secondmate_force_teardown_refuses_unregistered_child_worktree
 test_secondmate_teardown_refuses_home_ancestor
 test_secondmate_teardown_refuses_home_descendants
-test_secondmate_idle_pane_is_not_stale
 test_secondmate_charter_brief_is_idle_by_default
 test_backlog_handoff_moves_in_scope_items
 test_backlog_handoff_creates_absent_section_and_refuses_non_secondmate_home

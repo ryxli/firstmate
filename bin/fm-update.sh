@@ -32,8 +32,6 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 SECONDMATES_MD="$FM_HOME/data/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
 
-"$SCRIPT_DIR/fm-guard.sh" || true
-
 usage() { echo "usage: fm-update.sh [--help]" >&2; }
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then

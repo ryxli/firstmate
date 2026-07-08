@@ -34,7 +34,6 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
-"$FM_ROOT/bin/fm-guard.sh" || true
 ID=$1
 FORCE=${2:-}
 
