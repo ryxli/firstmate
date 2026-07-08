@@ -24,6 +24,23 @@
 #
 # All functions are set -u and set -e safe.
 
+# fm_json_get <key> [<key>...]: read a JSON object on stdin, walk the nested
+# keys given as positional arguments, and print the leaf value (or nothing on
+# any parse error / missing key). This is the canonical accessor for herdr's
+# one-shot JSON responses; prefer it over grep/sed on raw JSON.
+fm_json_get() {
+  python3 -c '
+import sys, json
+try:
+    v = json.load(sys.stdin)
+    for k in sys.argv[1:]:
+        v = v[k]
+    print(v)
+except Exception:
+    pass
+' "$@" 2>/dev/null || true
+}
+
 fm_meta_value() {
   local meta=$1 key=$2
   grep "^$key=" "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true

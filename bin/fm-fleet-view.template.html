@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="luxury">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Firstmate fleet view</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+<style>
+  /* layout safety: nested grid/flex children must be allowed to shrink */
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, h1, h2, h3, h4, li, dd, td, th, .badge, .label) { overflow-wrap: anywhere; }
+  :where(img, svg, video, canvas) { max-width: 100%; height: auto; }
+
+  /* fleet tree guides: a quiet vertical rail per nesting level */
+  .fv-children { padding-left: 0.95rem; border-left: 1px solid color-mix(in oklab, currentColor 14%, transparent); }
+  .fv-dot { width: 0.6rem; height: 0.6rem; border-radius: 9999px; flex: 0 0 auto; box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 8%, transparent); }
+  .fv-dot-working { background: var(--color-success); }
+  .fv-dot-done    { background: var(--color-info); }
+  .fv-dot-blocked { background: var(--color-warning); }
+  .fv-dot-idle    { background: color-mix(in oklab, var(--color-base-content) 35%, transparent); }
+  .fv-dot-unknown { background: var(--color-error); }
+  .fv-mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  .fv-truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* native disclosure styling */
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  .fv-caret { transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1); flex: 0 0 auto; opacity: 0.55; }
+  details[open] > summary .fv-caret { transform: rotate(90deg); }
+  .fv-row { transition: background-color 120ms ease; border-radius: 0.5rem; }
+  .fv-row:hover { background: color-mix(in oklab, var(--color-base-content) 5%, transparent); }
+  summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 0.5rem; }
+</style>
+</head>
+<body class="bg-base-200 text-base-content">
+<main class="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8 space-y-6">
+  <div id="fv-app" class="space-y-6"></div>
+  <noscript>
+    <div role="alert" class="alert alert-warning">
+      <span>This fleet view renders client side. Enable JavaScript to see the tree.</span>
+    </div>
+  </noscript>
+</main>
+
+<script type="application/json" id="fv-payload">__FLEET_PAYLOAD__</script>
+<script>
+(function () {
+  "use strict";
+
+  var GOOD = { working: true, idle: true, blocked: true, done: true };
+  var STATUS_ORDER = ["working", "blocked", "idle", "done", "unknown"];
+  var STATUS_META = {
+    working: { label: "working", dot: "fv-dot-working", text: "text-success" },
+    done:    { label: "done",    dot: "fv-dot-done",    text: "text-info" },
+    blocked: { label: "blocked", dot: "fv-dot-blocked", text: "text-warning" },
+    idle:    { label: "idle",    dot: "fv-dot-idle",    text: "text-base-content/60" },
+    unknown: { label: "unknown", dot: "fv-dot-unknown", text: "text-error" }
+  };
+
+  function normStatus(s) {
+    s = (s == null ? "" : String(s)).trim();
+    return STATUS_META[s] ? s : "unknown";
+  }
+  function statusMeta(s) { return STATUS_META[normStatus(s)]; }
+
+  // present a value, treating "" and the tool's "?" placeholder as absent
+  function present(v) {
+    if (v == null) return "";
+    v = String(v).trim();
+    return v === "?" ? "" : v;
+  }
+  function isOmp(pane) { return present(pane && pane.agent_identity).toLowerCase() === "omp"; }
+
+  // h(tag, attrs?, ...children): safe DOM builder. Text always via textContent.
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (!Object.prototype.hasOwnProperty.call(attrs, k)) continue;
+        var v = attrs[k];
+        if (v == null || v === false) continue;
+        if (k === "class") el.className = v;
+        else if (k === "text") el.textContent = v;
+        else if (k === "html") el.innerHTML = v;
+        else el.setAttribute(k, v);
+      }
+    }
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c == null || c === false) continue;
+      if (Array.isArray(c)) { for (var j = 0; j < c.length; j++) appendChild(el, c[j]); }
+      else appendChild(el, c);
+    }
+    return el;
+  }
+  function appendChild(el, c) {
+    if (c == null || c === false) return;
+    el.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+
+  function statusDot(s) { return h("span", { class: "fv-dot " + statusMeta(s).dot }); }
+
+  function caret() {
+    return h("svg", { class: "fv-caret", width: "12", height: "12", viewBox: "0 0 16 16",
+      fill: "none", stroke: "currentColor", "stroke-width": "2",
+      "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" },
+      h("polyline", { points: "6 4 11 8 6 12" }));
+  }
+
+  // small metadata badge; quiet by default, one tone for emphasis
+  function badge(text, tone) {
+    var cls = "badge badge-sm badge-soft" + (tone ? " badge-" + tone : "");
+    return h("span", { class: cls, text: text });
+  }
+  function ghostBadge(label, value) {
+    var b = h("span", { class: "badge badge-sm badge-ghost gap-1 fv-truncate", style: "max-width:100%" });
+    b.appendChild(h("span", { class: "opacity-50", text: label }));
+    b.appendChild(document.createTextNode(value));
+    return b;
+  }
+
+  function statusPill(s) {
+    var m = statusMeta(s);
+    return h("span", { class: "inline-flex items-center gap-1.5 text-xs font-medium " + m.text },
+      statusDot(s), h("span", { text: m.label }));
+  }
+
+  // ---- aggregation -------------------------------------------------------
+
+  function eachPane(home, cb) {
+    var ws = home.workspaces || [];
+    for (var a = 0; a < ws.length; a++) {
+      var tabs = ws[a].tabs || [];
+      for (var b = 0; b < tabs.length; b++) {
+        var panes = tabs[b].panes || [];
+        for (var c = 0; c < panes.length; c++) {
+          cb(panes[c], home);
+          var sm = panes[c].task && panes[c].task.secondmate;
+          if (sm) eachPane(sm, cb);
+        }
+      }
+    }
+    var reg = home.registered_secondmates || [];
+    for (var d = 0; d < reg.length; d++) eachPane(reg[d], cb);
+  }
+
+  function summarize(root) {
+    var counts = { working: 0, blocked: 0, idle: 0, done: 0, unknown: 0 };
+    var total = 0, homes = 1, warnings = [];
+    eachPane(root, function (pane, home) {
+      total++;
+      counts[normStatus(pane.agent_status)]++;
+      if (isOmp(pane) && !GOOD[normStatus(pane.agent_status)]) {
+        warnings.push({ pane: pane, home: home });
+      }
+    });
+    function countHomes(home) {
+      eachPane(home, function () {});
+      var reg = home.registered_secondmates || [];
+      var ws = home.workspaces || [];
+      for (var a = 0; a < ws.length; a++)
+        for (var b = 0; b < (ws[a].tabs || []).length; b++)
+          for (var c = 0; c < (ws[a].tabs[b].panes || []).length; c++) {
+            var sm = ws[a].tabs[b].panes[c].task && ws[a].tabs[b].panes[c].task.secondmate;
+            if (sm) { homes++; countHomes(sm); }
+          }
+      for (var d = 0; d < reg.length; d++) { homes++; countHomes(reg[d]); }
+    }
+    countHomes(root);
+    return { counts: counts, total: total, homes: homes, warnings: warnings };
+  }
+
+  // ---- rendering ---------------------------------------------------------
+
+  function identityChips(home) {
+    var chips = [];
+    var role = present(home.role);
+    var parent = present(home.parent);
+    var harness = present(home.harness);
+    var avail = present(home.availability);
+    if (role) chips.push(ghostBadge("role", role));
+    if (parent) chips.push(ghostBadge("parent", parent));
+    if (harness) chips.push(badge(harness, "primary"));
+    if (avail) chips.push(badge(avail, avail === "running" ? "success" : "neutral"));
+    return chips;
+  }
+
+  function fleetHeader(root, meta) {
+    var supervisor = present(root.supervisor) || "firstmate";
+    var src = meta && meta.source === "live" ? "live herdr session" : (meta && meta.source) || "snapshot";
+    var when = meta && meta.generated ? meta.generated : "";
+
+    var left = h("div", { class: "min-w-0 space-y-2" },
+      h("div", { class: "flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-base-content/45" },
+        h("span", { class: "fv-dot fv-dot-working", style: "box-shadow:none" }),
+        h("span", { text: "Firstmate fleet" })),
+      h("h1", { class: "text-3xl lg:text-4xl font-semibold leading-tight", text: supervisor }),
+      h("div", { class: "flex flex-wrap items-center gap-1.5" }, identityChips(root)),
+      h("p", { class: "fv-mono text-xs text-base-content/45 fv-truncate", title: present(root.home), text: present(root.home) }));
+
+    var right = h("div", { class: "shrink-0 text-right text-xs text-base-content/45 space-y-1" },
+      h("div", null, h("span", { class: "opacity-60", text: "source " }), src),
+      when ? h("div", null, h("span", { class: "opacity-60", text: "as of " }), when) : null,
+      present(root.session && root.session.current_pane)
+        ? h("div", { class: "fv-mono" }, h("span", { class: "opacity-60", text: "pane " }), present(root.session.current_pane))
+        : null);
+
+    return h("header", { class: "card bg-base-100 border border-base-content/10" },
+      h("div", { class: "card-body p-5 flex flex-col sm:flex-row sm:items-start gap-4 justify-between" }, left, right));
+  }
+
+  function summaryStrip(sum) {
+    var tiles = [];
+    tiles.push(h("div", { class: "rounded-xl bg-base-100 border border-base-content/10 px-4 py-3 col-span-2 sm:col-span-1 flex sm:flex-col items-baseline sm:items-start justify-between gap-1" },
+      h("div", { class: "text-[0.7rem] uppercase tracking-wider text-base-content/45", text: "agents" }),
+      h("div", { class: "flex items-baseline gap-2 min-w-0" },
+        h("span", { class: "text-3xl font-semibold leading-none", text: String(sum.total) }),
+        h("span", { class: "text-xs text-base-content/45 fv-truncate", text: sum.homes > 1 ? sum.homes + " homes" : "1 home" }))));
+
+    for (var i = 0; i < STATUS_ORDER.length; i++) {
+      var key = STATUS_ORDER[i];
+      var m = STATUS_META[key];
+      var live = sum.counts[key] > 0;
+      tiles.push(h("div", { class: "rounded-xl bg-base-100 border border-base-content/10 px-4 py-3 flex flex-col gap-1" + (live ? "" : " opacity-55") },
+        h("div", { class: "text-[0.7rem] uppercase tracking-wider text-base-content/45 flex items-center gap-1.5" },
+          h("span", { class: "fv-dot " + m.dot, style: "box-shadow:none" }), m.label),
+        h("div", { class: "text-2xl font-semibold leading-none " + (live ? m.text : "text-base-content/30"),
+          text: String(sum.counts[key]) })));
+    }
+
+    return h("section", { class: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5" }, tiles);
+  }
+
+  function warningBanner(warnings) {
+    if (!warnings.length) return null;
+    var items = warnings.map(function (w) {
+      var label = present(w.pane.label) || present(w.pane.task && w.pane.task.worker) || "unlabeled pane";
+      var pid = present(w.pane.id) || "no pane id";
+      return h("li", { class: "flex flex-wrap items-baseline gap-x-2 gap-y-0.5" },
+        h("span", { class: "font-medium", text: label }),
+        h("span", { class: "fv-mono text-xs opacity-70", text: pid }),
+        h("span", { class: "text-xs opacity-70", text: "status " + normStatus(w.pane.agent_status) }));
+    });
+    return h("section", { role: "alert", class: "alert alert-error items-start" },
+      h("svg", { xmlns: "http://www.w3.org/2000/svg", class: "h-6 w-6 shrink-0", fill: "none",
+        viewBox: "0 0 24 24", stroke: "currentColor", "stroke-width": "2", "aria-hidden": "true" },
+        h("path", { "stroke-linecap": "round", "stroke-linejoin": "round",
+          d: "M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" })),
+      h("div", { class: "min-w-0 space-y-1" },
+        h("div", { class: "font-semibold",
+          text: "Supervision blindness: " + warnings.length + " omp " + (warnings.length === 1 ? "pane is" : "panes are") + " not reporting status" }),
+        h("p", { class: "text-sm opacity-80",
+          text: "These panes carry agent identity omp but report a non-bound status. That is the agent-rename trap: a herdr agent rename detaches status. Check for an accidental rename; relabel with herdr pane rename only." }),
+        h("ul", { class: "text-sm space-y-0.5 mt-1" }, items)));
+  }
+
+  function taskBadges(task) {
+    var out = [];
+    var kind = present(task.kind);
+    var mode = present(task.mode);
+    var yolo = present(task.yolo);
+    var domain = present(task.domain);
+    if (kind) {
+      var tone = kind === "secondmate" ? "secondary" : (kind === "scout" ? "accent" : "primary");
+      out.push(badge(kind, tone));
+    }
+    if (mode) out.push(badge(mode, "neutral"));
+    if (yolo === "on") out.push(badge("yolo", "warning"));
+    if (domain) out.push(ghostBadge("domain", domain));
+    return out;
+  }
+
+  function paneNode(pane, depth) {
+    var task = pane.task || {};
+    var label = present(pane.label) || present(task.worker);
+    var labelEl = label
+      ? h("span", { class: "font-medium text-[0.95rem] leading-tight" }, label)
+      : h("span", { class: "italic text-base-content/45 text-[0.95rem]", text: "unlabeled" });
+
+    var idText = present(task.id);
+    var paneId = present(pane.id);
+    var degraded = present(task.degraded);
+
+    var metaRow = h("div", { class: "flex flex-wrap items-center gap-1.5 mt-1.5" }, taskBadges(task));
+    var identity = present(pane.agent_identity);
+    if (identity) metaRow.appendChild(
+      h("span", { class: "badge badge-sm badge-outline gap-1 opacity-70" },
+        h("span", { class: "opacity-60", text: "agent" }),
+        document.createTextNode(identity)));
+
+    var idLine = h("div", { class: "flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1.5 text-xs text-base-content/45" });
+    if (idText) idLine.appendChild(h("span", { class: "fv-mono" },
+      h("span", { class: "opacity-60", text: "task " }), idText));
+    else idLine.appendChild(h("span", { class: "italic opacity-60", text: "no task id" }));
+    if (!paneId) idLine.appendChild(h("span", { class: "fv-mono opacity-60", text: "pane not placed" }));
+
+    var cwd = present(pane.cwd);
+    var cwdLine = cwd
+      ? h("div", { class: "fv-mono text-xs text-base-content/40 fv-truncate mt-1", title: cwd, text: cwd })
+      : null;
+
+    var degradedTag = (degraded && degraded !== 'live')
+      ? h("span", { class: "badge badge-sm badge-soft badge-error gap-1", title: "herdr could not confirm this pane live" },
+          "stale: " + degraded)
+      : null;
+
+    var card = h("div", { class: "fv-row px-3 py-2.5 flex items-start gap-2.5" },
+      statusDot(pane.agent_status),
+      h("div", { class: "min-w-0 flex-1" },
+        h("div", { class: "flex items-center justify-between gap-3 flex-wrap" },
+          h("div", { class: "min-w-0 flex items-center gap-2 flex-wrap" }, labelEl, degradedTag),
+          statusPill(pane.agent_status)),
+        metaRow, idLine, cwdLine));
+
+    var wrap = h("div", null, card);
+
+    // recurse into a secondmate home nested under this pane's task
+    if (task.secondmate) {
+      wrap.appendChild(h("div", { class: "fv-children ml-3 mt-1 mb-1" },
+        homeNode(task.secondmate, depth + 1, true)));
+    }
+    return wrap;
+  }
+
+  function disclosure(open, summaryEl, bodyEl) {
+    var d = h("details", open ? { open: "" } : null);
+    var s = h("summary", { class: "fv-row px-2 py-2" }, summaryEl);
+    d.appendChild(s);
+    d.appendChild(bodyEl);
+    return d;
+  }
+
+  function tabNode(tab) {
+    var label = present(tab.label);
+    var panes = tab.panes || [];
+    var summary = h("div", { class: "flex items-center gap-2 min-w-0" },
+      caret(),
+      statusDot(tab.status),
+      h("span", { class: "text-[0.7rem] uppercase tracking-wider text-base-content/40", text: "tab" }),
+      label ? h("span", { class: "font-medium truncate", text: label })
+            : h("span", { class: "italic text-base-content/45", text: "unlabeled" }),
+      present(tab.id) ? h("span", { class: "fv-mono text-xs text-base-content/35", text: present(tab.id) }) : null,
+      h("span", { class: "ml-auto text-xs text-base-content/40", text: panes.length + (panes.length === 1 ? " pane" : " panes") }));
+
+    var body = h("div", { class: "fv-children ml-3 mt-1 space-y-1" });
+    if (!panes.length) body.appendChild(h("div", { class: "px-3 py-2 text-sm text-base-content/45 italic", text: "no panes" }));
+    for (var i = 0; i < panes.length; i++) body.appendChild(paneNode(panes[i], 0));
+    return disclosure(true, summary, body);
+  }
+
+  function workspaceNode(ws) {
+    var label = present(ws.label);
+    var tabs = ws.tabs || [];
+    var paneCount = 0;
+    for (var t = 0; t < tabs.length; t++) paneCount += (tabs[t].panes || []).length;
+
+    var summary = h("div", { class: "flex items-center gap-2 min-w-0" },
+      caret(),
+      statusDot(ws.status),
+      h("span", { class: "text-[0.7rem] uppercase tracking-wider text-base-content/40", text: "workspace" }),
+      label ? h("span", { class: "font-semibold truncate", text: label })
+            : h("span", { class: "italic text-base-content/45", text: "unlabeled" }),
+      present(ws.id) ? h("span", { class: "fv-mono text-xs text-base-content/35", text: present(ws.id) }) : null,
+      h("span", { class: "ml-auto text-xs text-base-content/40",
+        text: tabs.length + (tabs.length === 1 ? " tab" : " tabs") + " / " + paneCount + (paneCount === 1 ? " pane" : " panes") }));
+
+    var body = h("div", { class: "fv-children ml-3 mt-1.5 space-y-1.5" });
+    for (var i = 0; i < tabs.length; i++) body.appendChild(tabNode(tabs[i]));
+    return disclosure(true, summary, h("div", { class: "pb-1" }, body));
+  }
+
+  function emptyState(home) {
+    return h("div", { class: "card bg-base-100 border border-dashed border-base-content/15" },
+      h("div", { class: "card-body items-center text-center py-12 gap-2" },
+        h("div", { class: "fv-dot fv-dot-idle", style: "width:0.85rem;height:0.85rem;box-shadow:none" }),
+        h("h2", { class: "text-lg font-medium", text: "No agents in flight" }),
+        h("p", { class: "text-sm text-base-content/55 max-w-sm",
+          text: (present(home.supervisor) || "This firstmate") + " has no live crewmates right now. Spawn a task to populate the fleet." })));
+  }
+
+  function homeNode(home, depth, nested) {
+    var container = h("div", { class: "space-y-3" });
+
+    if (nested) {
+      // compact identity strip for a recursed secondmate home
+      var chips = identityChips(home);
+      var strip = h("div", { class: "flex items-center gap-2 flex-wrap rounded-lg bg-base-100 border border-base-content/10 px-3 py-2" },
+        h("span", { class: "text-[0.7rem] uppercase tracking-wider text-secondary/80 font-semibold", text: "secondmate home" }),
+        h("span", { class: "font-semibold", text: present(home.supervisor) || "secondmate" }),
+        chips,
+        h("span", { class: "fv-mono text-xs text-base-content/40 fv-truncate basis-full sm:basis-auto sm:ml-auto",
+          title: present(home.home), text: present(home.home) }));
+      container.appendChild(strip);
+    }
+
+    var workspaces = home.workspaces || [];
+    var registered = home.registered_secondmates || [];
+
+    if (!workspaces.length && !registered.length) {
+      container.appendChild(nested
+        ? h("div", { class: "text-sm text-base-content/45 italic px-3 pb-1", text: "no live workspaces in this home" })
+        : emptyState(home));
+      return container;
+    }
+
+    if (workspaces.length) {
+      var tree = h("div", { class: "card bg-base-100 border border-base-content/10" });
+      var treeBody = h("div", { class: "card-body p-3 sm:p-4 space-y-2" });
+      for (var i = 0; i < workspaces.length; i++) treeBody.appendChild(workspaceNode(workspaces[i]));
+      tree.appendChild(treeBody);
+      container.appendChild(tree);
+    } else if (nested) {
+      container.appendChild(h("div", { class: "text-sm text-base-content/45 italic px-3 pb-1", text: "no live workspaces in this home" }));
+    }
+
+    if (registered.length) {
+      var regWrap = h("div", { class: "space-y-2" },
+        h("div", { class: "flex items-center gap-2 text-xs uppercase tracking-wider text-base-content/40 px-1" },
+          h("span", { class: "fv-dot fv-dot-idle", style: "box-shadow:none" }),
+          "registered secondmates without a live pane"));
+      for (var r = 0; r < registered.length; r++)
+        regWrap.appendChild(h("div", { class: "fv-children ml-1" }, homeNode(registered[r], depth + 1, true)));
+      container.appendChild(regWrap);
+    }
+    return container;
+  }
+
+  // ---- boot --------------------------------------------------------------
+
+  function render() {
+    var app = document.getElementById("fv-app");
+    var payload;
+    try {
+      payload = JSON.parse(document.getElementById("fv-payload").textContent);
+    } catch (e) {
+      app.appendChild(h("div", { role: "alert", class: "alert alert-error" },
+        h("span", { text: "Could not parse fleet data: " + e.message })));
+      return;
+    }
+    var root = (payload && payload.fleet) || {};
+    var meta = payload || {};
+    var sum = summarize(root);
+
+    app.appendChild(fleetHeader(root, meta));
+    app.appendChild(summaryStrip(sum));
+    var banner = warningBanner(sum.warnings);
+    if (banner) app.appendChild(banner);
+    app.appendChild(homeNode(root, 0, false));
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
