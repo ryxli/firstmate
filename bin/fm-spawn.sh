@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a git worktree, or a secondmate in
 # its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> [harness|launch-command] [--scout]
-#        fm-spawn.sh <task-id> [<firstmate-home>] [harness|launch-command] --secondmate
+# Usage: fm-spawn.sh <task-id> <project-dir> [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>]
+#        fm-spawn.sh <task-id> [<firstmate-home>] [harness|launch-command] --secondmate [--workspace=<id>] [--tab=<id>]
 #   With no harness arg, the harness comes from fm-harness.sh crew (config/crew-harness,
 #   falling back to firstmate's own harness). A bare adapter name (omp|claude|codex|
 #   opencode|pi) overrides it for this spawn. A non-flag string containing whitespace
@@ -32,11 +32,15 @@ PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 SUB_HOME_MARKER=".fm-secondmate-home"
 
 KIND=ship
+WORKSPACE=""
+TAB=""
 POS=()
 for a in "$@"; do
   case "$a" in
     --scout) KIND=scout ;;
     --secondmate) KIND=secondmate ;;
+    --workspace=*) WORKSPACE=${a#*=} ;;
+    --tab=*) TAB=${a#*=} ;;
     *) POS+=("$a") ;;
   esac
 done
@@ -326,7 +330,14 @@ fi
 # addressable by name. The worktree (or secondmate home) is the --cwd.
 # herdr agent start outputs JSON with pane_id in the result.
 AGENT_NAME="fm-$ID"
-LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" --no-focus -- sh -c "$LAUNCH_CMD" 2>&1) || {
+# Placement at init (herdr agent start names the agent from the first positional -
+# never a post-hoc `herdr agent rename`, which pins agent_status to unknown). An
+# optional --workspace=/--tab= lands the pane in a chosen workspace/tab instead of
+# whatever herdr workspace is currently active.
+PLACE_ARGS=()
+if [ -n "$WORKSPACE" ]; then PLACE_ARGS+=(--workspace "$WORKSPACE"); fi
+if [ -n "$TAB" ]; then PLACE_ARGS+=(--tab "$TAB"); fi
+LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" ${PLACE_ARGS[@]+"${PLACE_ARGS[@]}"} --no-focus -- sh -c "$LAUNCH_CMD" 2>&1) || {
   # Clean up the worktree we just created before failing.
   if [ "$KIND" != secondmate ] && [ -d "$WT" ]; then
     git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
