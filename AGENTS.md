@@ -139,6 +139,15 @@ state/               volatile runtime signals; gitignored
   .status-internal.log  non-relevant status lines appended by the supervision extension (trimmed to last 500 lines); never touch
 ```
 
+### Ship omp extensions
+
+omp extensions that drive fleet supervision live under `.omp/extensions/` in this repo.
+That directory is the single canonical source: extensions are not installed globally into `~/.omp/agent/extensions/` and not copied into dotfiles, so there is no version drift between homes.
+omp discovers them for the main home through project-dir lookup (`<cwd>/.omp/extensions` at session start), so running omp from this repo root includes them automatically with no extra steps.
+Each persistent sub-home gets one symlink per extension entry pointing back to the canonical path; `bin/fm-home-seed.sh` creates these symlinks automatically when provisioning a new home.
+To refresh symlinks in an existing home without re-seeding, run `bin/fm-link-ship-ext.sh <id>` (resolves the home from `data/secondmates.md`) or `bin/fm-link-ship-ext.sh <home-path>`.
+The link step is idempotent: a symlink that already points to the canonical entry is a no-op, a stale or wrong symlink is refreshed, and a real file the home provides itself is left untouched.
+
 Task ids are short kebab slugs with a random suffix, e.g. `fix-login-k3`.
 The herdr pane for a task is named `fm-<id>` (via `herdr agent start "fm-<id>"`); the pane id (e.g. `w8:p3`) is stored as `pane=` in the task's meta.
 

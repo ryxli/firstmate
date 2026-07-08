@@ -2057,6 +2057,145 @@ EOF
   pass "fm-backlog-handoff creates absent sections and refuses unsafe homes"
 }
 
+test_home_seed_ship_extensions_linked() {
+  # A pre-created minimal home (not a git clone) has no .omp/extensions/ entries.
+  # Seeding it should create symlinks for every canonical extension.
+  local home subhome fakebin ext_src entry name link target found
+  home="$TMP_ROOT/ext-link-home"
+  subhome="$TMP_ROOT/ext-link-subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  make_git_project "$home/projects/alpha"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/ext-link-alpha.git"
+  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  fakebin=$(make_fake_no_mistakes "$TMP_ROOT/ext-link-nm-fake")
+
+  # Pre-create a minimal firstmate home without .omp/extensions/ so ensure_home
+  # uses it as-is (no git clone) and install_ship_extensions creates symlinks.
+  mkdir -p "$subhome/bin"
+  printf '# Firstmate\n' > "$subhome/AGENTS.md"
+
+  PATH="$fakebin:$PATH" FM_HOME="$home" \
+    FM_SECONDMATE_CHARTER='ext link scope' \
+    FM_SECONDMATE_SCOPE='ext link scope' \
+    "$ROOT/bin/fm-home-seed.sh" extlink "$subhome" alpha >/dev/null \
+    || fail "seed failed for ext link test"
+
+  ext_src="$ROOT/.omp/extensions"
+  [ -d "$ext_src" ] || fail "canonical extensions dir missing at $ext_src"
+  found=0
+  for entry in "$ext_src"/*; do
+    [ -e "$entry" ] || continue
+    found=$((found + 1))
+    name=$(basename "$entry")
+    link="$subhome/.omp/extensions/$name"
+    [ -L "$link" ] || fail "extension symlink not created for $name"
+    target=$(readlink "$link")
+    [ "$target" = "$entry" ] || fail "extension symlink $name points to wrong target: $target"
+  done
+  [ "$found" -gt 0 ] || fail "canonical extensions dir had no entries"
+  pass "home seeding creates extension symlinks pointing at canonical"
+}
+
+test_home_seed_ship_extensions_idempotent() {
+  # Seed a pre-created minimal home, then fm-link-ship-ext again - should be a no-op.
+  local home subhome fakebin out ext_src entry name link target
+  home="$TMP_ROOT/ext-idem-home"
+  subhome="$TMP_ROOT/ext-idem-subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  make_git_project "$home/projects/alpha"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/ext-idem-alpha.git"
+  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  fakebin=$(make_fake_no_mistakes "$TMP_ROOT/ext-idem-nm-fake")
+  mkdir -p "$subhome/bin"
+  printf '# Firstmate\n' > "$subhome/AGENTS.md"
+
+  PATH="$fakebin:$PATH" FM_HOME="$home" \
+    FM_SECONDMATE_CHARTER='ext idem scope' \
+    FM_SECONDMATE_SCOPE='ext idem scope' \
+    "$ROOT/bin/fm-home-seed.sh" extidem "$subhome" alpha >/dev/null \
+    || fail "seed failed for ext idempotent test"
+
+  # fm-link-ship-ext on an already-linked home should report no changes
+  out=$("$ROOT/bin/fm-link-ship-ext.sh" "$subhome")
+  printf '%s\n' "$out" | grep -F 'up to date' >/dev/null \
+    || fail "fm-link-ship-ext reported changes on already-correct symlinks: $out"
+
+  # Symlinks still correct after re-run
+  ext_src="$ROOT/.omp/extensions"
+  for entry in "$ext_src"/*; do
+    [ -e "$entry" ] || continue
+    name=$(basename "$entry")
+    link="$subhome/.omp/extensions/$name"
+    [ -L "$link" ] || fail "symlink gone after idempotent re-run: $name"
+    target=$(readlink "$link")
+    [ "$target" = "$entry" ] || fail "symlink $name changed after idempotent re-run"
+  done
+  pass "fm-link-ship-ext is idempotent over already-correct symlinks"
+}
+
+test_home_seed_ship_extensions_skips_real_file() {
+  local home subhome fakebin ext_src first_entry name content
+  home="$TMP_ROOT/ext-skip-home"
+  subhome="$TMP_ROOT/ext-skip-subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  make_git_project "$home/projects/alpha"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/ext-skip-alpha.git"
+  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  fakebin=$(make_fake_no_mistakes "$TMP_ROOT/ext-skip-nm-fake")
+
+  ext_src="$ROOT/.omp/extensions"
+  first_entry=
+  for e in "$ext_src"/*; do
+    [ -e "$e" ] || continue
+    first_entry="$e"
+    break
+  done
+  [ -n "$first_entry" ] || { pass "no extensions to test skip; vacuous pass"; return; }
+  name=$(basename "$first_entry")
+  # Pre-create a minimal home, then place a real file at the extension slot
+  mkdir -p "$subhome/bin" "$subhome/.omp/extensions"
+  printf '# Firstmate\n' > "$subhome/AGENTS.md"
+  printf 'real file content\n' > "$subhome/.omp/extensions/$name"
+
+  PATH="$fakebin:$PATH" FM_HOME="$home" \
+    FM_SECONDMATE_CHARTER='ext skip scope' \
+    FM_SECONDMATE_SCOPE='ext skip scope' \
+    "$ROOT/bin/fm-home-seed.sh" extskip "$subhome" alpha >/dev/null \
+    || fail "seed failed for ext skip test"
+
+  # The real file must still be a regular file, not replaced by a symlink
+  [ -L "$subhome/.omp/extensions/$name" ] \
+    && fail "seed clobbered real file with a symlink: $name"
+  content=$(cat "$subhome/.omp/extensions/$name")
+  [ "$content" = "real file content" ] || fail "real file content changed after seed"
+  pass "home seeding skips real files at extension slot paths"
+}
+
+test_link_ship_ext_resolves_id_from_registry() {
+  local main_home sm_home ext_src entry name link target
+  main_home="$TMP_ROOT/ext-id-main"
+  sm_home="$TMP_ROOT/ext-id-sm"
+  mkdir -p "$main_home/data" "$sm_home"
+  printf '%s\n' "- extid - ext id test (home: $sm_home; scope: x; projects: alpha; added 2026-06-22)" \
+    > "$main_home/data/secondmates.md"
+
+  ext_src="$ROOT/.omp/extensions"
+  [ -d "$ext_src" ] || { pass "no extensions dir; vacuous pass"; return; }
+
+  FM_HOME="$main_home" "$ROOT/bin/fm-link-ship-ext.sh" extid >/dev/null \
+    || fail "fm-link-ship-ext failed to resolve id from secondmates.md"
+
+  for entry in "$ext_src"/*; do
+    [ -e "$entry" ] || continue
+    name=$(basename "$entry")
+    link="$sm_home/.omp/extensions/$name"
+    [ -L "$link" ] || fail "id-resolved link not created for $name"
+    target=$(readlink "$link")
+    [ "$target" = "$entry" ] || fail "id-resolved link $name has wrong target: $target"
+  done
+  pass "fm-link-ship-ext resolves secondmate id from registry to install symlinks"
+}
+
 test_fm_home_parameterization
 test_lock_status_is_per_home
 test_home_seed_registry_scope_and_overlapping_projects
@@ -2110,3 +2249,7 @@ test_secondmate_teardown_refuses_home_descendants
 test_secondmate_charter_brief_is_idle_by_default
 test_backlog_handoff_moves_in_scope_items
 test_backlog_handoff_creates_absent_section_and_refuses_non_secondmate_home
+test_home_seed_ship_extensions_linked
+test_home_seed_ship_extensions_idempotent
+test_home_seed_ship_extensions_skips_real_file
+test_link_ship_ext_resolves_id_from_registry

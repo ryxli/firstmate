@@ -36,6 +36,7 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 usage() {
   echo "usage: fm-home-seed.sh <id> <home|-> <project>..." >&2
   echo "       fm-home-seed.sh validate" >&2
+  echo "       fm-link-ship-ext.sh <id|home-path>  # refresh extension symlinks without re-seeding" >&2
 }
 
 registry_home_for_line() {
@@ -597,6 +598,8 @@ SEED_PARENT_BRIEF_DIR_CREATED=0
 SEED_SUB_REG_EXISTED=0
 SEED_CHARTER_EXISTED=0
 SEED_MARKER_EXISTED=0
+SEED_EXT_DST_EXISTED=0
+SEED_CREATED_EXT_LINKS_FILE=
 
 restore_seed_file() {
   local existed=$1 backup=$2 path=$3
@@ -710,6 +713,16 @@ seed_rollback() {
           seed_remove_created_project "$project_path"
         done < "$SEED_CREATED_PROJECTS_FILE"
       fi
+      if [ -n "${SEED_CREATED_EXT_LINKS_FILE:-}" ] && [ -f "$SEED_CREATED_EXT_LINKS_FILE" ]; then
+        while IFS= read -r link_path; do
+          [ -n "$link_path" ] || continue
+          rm -f "$link_path" 2>/dev/null || true
+        done < "$SEED_CREATED_EXT_LINKS_FILE"
+      fi
+      if [ "${SEED_EXT_DST_EXISTED:-1}" = 0 ] && [ -n "${SEED_HOME:-}" ]; then
+        rmdir "$SEED_HOME/.omp/extensions" 2>/dev/null || true
+        rmdir "$SEED_HOME/.omp" 2>/dev/null || true
+      fi
       if [ -n "${SEED_BACKUP_DIR:-}" ] && [ "${SEED_HOME_BACKED_UP:-0}" = 1 ]; then
         restore_seed_file "$SEED_MARKER_EXISTED" "$SEED_BACKUP_DIR/marker" "$SEED_HOME/$SUB_HOME_MARKER"
         restore_seed_file "$SEED_CHARTER_EXISTED" "$SEED_BACKUP_DIR/charter.md" "$SEED_HOME/data/charter.md"
@@ -812,6 +825,43 @@ write_registry() {
   mv "$tmp" "$REG"
 }
 
+install_ship_extensions() {
+  # Install a symlink per entry in .omp/extensions/ (canonical) into <home>/.omp/extensions/.
+  # Idempotent: correct symlink = no-op; stale/wrong symlink = refreshed;
+  # real file the home provides itself = left alone.
+  # Writes created/replaced symlink paths to SEED_CREATED_EXT_LINKS_FILE for rollback.
+  local home=$1
+  local ext_src ext_dst entry name link_path canonical existing_target
+  ext_src="$(cd "$SCRIPT_DIR/.." && pwd)/.omp/extensions"
+  [ -d "$ext_src" ] || return 0
+  ext_dst="$home/.omp/extensions"
+  if [ -d "$ext_dst" ]; then
+    SEED_EXT_DST_EXISTED=1
+  else
+    SEED_EXT_DST_EXISTED=0
+    mkdir -p "$ext_dst"
+  fi
+  for entry in "$ext_src"/*; do
+    [ -e "$entry" ] || continue
+    name=$(basename "$entry")
+    link_path="$ext_dst/$name"
+    canonical="$entry"
+    if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
+      continue
+    fi
+    if [ -L "$link_path" ]; then
+      existing_target=$(readlink "$link_path")
+      [ "$existing_target" = "$canonical" ] && continue
+      rm -f "$link_path"
+      ln -s "$canonical" "$link_path"
+      printf '%s\n' "$link_path" >> "${SEED_CREATED_EXT_LINKS_FILE:-/dev/null}"
+    else
+      ln -s "$canonical" "$link_path"
+      printf '%s\n' "$link_path" >> "${SEED_CREATED_EXT_LINKS_FILE:-/dev/null}"
+    fi
+  done
+}
+
 seed_home() {
   local id=$1 requested_home=$2 requested_abs home projects_csv project project_dst charter_summary charter_scope
   shift 2
@@ -834,6 +884,9 @@ seed_home() {
   SEED_BACKUP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-home-seed.XXXXXX")
   SEED_CREATED_PROJECTS_FILE="$SEED_BACKUP_DIR/created-projects"
   : > "$SEED_CREATED_PROJECTS_FILE"
+  SEED_CREATED_EXT_LINKS_FILE="$SEED_BACKUP_DIR/created-ext-links"
+  SEED_EXT_DST_EXISTED=0
+  : > "$SEED_CREATED_EXT_LINKS_FILE"
   SEED_PARENT_REG_EXISTED=0
   SEED_PARENT_BRIEF="$DATA/$id/brief.md"
   SEED_PARENT_BRIEF_CREATED=0
@@ -882,6 +935,7 @@ seed_home() {
     cp "$home/$SUB_HOME_MARKER" "$SEED_BACKUP_DIR/marker"
   fi
   SEED_HOME_BACKED_UP=1
+  install_ship_extensions "$home" || return 1
 
   if [ ! -f "$SEED_PARENT_BRIEF" ]; then
     [ -n "${FM_SECONDMATE_CHARTER:-}" ] || {
