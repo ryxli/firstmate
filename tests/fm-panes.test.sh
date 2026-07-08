@@ -36,7 +36,7 @@ case "${1:-}" in
     case "${2:-}" in
       list)
         cat << 'JSON'
-{"id":"cli:pane:list","result":{"panes":[{"agent":"omp","agent_status":"working","display_agent":"Keel","pane_id":"wV:p3H"},{"agent_status":"unknown","pane_id":"wV:p1X"},{"agent":"omp","agent_status":"idle","display_agent":"Fran","pane_id":"w24:pD"},{"agent":"omp","agent_status":"idle","display_agent":"Atlas","pane_id":"w2C:p9"}],"type":"pane_list"}}
+{"id":"cli:pane:list","result":{"panes":[{"agent":"omp","agent_status":"working","display_agent":"Keel","pane_id":"wV:p3H"},{"agent_status":"unknown","pane_id":"wV:p1X","cwd":"/srv/hookless"},{"agent":"omp","agent_status":"idle","display_agent":"Fran","pane_id":"w24:pD"},{"agent":"omp","agent_status":"idle","display_agent":"Atlas","pane_id":"w2C:p9"}],"type":"pane_list"}}
 JSON
         exit 0
         ;;
@@ -118,10 +118,52 @@ SH
   pass "exits non-zero when herdr fails"
 }
 
+test_all_flag_shows_agentless_pane() {
+  local out
+  out=$(PATH="$BIN_DIR:$BASE_PATH" "$ROOT/bin/fm-panes.sh" --all) || fail "script exited non-zero with --all"
+
+  # The agentless pane must appear in the output.
+  printf '%s\n' "$out" | grep -q '^-' \
+    || fail "--all did not include the agentless pane: $out"
+  # It must carry the cwd as the 4th field.
+  printf '%s\n' "$out" | grep -qF '/srv/hookless' \
+    || fail "--all agentless pane missing cwd field: $out"
+  pass "--all includes agentless panes with cwd column"
+}
+
+test_all_flag_output_format_agentless() {
+  local out line
+  out=$(PATH="$BIN_DIR:$BASE_PATH" "$ROOT/bin/fm-panes.sh" --all) || fail "script exited non-zero"
+  line=$(printf '%s\n' "$out" | grep '^-')
+  [ "$line" = "-	unknown	wV:p1X	/srv/hookless" ] \
+    || fail "--all agentless line format wrong: '$line'"
+  pass "--all agentless pane format is -<TAB>unknown<TAB>pane_id<TAB>cwd"
+}
+
+test_all_flag_total_count() {
+  local out count
+  out=$(PATH="$BIN_DIR:$BASE_PATH" "$ROOT/bin/fm-panes.sh" --all) || fail "script exited non-zero"
+  count=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
+  [ "$count" -eq 4 ] || fail "--all should return 4 panes (3 agents + 1 agentless), got $count"
+  pass "--all returns all panes including agentless"
+}
+
+test_default_still_excludes_agentless() {
+  local out
+  out=$(PATH="$BIN_DIR:$BASE_PATH" "$ROOT/bin/fm-panes.sh") || fail "script exited non-zero"
+  printf '%s\n' "$out" | grep -q '^-' \
+    && fail "agentless pane appeared in default (no --all) output"
+  pass "default mode still excludes agentless panes"
+}
+
 test_lists_panes_with_agents
 test_filters_case_insensitive
 test_filters_uppercase
 test_no_match_returns_empty
 test_panes_without_agent_excluded
 test_output_format
+test_all_flag_shows_agentless_pane
+test_all_flag_output_format_agentless
+test_all_flag_total_count
+test_default_still_excludes_agentless
 test_herdr_error_exits_nonzero

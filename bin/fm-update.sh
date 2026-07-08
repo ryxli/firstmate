@@ -55,12 +55,12 @@ default_branch() {
     echo "${ref#origin/}"
     return 0
   fi
-  for branch in main master; do
-    if git -C "$dir" show-ref --verify --quiet "refs/heads/$branch"; then
-      echo "$branch"
-      return 0
-    fi
-  done
+  # origin/HEAD not cached locally; query the remote directly.
+  branch=$(git -C "$dir" remote show origin 2>/dev/null | awk '/HEAD branch:/{print $NF}')
+  if [ -n "$branch" ] && [ "$branch" != "(unknown)" ]; then
+    echo "$branch"
+    return 0
+  fi
   return 1
 }
 
@@ -205,6 +205,8 @@ fetch_once() {
     esac
   fi
   if git -C "$dir" fetch origin --prune --quiet 2>/dev/null; then
+    # Refresh cached origin/HEAD so a renamed default branch is detected correctly.
+    git -C "$dir" remote set-head origin --auto >/dev/null 2>&1 || true
     [ -n "$common" ] && FETCHED="$FETCHED $common"
     return 0
   fi
@@ -248,7 +250,7 @@ ff_target() {
     return 0
   fi
   if ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "$label: skipped: not a git repo"
+    echo "$label: skipped: not a git repo ($dir)"
     return 0
   fi
   if ! git -C "$dir" remote get-url origin >/dev/null 2>&1; then
@@ -277,8 +279,19 @@ ff_target() {
     return 0
   fi
   if [ -n "$cur" ] && [ "$cur" != "$default" ]; then
-    echo "$label: skipped: on $cur, expected $default"
-    return 0
+    # origin/HEAD may point to a branch that has diverged from the operator's
+    # actual working branch (e.g. when a default-branch rename on the remote
+    # wasn't reflected locally). Accept the current branch if its configured
+    # upstream tracking ref is origin/<cur>.
+    local upstream
+    upstream=$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" 2>/dev/null || true)
+    if [ -n "$upstream" ] && [ "$upstream" = "origin/$cur" ]; then
+      default="$cur"
+      base="origin/$cur"
+    else
+      echo "$label: skipped: on $cur, expected $default"
+      return 0
+    fi
   fi
 
   if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ]; then

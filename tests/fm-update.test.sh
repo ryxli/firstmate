@@ -344,4 +344,54 @@ test_firstmate_wrong_branch_skipped
 test_firstmate_detached_head_skipped
 test_unsafe_secondmate_home_skipped_before_git_update
 
+# --- T12: default-branch detection when origin/HEAD is absent ---------------
+# Verify that the remote show fallback detects the correct default branch even
+# when refs/remotes/origin/HEAD is not set locally.
+test_default_branch_fallback_remote_show() {
+  local w out
+  w=$(new_world t12)
+  bump_origin "$w" instr
+  # Remove the locally cached origin/HEAD so the symbolic-ref path returns nothing.
+  git -C "$w/main" remote set-head origin --delete >/dev/null 2>&1 || true
+  # Confirm it's gone (the remote show fallback must carry the update).
+  git -C "$w/main" symbolic-ref refs/remotes/origin/HEAD >/dev/null 2>&1 \
+    && fail "setup error: origin/HEAD should be absent after --delete"
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "firstmate: updated " "firstmate updated via remote show fallback"
+  assert_contains "$out" "reread-firstmate: yes" "instruction change triggers reread"
+  pass "T12 default branch detected via remote show when origin/HEAD absent"
+}
+
+# --- T13: not-a-git-repo skip message includes the path --------------------
+test_not_a_git_repo_message_includes_path() {
+  local w out bad_home
+  w=$(new_world t13)
+  bad_home="$w/not-a-repo"
+  mkdir -p "$bad_home"
+  # Register it as a secondmate with no git repo so ff_target fires the not-a-git-repo path.
+  printf 't13sm\n' > "$bad_home/.fm-secondmate-home"
+  printf 'v1\n' > "$bad_home/AGENTS.md"
+  mkdir -p "$bad_home/bin"
+  {
+    printf 'pane=w1:p1\n'
+    printf 'kind=secondmate\n'
+    printf 'home=%s\n' "$bad_home"
+  } > "$w/home/state/t13sm.meta"
+
+  out=$(run_update "$w")
+
+  # validate_secondmate_home resolves via cd/pwd -P, so the message carries the
+  # canonical path (e.g. /private/var/... on macOS); canonicalize for comparison.
+  local bad_home_real
+  bad_home_real=$(cd "$bad_home" && pwd -P)
+  assert_contains "$out" "not a git repo" "not-a-git-repo message present"
+  assert_contains "$out" "$bad_home_real" "not-a-git-repo message includes the path"
+  pass "T13 not-a-git-repo skip message includes the checked path"
+}
+
+test_default_branch_fallback_remote_show
+test_not_a_git_repo_message_includes_path
+
 echo "# all fm-update tests passed"

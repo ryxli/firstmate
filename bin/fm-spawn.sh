@@ -262,6 +262,25 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
+
+# Pre-spawn guard: refuse if any herdr pane already has cwd == the secondmate home.
+# Prevents duplicate spawns when an existing session is alive but hook-less (agent_status=unknown).
+if [ "$KIND" = secondmate ] && [ -z "${FM_SPAWN_FORCE:-}" ]; then
+  _guard_pane=$(herdr pane list 2>/dev/null | python3 -c '
+import json, sys
+data = json.loads(sys.stdin.read())
+home = sys.argv[1]
+for p in data.get("result", {}).get("panes", []):
+    if p.get("cwd", "") == home:
+        print(p.get("pane_id", ""))
+        break
+' "$WT" 2>/dev/null || true)
+  if [ -n "$_guard_pane" ]; then
+    echo "error: secondmate $ID already has a live pane at $WT (pane $_guard_pane); set FM_SPAWN_FORCE=1 to override" >&2
+    exit 1
+  fi
+fi
+
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
 # Create a git worktree for ship/scout tasks.
