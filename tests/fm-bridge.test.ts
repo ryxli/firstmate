@@ -1,32 +1,33 @@
 // bridge - buildSnapshot (mates + tasks lenses) + render (roster/tasks/all views).
 // Ported from herdr:.omp/extensions/bridge/fleet.test.ts
 // Run: bun test tests/fm-bridge.test.ts
-//
-// Two lenses: MATES (the persistent roster - firstmate + secondmates, presence +
-// load) and TASKS (every backlog item, tagged owner/project/state/worker). A
-// crewmate is the live worker of an in-flight task and shows on the TASK lens,
-// never as a roster person. PENDING is passed in from fm-focus (its own tests
-// cover the ranking). These cases lock the lens separation, the view dispatch,
-// and render robustness (no overflow, no split surrogate pairs).
 
-import { buildSnapshot, type FleetSnapshot, type HerdrAgent, type ParsedHome, type PendingItem, type PrInfo, render } from "../.omp/extensions/bridge/fleet";
+import { describe, expect, it } from "bun:test";
 
-let failures = 0;
-function check(name: string, cond: boolean): void {
-	if (!cond) {
-		console.error(`FAIL ${name}`);
-		failures++;
-	}
-}
+import {
+	buildSnapshot,
+	type FleetSnapshot,
+	type HerdrAgent,
+	type ParsedHome,
+	type PendingItem,
+	type PrInfo,
+	render,
+} from "../.omp/extensions/bridge/fleet";
+
+// ---------------------------------------------------------------------------
+// Shared fixtures
+// ---------------------------------------------------------------------------
+
 function herdrMap(all: HerdrAgent[]): Map<string, HerdrAgent> {
 	const m = new Map<string, HerdrAgent>();
 	for (const a of all) if (a.pane_id) m.set(a.pane_id, a);
 	return m;
 }
+
 const NOW = "2026-06-28T22:31:10Z";
 const noPending: PendingItem[] = [];
 
-// Fixture: firstmate + secondmate Plum, tasks across both homes, plus a stray pane.
+// Firstmate + secondmate Plum, tasks across both homes, plus a stray pane.
 const mainHome: ParsedHome = {
 	path: "/main",
 	label: "firstmate",
@@ -41,6 +42,7 @@ const mainHome: ParsedHome = {
 		{ id: "feat-x", meta: { id: "feat-x", pane: "w20:p1", raw: {} }, status: { state: "working", text: "building" } },
 	],
 };
+
 const smHome: ParsedHome = {
 	path: "/sm-plum",
 	label: "fm-sm-plum",
@@ -48,74 +50,198 @@ const smHome: ParsedHome = {
 	backlog: { inflight: [{ id: "triage-1", desc: "repro bug (repo: support)", section: "inflight", resolved: false }], queued: [], done: [] },
 	agents: [{ id: "triage-1", meta: { id: "triage-1", pane: "w21:p1", raw: {} }, status: { state: "working", text: "reproducing" } }],
 };
-const herdr: HerdrAgent[] = [
+
+const herdrAgents: HerdrAgent[] = [
 	{ pane_id: "w2:pA", cwd: "/main", agent_status: "idle", name: "firstmate" },
 	{ pane_id: "w15:p2", cwd: "/sm-plum", agent_status: "working", name: "plum" },
 	{ pane_id: "w20:p1", cwd: "/wt/feat-x", agent_status: "working", name: "feat-x" },
 	{ pane_id: "w21:p1", cwd: "/wt/triage-1", agent_status: "working", name: "triage-1" },
 	{ pane_id: "w99:p9", cwd: "/elsewhere", agent_status: "idle", name: "stray" },
 ];
-const prByUrl = new Map<string, PrInfo>([["https://github.com/o/r/pull/12", { url: "https://github.com/o/r/pull/12", state: "MERGED", checks: "passing" }]]);
 
-const snap = buildSnapshot([mainHome, smHome], herdrMap(herdr), herdr, prByUrl, noPending, NOW);
+const prByUrl = new Map<string, PrInfo>([
+	["https://github.com/o/r/pull/12", { url: "https://github.com/o/r/pull/12", state: "MERGED", checks: "passing" }],
+]);
 
-// MATES lens: persistent people only, with presence + load.
-check("two mates (firstmate + plum)", snap.mates.length === 2);
-check("firstmate first: role firstmate, idle, load 1", snap.mates[0]?.name === "firstmate" && snap.mates[0]?.role === "firstmate" && snap.mates[0]?.herdrStatus === "idle" && snap.mates[0]?.load === 1);
-check("plum: secondmate, working, load 1", snap.mates[1]?.name === "plum" && snap.mates[1]?.role === "secondmate" && snap.mates[1]?.herdrStatus === "working" && snap.mates[1]?.load === 1);
-check("crewmates are NOT mates", !snap.mates.some(m => m.name === "feat-x" || m.name === "triage-1"));
+const snap = buildSnapshot([mainHome, smHome], herdrMap(herdrAgents), herdrAgents, prByUrl, noPending, NOW);
 
-// TASK lens: every backlog item, tagged owner/project/state/worker.
 const byId = (id: string): FleetSnapshot["tasks"][number] | undefined => snap.tasks.find(t => t.id === id);
-check("feat-x: inflight, owner firstmate, project app, worker working", byId("feat-x")?.state === "inflight" && byId("feat-x")?.owner === "firstmate" && byId("feat-x")?.project === "app" && byId("feat-x")?.workerState === "working");
-check("refactor-db: queued, blocked-by feat-x", byId("refactor-db")?.state === "queued" && byId("refactor-db")?.note.includes("blocked-by feat-x") === true);
-check("old-feat: done, merged", byId("old-feat")?.state === "done" && byId("old-feat")?.merged === true && byId("old-feat")?.note === "merged");
-check("triage-1: owner is plum (mate name, not home dir), project support", byId("triage-1")?.owner === "plum" && byId("triage-1")?.project === "support");
-check("only the stray is unaffiliated", snap.otherLivePanes.length === 1 && snap.otherLivePanes[0]?.name === "stray");
 
-// VIEWS: the dispatch shows the right lens for each.
-const roster = render(snap, "roster");
-check("roster: CREW + NEEDS YOU", roster.includes("CREW") && roster.includes("NEEDS YOU"));
-check("roster: lists the mates", roster.includes("firstmate") && roster.includes("plum"));
-check("roster: NOT the task board", !roster.includes("IN FLIGHT"));
-check("roster is the default view", render(snap) === roster);
-const tasks = render(snap, "tasks");
-check("tasks: board headers + counts", tasks.includes("IN FLIGHT (2)") && tasks.includes("QUEUED (1)") && tasks.includes("DONE (1)"));
-check("tasks: task ids + owners", tasks.includes("feat-x") && tasks.includes("triage-1") && tasks.includes("plum"));
-check("tasks: NOT the roster", !tasks.includes("CREW"));
-const all = render(snap, "all");
-check("all: both lenses", all.includes("CREW") && all.includes("IN FLIGHT (2)"));
+// ---------------------------------------------------------------------------
+// MATES lens
+// ---------------------------------------------------------------------------
 
-// No main home -> empty roster, NEEDS YOU says not read.
-const empty = buildSnapshot([], herdrMap([]), [], new Map(), noPending, NOW);
-check("no main home -> no mates", empty.mates.length === 0);
-check("render: fleet NOT read", render(empty).includes("fleet NOT read"));
+describe("MATES lens: persistent roster with presence + load", () => {
+	it("two mates (firstmate + plum)", () => {
+		expect(snap.mates.length).toBe(2);
+	});
 
-// Render robustness: width + surrogate safety, incl. a high-load + long-name mate.
-const BOARD_WIDTH = 70;
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-const stress: FleetSnapshot = {
-	generatedAt: NOW,
-	pending: [{ cls: "CAPTAIN-BLOCKED", clsRank: 4, home: "really-long-project-name", id: "a-very-long-task-id-exceeding-its-budget", reason: "BLOCKED - a long reason that must clip without overflowing the right edge of the board ever" }],
-	mates: [
-		{ name: "an-extremely-long-firstmate-name-well-past-the-limit", role: "firstmate", herdrStatus: "idle", load: 12 },
-		{ name: "plum", role: "secondmate", herdrStatus: "working", load: 0 },
-	],
-	tasks: [
-		{ id: "a-very-long-task-identifier-that-overflows-the-column", state: "inflight", owner: "firstmate", project: "some-long-project-name", workerState: "working", note: "doing \uD83D\uDE80 a thing with an emoji and a long status that runs well past the right edge" },
-		{ id: "q1", state: "queued", owner: "plum", note: "blocked-by something-with-a-long-name" },
-		{ id: "d1", state: "done", owner: "plum", note: "merged", merged: true },
-	],
-	otherLivePanes: [{ name: "a-very-long-other-pane-name-that-should-clip-to-the-budget", status: "idle", cwd: "x" }],
-	notes: ["a long degradation note that should clip to the board width without overflowing the edge"],
-};
-const sr = render(stress, "all");
-check("stress: no line exceeds BOARD_WIDTH", sr.split("\n").every(l => [...l].length <= BOARD_WIDTH));
-check("stress: no split surrogate pair", !LONE_SURROGATE.test(sr));
-check("stress: long content clipped with ellipsis", sr.includes("\u2026"));
+	it("firstmate first: role firstmate, idle, load 1", () => {
+		const m = snap.mates[0];
+		expect(m?.name).toBe("firstmate");
+		expect(m?.role).toBe("firstmate");
+		expect(m?.herdrStatus).toBe("idle");
+		expect(m?.load).toBe(1);
+	});
 
-if (failures > 0) {
-	console.error(`\n${failures} FAILURE(S)`);
-	process.exit(1);
-}
-console.log("bridge mates + tasks + views: all checks pass");
+	it("plum: secondmate, working, load 1", () => {
+		const m = snap.mates[1];
+		expect(m?.name).toBe("plum");
+		expect(m?.role).toBe("secondmate");
+		expect(m?.herdrStatus).toBe("working");
+		expect(m?.load).toBe(1);
+	});
+
+	it("crewmates (feat-x, triage-1) are NOT mates", () => {
+		expect(snap.mates.some(m => m.name === "feat-x" || m.name === "triage-1")).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// TASK lens
+// ---------------------------------------------------------------------------
+
+describe("TASK lens: every backlog item tagged owner/project/state/worker", () => {
+	it("feat-x: inflight, owner firstmate, project app, worker working", () => {
+		const t = byId("feat-x");
+		expect(t?.state).toBe("inflight");
+		expect(t?.owner).toBe("firstmate");
+		expect(t?.project).toBe("app");
+		expect(t?.workerState).toBe("working");
+	});
+
+	it("refactor-db: queued, note includes blocked-by feat-x", () => {
+		const t = byId("refactor-db");
+		expect(t?.state).toBe("queued");
+		expect(t?.note).toContain("blocked-by feat-x");
+	});
+
+	it("old-feat: done, merged=true, note='merged'", () => {
+		const t = byId("old-feat");
+		expect(t?.state).toBe("done");
+		expect(t?.merged).toBe(true);
+		expect(t?.note).toBe("merged");
+	});
+
+	it("triage-1: owner is plum (mate name, not home dir), project support", () => {
+		const t = byId("triage-1");
+		expect(t?.owner).toBe("plum");
+		expect(t?.project).toBe("support");
+	});
+
+	it("only the stray pane is unaffiliated", () => {
+		expect(snap.otherLivePanes.length).toBe(1);
+		expect(snap.otherLivePanes[0]?.name).toBe("stray");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// VIEW dispatch
+// ---------------------------------------------------------------------------
+
+describe("view dispatch: roster / tasks / all", () => {
+	const roster = render(snap, "roster");
+	const tasks = render(snap, "tasks");
+	const all = render(snap, "all");
+
+	it("roster: contains CREW + NEEDS YOU", () => {
+		expect(roster).toContain("CREW");
+		expect(roster).toContain("NEEDS YOU");
+	});
+
+	it("roster: lists mates by name", () => {
+		expect(roster).toContain("firstmate");
+		expect(roster).toContain("plum");
+	});
+
+	it("roster: does NOT include task board", () => {
+		expect(roster).not.toContain("IN FLIGHT");
+	});
+
+	it("roster is the default view", () => {
+		expect(render(snap)).toBe(roster);
+	});
+
+	it("tasks: board headers + counts", () => {
+		expect(tasks).toContain("IN FLIGHT (2)");
+		expect(tasks).toContain("QUEUED (1)");
+		expect(tasks).toContain("DONE (1)");
+	});
+
+	it("tasks: task ids + owner names present", () => {
+		expect(tasks).toContain("feat-x");
+		expect(tasks).toContain("triage-1");
+		expect(tasks).toContain("plum");
+	});
+
+	it("tasks: does NOT include roster section", () => {
+		expect(tasks).not.toContain("CREW");
+	});
+
+	it("all: both lenses present", () => {
+		expect(all).toContain("CREW");
+		expect(all).toContain("IN FLIGHT (2)");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Empty fleet
+// ---------------------------------------------------------------------------
+
+describe("empty fleet (no main home)", () => {
+	const empty = buildSnapshot([], herdrMap([]), [], new Map(), noPending, NOW);
+
+	it("no mates", () => {
+		expect(empty.mates.length).toBe(0);
+	});
+
+	it("render says fleet NOT read", () => {
+		expect(render(empty)).toContain("fleet NOT read");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Render robustness
+// ---------------------------------------------------------------------------
+
+describe("render robustness: width + surrogate safety", () => {
+	const BOARD_WIDTH = 70;
+	const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+	const stress: FleetSnapshot = {
+		generatedAt: NOW,
+		pending: [{
+			cls: "CAPTAIN-BLOCKED",
+			clsRank: 4,
+			home: "really-long-project-name",
+			id: "a-very-long-task-id-exceeding-its-budget",
+			reason: "BLOCKED - a long reason that must clip without overflowing the right edge of the board ever",
+		}],
+		mates: [
+			{ name: "an-extremely-long-firstmate-name-well-past-the-limit", role: "firstmate", herdrStatus: "idle", load: 12 },
+			{ name: "plum", role: "secondmate", herdrStatus: "working", load: 0 },
+		],
+		tasks: [
+			{ id: "a-very-long-task-identifier-that-overflows-the-column", state: "inflight", owner: "firstmate", project: "some-long-project-name", workerState: "working", note: "doing \uD83D\uDE80 a thing with an emoji and a long status that runs well past the right edge" },
+			{ id: "q1", state: "queued", owner: "plum", note: "blocked-by something-with-a-long-name" },
+			{ id: "d1", state: "done", owner: "plum", note: "merged", merged: true },
+		],
+		otherLivePanes: [{ name: "a-very-long-other-pane-name-that-should-clip-to-the-budget", status: "idle", cwd: "x" }],
+		notes: ["a long degradation note that should clip to the board width without overflowing the edge"],
+	};
+
+	const sr = render(stress, "all");
+
+	it("no line exceeds BOARD_WIDTH", () => {
+		const violations = sr.split("\n").filter(l => [...l].length > BOARD_WIDTH);
+		expect(violations).toEqual([]);
+	});
+
+	it("no split surrogate pair", () => {
+		expect(LONE_SURROGATE.test(sr)).toBe(false);
+	});
+
+	it("long content clipped with ellipsis", () => {
+		expect(sr).toContain("\u2026");
+	});
+});
