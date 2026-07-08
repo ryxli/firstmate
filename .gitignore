@@ -3,6 +3,7 @@ state/
 data/
 worktrees/
 .no-mistakes/
+.fm-secondmate-home
 .lavish/
 .DS_Store
 .env

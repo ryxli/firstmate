@@ -65,8 +65,8 @@ make_fake_no_mistakes() {
   printf '%s\n' "$fakebin"
 }
 
-# Build a minimal seeded secondmate home: marker + operational dirs, with AGENTS.md
-# and bin/ already present so auto-link gets past the base entries. No CLAUDE.md.
+# Build a minimal seeded secondmate home with operational dirs and no shared-code
+# links. fm-spawn should repair the full symlink set, including CLAUDE.md.
 # Echoes the home path.
 make_secondmate_home_no_claude() {
   local name=$1 id=$2 home
@@ -75,9 +75,6 @@ make_secondmate_home_no_claude() {
   printf '%s\n' "$id" > "$home/.fm-secondmate-home"
   printf 'name=%s\n' "Anchor" > "$home/config/identity"
   printf 'charter\n' > "$home/data/charter.md"
-  # AGENTS.md and bin present; CLAUDE.md absent
-  printf '# Firstmate\n' > "$home/AGENTS.md"
-  mkdir -p "$home/bin"
   printf '%s\n' "$home"
 }
 
@@ -120,7 +117,7 @@ make_fm_home() {
 }
 
 # -----------------------------------------------------------------------
-# Test 1: spawn auto-links CLAUDE.md when it is missing but AGENTS.md exists
+# Test 1: spawn auto-links shared code when CLAUDE.md is missing
 # -----------------------------------------------------------------------
 test_spawn_autolinks_claude_md() {
   local home fakebin smhome out
@@ -170,14 +167,13 @@ test_spawn_clears_broken_symlinks() {
 }
 
 # -----------------------------------------------------------------------
-# Test 3: fm-home-seed.sh seed_home creates CLAUDE.md symlink for a
-#   pre-existing home that has AGENTS.md + bin/ but no CLAUDE.md.
-#   This covers the "old home upgraded in-place" scenario.
+# Test 3: fm-home-seed.sh with default symlink homes creates the shared-code
+#   links, including CLAUDE.md as a relative symlink to AGENTS.md.
 # -----------------------------------------------------------------------
 test_seed_home_creates_claude_md() {
   local home subhome out fakebin fakeherdr_bin
   home="$TMP_ROOT/seed-claude-home"
-  subhome="$TMP_ROOT/seed-claude-subhome"
+  subhome="$TMP_ROOT/mates/seedtest"
   mkdir -p "$home/projects" "$home/data" "$home/state"
 
   # Create a minimal project with a file origin
@@ -197,28 +193,26 @@ test_seed_home_creates_claude_md() {
 
   printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-25)' > "$home/data/projects.md"
 
-  # Pre-create the subhome as an "old" firstmate home: has AGENTS.md + bin/
-  # (real files, not symlinks) but NO CLAUDE.md — simulates a home seeded
-  # before CLAUDE.md tracking was added.
-  mkdir -p "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects" "$subhome/bin"
-  printf '# Firstmate\n' > "$subhome/AGENTS.md"
-
+  # The default "-" path creates the symlink-home shell and repairs the link set.
   fakebin=$(make_fake_no_mistakes "$TMP_ROOT/seed-nm-fake")
   fakeherdr_bin=$(make_fake_herdr "$TMP_ROOT/seed-herdr-fake")
 
   PATH="$fakeherdr_bin:$fakebin:$PATH" \
     FM_HOME="$home" \
+    FM_HERDR_SM_BASE="$TMP_ROOT/mates" \
     FM_SECONDMATE_CHARTER='test charter for alpha' \
     FM_FAKE_HERDR_LOG="$TMP_ROOT/seed-herdr-fake/herdr.log" \
-    "$ROOT/bin/fm-home-seed.sh" seedtest "$subhome" alpha >/dev/null \
+    "$ROOT/bin/fm-home-seed.sh" seedtest - alpha >/dev/null \
     || fail "fm-home-seed.sh failed to seed the home"
 
-  [ -L "$subhome/CLAUDE.md" ] || fail "seed_home did not create CLAUDE.md symlink for old home"
+  [ -L "$subhome/AGENTS.md" ] || fail "seed_home did not create AGENTS.md symlink for symlink home"
+  [ -L "$subhome/bin" ] || fail "seed_home did not create bin symlink for symlink home"
+  [ -L "$subhome/CLAUDE.md" ] || fail "seed_home did not create CLAUDE.md symlink for symlink home"
   [ -e "$subhome/CLAUDE.md" ] || fail "seed_home CLAUDE.md symlink does not resolve"
   local target
   target=$(readlink "$subhome/CLAUDE.md")
   [ "$target" = "AGENTS.md" ] || fail "seed_home CLAUDE.md target is '$target', expected 'AGENTS.md'"
-  pass "fm-home-seed.sh creates CLAUDE.md as a relative symlink to AGENTS.md for a pre-existing home"
+  pass "fm-home-seed.sh repairs shared-code links for a symlink home"
 }
 
 # -----------------------------------------------------------------------
@@ -227,7 +221,7 @@ test_seed_home_creates_claude_md() {
 test_seed_home_fixes_broken_claude_md() {
   local home subhome fakebin fakeherdr_bin proj_dir proj_remote remote_abs
   home="$TMP_ROOT/seed-broken-home"
-  subhome="$TMP_ROOT/seed-broken-subhome"
+  subhome="$TMP_ROOT/mates-broken/brokentest"
   mkdir -p "$home/projects" "$home/data" "$home/state"
 
   proj_dir="$home/projects/beta"
@@ -245,9 +239,10 @@ test_seed_home_fixes_broken_claude_md() {
 
   printf '%s\n' '- beta [direct-PR] - beta project (added 2026-06-25)' > "$home/data/projects.md"
 
-  # Pre-create the subhome with AGENTS.md + bin/ but a broken CLAUDE.md symlink.
-  mkdir -p "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects" "$subhome/bin"
-  printf '# Firstmate\n' > "$subhome/AGENTS.md"
+  # Pre-create the subhome with broken shared-code symlinks.
+  mkdir -p "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects"
+  ln -s "/nonexistent/AGENTS.md" "$subhome/AGENTS.md"
+  ln -s "/nonexistent/bin" "$subhome/bin"
   ln -s "/nonexistent/AGENTS.md" "$subhome/CLAUDE.md"
 
   [ -L "$subhome/CLAUDE.md" ] && [ ! -e "$subhome/CLAUDE.md" ] \
@@ -258,9 +253,10 @@ test_seed_home_fixes_broken_claude_md() {
 
   PATH="$fakeherdr_bin:$fakebin:$PATH" \
     FM_HOME="$home" \
+    FM_HERDR_SM_BASE="$TMP_ROOT/mates-broken" \
     FM_SECONDMATE_CHARTER='test charter for beta' \
     FM_FAKE_HERDR_LOG="$TMP_ROOT/seed-broken-herdr-fake/herdr.log" \
-    "$ROOT/bin/fm-home-seed.sh" brokentest "$subhome" beta >/dev/null \
+    "$ROOT/bin/fm-home-seed.sh" brokentest - beta >/dev/null \
     || fail "fm-home-seed.sh failed to seed the home with a broken CLAUDE.md symlink"
 
   [ -L "$subhome/CLAUDE.md" ] || fail "broken CLAUDE.md was not replaced with a symlink"
@@ -272,8 +268,8 @@ test_seed_home_fixes_broken_claude_md() {
 }
 
 # -----------------------------------------------------------------------
-# Test 4: spawn rejects home when CLAUDE.md cannot be auto-linked
-#   (AGENTS.md also missing so both auto-links fail)
+# Test 4: spawn replaces an empty CLAUDE.md placeholder while repairing the
+#   symlink-home shared-code links.
 # -----------------------------------------------------------------------
 test_spawn_rejects_when_autolink_impossible() {
   local home fakebin smhome out
@@ -290,11 +286,9 @@ test_spawn_rejects_when_autolink_impossible() {
   printf 'anchor3\n' > "$smhome/.fm-secondmate-home"
   printf 'name=Anchor\n' > "$smhome/config/identity"
   printf 'charter\n' > "$smhome/data/charter.md"
-  # AGENTS.md is a plain file (not a symlink, not empty) - this is a real AGENTS.md
-  # but CLAUDE.md is a regular empty file (edge case: removed by seed but left zero-byte)
-  printf '# Firstmate\n' > "$smhome/AGENTS.md"
-  mkdir -p "$smhome/bin"
-  : > "$smhome/CLAUDE.md"   # zero-byte regular file - should be removed and replaced
+  # CLAUDE.md is a regular empty file. Empty placeholders are safe to replace
+  # during symlink-home repair, while non-empty shared-code conflicts are blocked.
+  : > "$smhome/CLAUDE.md"
 
   out=$(run_spawn "$home" "$fakebin" anchor3 "$smhome" omp --secondmate) \
     || fail "secondmate spawn failed when CLAUDE.md was a zero-byte regular file: $out"

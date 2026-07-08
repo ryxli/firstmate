@@ -153,7 +153,7 @@ add_fake_git() {
   cat > "$fakebin/git" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = "-C" ] && [ "${3:-}" = "rev-parse" ] && [ "${4:-}" = "--show-toplevel" ]; then
-  if [ -n "${FM_FAKE_TOPLEVEL:-}" ] && [ "${2:-}" = "${FM_FAKE_WT:-}" ]; then
+  if [ -n "${FM_FAKE_TOPLEVEL:-}" ] && [ "$(cd "${2:-.}" 2>/dev/null && pwd -P)" = "$(cd "${FM_FAKE_WT:-.}" 2>/dev/null && pwd -P)" ]; then
     printf '%s\n' "$FM_FAKE_TOPLEVEL"
     exit 0
   fi
@@ -282,9 +282,9 @@ test_crewmate_fallback_creates_project_workspace_outside_herdr() {
   pass "outside herdr, crew fall back to a project-labeled workspace"
 }
 
-# Build a seeded secondmate home (marker + operational dirs), optionally missing
-# AGENTS.md/bin so the auto-link path is exercised. Echoes the home path.
-# Args: case-name id supervisor-name with_agents_md(0|1)
+# Build a seeded secondmate home (marker + operational dirs), optionally with
+# already-repaired shared-code symlinks. Echoes the home path.
+# Args: case-name id supervisor-name with_shared_links(0|1)
 make_secondmate_home() {
   local name=$1 id=$2 supname=$3 with_files=$4 home
   home="$TMP_ROOT/$name-smhome"
@@ -293,8 +293,9 @@ make_secondmate_home() {
   printf 'name=%s\n' "$supname" > "$home/config/identity"
   printf 'charter\n' > "$home/data/charter.md"
   if [ "$with_files" = 1 ]; then
-    printf '# fm\n' > "$home/AGENTS.md"
-    mkdir -p "$home/bin"
+    ln -s "$ROOT/AGENTS.md" "$home/AGENTS.md"
+    ln -s AGENTS.md "$home/CLAUDE.md"
+    ln -s "$ROOT/bin" "$home/bin"
   fi
   printf '%s\n' "$home"
 }

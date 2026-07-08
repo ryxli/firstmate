@@ -203,9 +203,12 @@ phase_spawn() {
   assert_no_grep 'agent rename' "$LOG" "spawn renamed the herdr agent, which breaks the omp<->herdr status binding"
   assert_no_grep "pane close $HERDR_AGENT_PANE" "$LOG" "spawn closed the agent's own pane"
 
-  # Launch ran in the subhome, with the persistent charter and cleared overrides.
+  # Launch ran in the subhome, with the persistent charter, code-root override
+  # pinned to the canonical checkout, and operational overrides cleared.
   assert_grep "FM_HOME='$SUB_ABS'" "$LOG" "secondmate launch did not set FM_HOME to the subhome"
-  assert_grep 'FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE=' "$LOG" "launch did not clear operational overrides"
+  assert_grep "FM_CODE_ROOT_OVERRIDE='$ROOT'" "$LOG" "secondmate launch did not pin the canonical code root"
+  assert_grep "FM_ROOT_OVERRIDE='$ROOT'" "$LOG" "secondmate launch did not preserve script lookup through the canonical code root"
+  assert_grep 'FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE=' "$LOG" "launch did not clear operational overrides"
   assert_grep 'FM_CONFIG_OVERRIDE=' "$LOG" "launch did not clear the config override"
   assert_grep "$SUB_ABS/data/charter.md" "$LOG" "launch did not use the persistent charter"
   pass "spawn: own tab in its own named workspace via herdr agent start, persistent charter, routing meta"

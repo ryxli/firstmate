@@ -22,10 +22,10 @@
 # Record each newly verified env marker here.
 set -u
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
-CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-root-lib.sh
+. "$SCRIPT_DIR/fm-root-lib.sh"
+fm_init_roots "${BASH_SOURCE[0]}"
 
 detect_own() {
   # Layer 1: environment markers for verified harnesses.

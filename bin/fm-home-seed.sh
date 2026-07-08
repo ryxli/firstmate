@@ -3,10 +3,11 @@
 #
 # Usage:
 #   fm-home-seed.sh <id> <home|-> [<project>...]
-#       Provision <home> as an isolated firstmate home. If <home> is "-", create
-#       a fresh herdr-managed git worktree of the firstmate repo under the
-#       shared mates dir (at <code-root>/mates/<id>, e.g. ~/code/mates/<id>). The herdr workspace ID is stored
-#       in data/secondmates.md so teardown can remove the workspace cleanly.
+#       Provision <home> as an isolated firstmate home. If <home> is "-", the
+#       default FM_SECONDMATE_HOME_MODE=symlink creates a plain operational home
+#       under the shared mates dir and links shared code to the canonical firstmate
+#       checkout. Set FM_SECONDMATE_HOME_MODE=worktree to create the legacy
+#       herdr-managed git worktree home.
 #       Projects are cloned from the active home into the secondmate home's
 #       projects/ directory. That project list is non-exclusive provisioning data
 #       and MAY be empty: a pure-domain secondmate (e.g. a quality/eval
@@ -33,12 +34,12 @@
 #       data/secondmates.md.
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
-DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
-PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-root-lib.sh
+. "$SCRIPT_DIR/fm-root-lib.sh"
+fm_init_roots "${BASH_SOURCE[0]}"
 REG="$DATA/secondmates.md"
+HOME_MODE="${FM_SECONDMATE_HOME_MODE:-symlink}"
 # shellcheck source=bin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 SUB_HOME_MARKER=".fm-secondmate-home"
@@ -46,6 +47,7 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 usage() {
   echo "usage: fm-home-seed.sh <id> <home|-> [<project>...]" >&2
   echo "       fm-home-seed.sh validate" >&2
+  echo "       FM_SECONDMATE_HOME_MODE=symlink|worktree (default: symlink for '-')" >&2
 }
 
 registry_home_for_line() {
@@ -539,6 +541,77 @@ acquire_herdr_home() {
   printf '%s\n%s\n' "$workspace_id" "$home"
 }
 
+mate_base_dir() {
+  if [ -n "${FM_HERDR_SM_BASE:-}" ]; then
+    fm_normalize_path "$FM_HERDR_SM_BASE"
+  else
+    printf '%s/mates\n' "$(dirname "$(dirname "$(cd "$FM_ROOT" && pwd -P)")")"
+  fi
+}
+
+acquire_symlink_home() {
+  local id=$1 sm_base home
+  sm_base=$(mate_base_dir)
+  home="$sm_base/$id"
+  mkdir -p "$sm_base"
+  refuse_active_home_path "$home" || return 1
+  validate_home_assignment "$id" "$home" || return 1
+  if [ -e "$home" ]; then
+    [ -d "$home" ] || { echo "error: $home exists and is not a directory" >&2; return 1; }
+  else
+    mkdir -p "$home"
+    SEED_HOME_CREATED=1
+  fi
+  mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
+  printf '%s\n' "$(cd "$home" && pwd -P)"
+}
+
+herdr_workspace_id_for_label_cwd() {
+  local label=$1 cwd=$2
+  herdr workspace list 2>/dev/null | python3 -c '
+import json, os, sys
+label, cwd = sys.argv[1], os.path.realpath(sys.argv[2])
+try:
+    workspaces = json.load(sys.stdin).get("result", {}).get("workspaces", [])
+except Exception:
+    sys.exit(0)
+for w in workspaces:
+    if w.get("label") != label:
+        continue
+    wsid = w.get("workspace_id", "")
+    wcwd = w.get("cwd") or w.get("checkout_path") or w.get("path") or w.get("worktree", {}).get("checkout_path", "")
+    if wcwd and os.path.realpath(wcwd) == cwd:
+        print(wsid)
+    else:
+        print("mismatch:" + wsid + ":" + (wcwd or "missing"))
+    break
+' "$label" "$cwd" 2>/dev/null || true
+}
+
+resolve_symlink_home_workspace() {
+  local label=$1 home=$2 existing json workspace_id
+  existing=$(herdr_workspace_id_for_label_cwd "$label" "$home")
+  case "$existing" in
+    mismatch:*)
+      echo "error: herdr workspace label '$label' already exists with a different cwd (${existing#mismatch:})" >&2
+      return 1
+      ;;
+    ?*)
+      printf '%s\n' "$existing"
+      return 0
+      ;;
+  esac
+  json=$(herdr workspace create --label "$label" --cwd "$home" --no-focus 2>&1) || {
+    echo "error: herdr workspace create failed for secondmate home $home" >&2
+    echo "$json" >&2
+    return 1
+  }
+  workspace_id=$(printf '%s' "$json" | herdr_json_get result workspace workspace_id)
+  [ -n "$workspace_id" ] || workspace_id=$(herdr_workspace_id_for_label_cwd "$label" "$home")
+  [ -n "$workspace_id" ] || { echo "error: herdr workspace create did not return a workspace_id" >&2; return 1; }
+  printf '%s\n' "$workspace_id"
+}
+
 ensure_home() {
   local id=$1 requested=$2 home
   if [ "$requested" = "-" ]; then
@@ -903,7 +976,6 @@ seed_home() {
   SEED_HOME=
   SEED_HOME_ACQUIRED=0
   SEED_HOME_CREATED=0
-  SEED_HOME_ACQUIRED=0
   SEED_HOME_BACKED_UP=0
   SEED_HERDR_WORKSPACE_ID=
   SEED_BACKUP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-home-seed.XXXXXX")
@@ -923,7 +995,12 @@ seed_home() {
     cp "$REG" "$SEED_BACKUP_DIR/parent-secondmates.md"
   fi
 
-  if [ "$requested_home" = "-" ]; then
+  case "$HOME_MODE" in
+    symlink|worktree) ;;
+    *) echo "error: FM_SECONDMATE_HOME_MODE must be symlink or worktree" >&2; return 1 ;;
+  esac
+
+  if [ "$requested_home" = "-" ] && [ "$HOME_MODE" = worktree ]; then
     SEED_HOME_ACQUIRED=1
     local _acquire_out
     _acquire_out=$(acquire_herdr_home "$id") || return 1
@@ -931,6 +1008,11 @@ seed_home() {
     home=$(printf '%s\n' "$_acquire_out" | tail -1)
     SEED_HOME="$home"
     home=$(verify_firstmate_home "$home")
+  elif [ "$requested_home" = "-" ]; then
+    requested_abs="$(mate_base_dir)/$id"
+    [ -e "$requested_abs" ] || SEED_HOME_CREATED=1
+    home=$(acquire_symlink_home "$id") || return 1
+    SEED_HOME="$home"
   else
     requested_abs=$(abs_path_for_new "$requested_home")
     refuse_active_home_path "$requested_abs" || return 1
@@ -943,20 +1025,18 @@ seed_home() {
   validate_registry_home_text "$home" || return 1
   validate_home_assignment "$id" "$home"
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
-  [ -L "$home/AGENTS.md" ] && [ ! -e "$home/AGENTS.md" ] && rm -f "$home/AGENTS.md" 2>/dev/null || true
-  if [ ! -e "$home/AGENTS.md" ] && [ -f "$FM_ROOT/AGENTS.md" ]; then
-    ln -s "$FM_ROOT/AGENTS.md" "$home/AGENTS.md" 2>/dev/null || true
-  fi
-  [ -L "$home/config/omp-overlay.yml" ] && [ ! -e "$home/config/omp-overlay.yml" ] && rm -f "$home/config/omp-overlay.yml" 2>/dev/null || true
-  if [ ! -e "$home/config/omp-overlay.yml" ] && [ -f "$FM_ROOT/.omp/supervisor-overlay.yml" ]; then
-    ln -s "$FM_ROOT/.omp/supervisor-overlay.yml" "$home/config/omp-overlay.yml" 2>/dev/null || true
-  fi
-  if [ -f "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] && [ ! -s "$home/CLAUDE.md" ]; then
-    rm -f "$home/CLAUDE.md"
-  fi
-  [ -L "$home/CLAUDE.md" ] && [ ! -e "$home/CLAUDE.md" ] && rm -f "$home/CLAUDE.md" 2>/dev/null || true
-  if [ ! -e "$home/CLAUDE.md" ] && [ -e "$home/AGENTS.md" ]; then
-    ln -s "AGENTS.md" "$home/CLAUDE.md" 2>/dev/null || true
+  if [ "$HOME_MODE" = worktree ] || git -C "$home" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    [ -L "$home/AGENTS.md" ] && [ ! -e "$home/AGENTS.md" ] && rm -f "$home/AGENTS.md" 2>/dev/null || true
+    if [ ! -e "$home/AGENTS.md" ] && [ -f "$FM_ROOT/AGENTS.md" ]; then
+      ln -s "$FM_ROOT/AGENTS.md" "$home/AGENTS.md" 2>/dev/null || true
+    fi
+    if [ -f "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] && [ ! -s "$home/CLAUDE.md" ]; then
+      rm -f "$home/CLAUDE.md"
+    fi
+    [ -L "$home/CLAUDE.md" ] && [ ! -e "$home/CLAUDE.md" ] && rm -f "$home/CLAUDE.md" 2>/dev/null || true
+    if [ ! -e "$home/CLAUDE.md" ] && [ -e "$home/AGENTS.md" ]; then
+      ln -s "AGENTS.md" "$home/CLAUDE.md" 2>/dev/null || true
+    fi
   fi
   validate_operational_dirs "$home" || return 1
   validate_seed_leaf_files "$home" || return 1
@@ -1038,6 +1118,13 @@ seed_home() {
   projects_csv=$(join_projects "$@")
   [ -n "$projects_csv" ] || projects_csv="(none)"
   printf '%s\n' "$id" > "$home/$SUB_HOME_MARKER"
+  if ! git -C "$home" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    "$FM_ROOT/bin/fm-home-link.sh" "$home" --repair >/dev/null || {
+      echo "error: failed to repair shared-code links in symlink home $home" >&2
+      return 1
+    }
+    SEED_HERDR_WORKSPACE_ID=$(resolve_symlink_home_workspace "$sm_name" "$home") || return 1
+  fi
   write_registry "$id" "$home" "$projects_csv" "$SEED_PARENT_BRIEF" "${SEED_HERDR_WORKSPACE_ID:-}" "$sm_name"
   validate_registry
   SEED_COMMITTED=1

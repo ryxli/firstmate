@@ -18,13 +18,13 @@
 //   bin/fm-focus --items F  rank items from a JSON file directly (bypass gather; for tests)
 //   bin/fm-focus --no-color force plain output even on a TTY
 
-import { readFileSync, statSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, statSync, readdirSync, existsSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 
-const SCRIPT_DIR = dirname(new URL(import.meta.url).pathname);
-const FM_ROOT = process.env.FM_ROOT_OVERRIDE || join(SCRIPT_DIR, "..");
-const LINEAGE = join(SCRIPT_DIR, "fm-lineage.sh");
+const SCRIPT_DIR = realpathSync(dirname(new URL(import.meta.url).pathname));
+const FM_ROOT = realpathSync(process.env.FM_CODE_ROOT_OVERRIDE || process.env.FM_ROOT_OVERRIDE || join(SCRIPT_DIR, ".."));
+const LINEAGE = join(FM_ROOT, "bin/fm-lineage.sh");
 
 // ---------------------------------------------------------------------------
 // Pure ranking core (exported, unit-tested; no I/O).

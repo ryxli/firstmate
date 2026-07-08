@@ -37,13 +37,10 @@
 #   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> tab=<tab-id> workspace=<label> worker=<label> worktree=<path>
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
-STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
-DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
-PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
-CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-root-lib.sh
+. "$SCRIPT_DIR/fm-root-lib.sh"
+fm_init_roots "${BASH_SOURCE[0]}"
 SUB_HOME_MARKER=".fm-secondmate-home"
 # shellcheck source=bin/fm-identity-lib.sh
 . "$SCRIPT_DIR/fm-identity-lib.sh"
@@ -476,6 +473,11 @@ herdr_place_agent_tab() {
   if [ -n "${HERDR_SOCKET_PATH:-}" ]; then
     start_env+=(--env "HERDR_SOCKET_PATH=$HERDR_SOCKET_PATH")
   fi
+  if [ -n "${FM_AGENT_START_HOME:-}" ]; then
+    start_env+=(--env "FM_HOME=$FM_AGENT_START_HOME")
+    start_env+=(--env "FM_CODE_ROOT_OVERRIDE=$FM_AGENT_START_CODE_ROOT")
+    start_env+=(--env "FM_ROOT_OVERRIDE=$FM_AGENT_START_CODE_ROOT")
+  fi
   # Idempotent respawn: a herdr session restore can bring this task's tab back as
   # a husk (pane restored, agent process gone) while its agent SLOT stays
   # registered, so `herdr agent start "$slot"` would fail agent_name_taken and
@@ -542,24 +544,28 @@ validate_firstmate_home_for_spawn() {
   if [ "$marker_id" != "$id" ]; then
     echo "error: firstmate home $home is marked for secondmate ${marker_id:-unknown}, expected $id" >&2; return 1
   fi
-  # Valid by construction: a seeded home that is missing the shared firstmate
-  # AGENTS.md, CLAUDE.md, or bin/ is auto-repaired rather than forcing a
-  # manual fix. Safe here because the marker check above already confirmed
-  # this is the seeded home for exactly this id.
-  [ -L "$abs_home/AGENTS.md" ] && [ ! -e "$abs_home/AGENTS.md" ] && rm -f "$abs_home/AGENTS.md" 2>/dev/null || true
-  if [ ! -e "$abs_home/AGENTS.md" ] && [ -f "$abs_root/AGENTS.md" ]; then
-    ln -s "$abs_root/AGENTS.md" "$abs_home/AGENTS.md" 2>/dev/null || true
-  fi
-  [ -L "$abs_home/bin" ] && [ ! -e "$abs_home/bin" ] && rm -f "$abs_home/bin" 2>/dev/null || true
-  if [ ! -e "$abs_home/bin" ] && [ -d "$abs_root/bin" ]; then
-    ln -s "$abs_root/bin" "$abs_home/bin" 2>/dev/null || true
-  fi
-  if [ -f "$abs_home/CLAUDE.md" ] && [ ! -L "$abs_home/CLAUDE.md" ] && [ ! -s "$abs_home/CLAUDE.md" ]; then
-    rm -f "$abs_home/CLAUDE.md"
-  fi
-  [ -L "$abs_home/CLAUDE.md" ] && [ ! -e "$abs_home/CLAUDE.md" ] && rm -f "$abs_home/CLAUDE.md" 2>/dev/null || true
-  if [ ! -e "$abs_home/CLAUDE.md" ] && [ -e "$abs_home/AGENTS.md" ]; then
-    ln -s "AGENTS.md" "$abs_home/CLAUDE.md" 2>/dev/null || true
+  if git -C "$abs_home" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # Legacy worktree/clone homes remain supported during rollout.
+    [ -L "$abs_home/AGENTS.md" ] && [ ! -e "$abs_home/AGENTS.md" ] && rm -f "$abs_home/AGENTS.md" 2>/dev/null || true
+    if [ ! -e "$abs_home/AGENTS.md" ] && [ -f "$abs_root/AGENTS.md" ]; then
+      ln -s "$abs_root/AGENTS.md" "$abs_home/AGENTS.md" 2>/dev/null || true
+    fi
+    [ -L "$abs_home/bin" ] && [ ! -e "$abs_home/bin" ] && rm -f "$abs_home/bin" 2>/dev/null || true
+    if [ ! -e "$abs_home/bin" ] && [ -d "$abs_root/bin" ]; then
+      ln -s "$abs_root/bin" "$abs_home/bin" 2>/dev/null || true
+    fi
+    if [ -f "$abs_home/CLAUDE.md" ] && [ ! -L "$abs_home/CLAUDE.md" ] && [ ! -s "$abs_home/CLAUDE.md" ]; then
+      rm -f "$abs_home/CLAUDE.md"
+    fi
+    [ -L "$abs_home/CLAUDE.md" ] && [ ! -e "$abs_home/CLAUDE.md" ] && rm -f "$abs_home/CLAUDE.md" 2>/dev/null || true
+    if [ ! -e "$abs_home/CLAUDE.md" ] && [ -e "$abs_home/AGENTS.md" ]; then
+      ln -s "AGENTS.md" "$abs_home/CLAUDE.md" 2>/dev/null || true
+    fi
+  else
+    "$abs_root/bin/fm-home-link.sh" "$abs_home" --repair >/dev/null || {
+      echo "error: failed to repair shared-code links in secondmate home $home" >&2
+      return 1
+    }
   fi
   if [ ! -e "$abs_home/AGENTS.md" ]; then
     echo "error: $home is not a firstmate home (missing AGENTS.md, auto-link failed)" >&2; return 1
@@ -711,7 +717,10 @@ fi
 
 if [ "$KIND" = secondmate ]; then
   sq_home=$(fm_shell_quote "$PROJ_ABS")
-  LAUNCH_CMD="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH_CMD"
+  sq_root=$(fm_shell_quote "$FM_ROOT")
+  FM_AGENT_START_HOME=$PROJ_ABS
+  FM_AGENT_START_CODE_ROOT=$FM_ROOT
+  LAUNCH_CMD="FM_HOME=$sq_home FM_CODE_ROOT_OVERRIDE=$sq_root FM_ROOT_OVERRIDE=$sq_root FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= $LAUNCH_CMD"
 fi
 
 spawn_cleanup_worktree() {

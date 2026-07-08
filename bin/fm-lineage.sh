@@ -58,19 +58,13 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-root-lib.sh
+. "$SCRIPT_DIR/fm-root-lib.sh"
 if [ -n "$HOME_OVERRIDE" ]; then
   FM_HOME="$HOME_OVERRIDE"
-  STATE="$FM_HOME/state"
-  CONFIG="$FM_HOME/config"
-  DATA="$FM_HOME/data"
-else
-  FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
-  STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
-  CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
-  DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 fi
+fm_init_roots "${BASH_SOURCE[0]}"
 
 # shellcheck source=bin/fm-identity-lib.sh
 . "$SCRIPT_DIR/fm-identity-lib.sh"

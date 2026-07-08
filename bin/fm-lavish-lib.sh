@@ -72,11 +72,12 @@ fm_lavish_base_url() {
 # feedback live (under the firstmate state dir, gitignored). Honors the same
 # FM_HOME / FM_STATE_OVERRIDE resolution as the rest of bin/.
 fm_lavish_state_dir() {
-  local script_dir root home state
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  root="${FM_ROOT_OVERRIDE:-$(cd "$script_dir/.." && pwd)}"
-  home="${FM_HOME:-${FM_ROOT_OVERRIDE:-$root}}"
-  state="${FM_STATE_OVERRIDE:-$home/state}"
+  local script_dir state
+  script_dir="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=bin/fm-root-lib.sh
+  . "$script_dir/fm-root-lib.sh"
+  fm_init_roots "${BASH_SOURCE[0]}"
+  state="$STATE"
   printf '%s/lavish\n' "$state"
 }
 

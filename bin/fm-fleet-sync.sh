@@ -10,10 +10,10 @@
 # Usage: fm-fleet-sync.sh [<project-dir>]
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
-PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-root-lib.sh
+. "$SCRIPT_DIR/fm-root-lib.sh"
+fm_init_roots "${BASH_SOURCE[0]}"
 
 usage() {
   echo "usage: fm-fleet-sync.sh [<project-dir>]" >&2

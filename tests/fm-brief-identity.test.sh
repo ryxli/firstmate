@@ -18,7 +18,7 @@ make_home() {
   home="$TMP_ROOT/$name"
   mkdir -p "$home/data" "$home/state" "$home/config"
   printf 'name=Mate\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
-  printf '%s\n' "$home"
+  (cd "$home" && pwd -P)
 }
 
 run_brief() {

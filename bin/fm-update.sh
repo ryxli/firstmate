@@ -22,23 +22,29 @@
 #   - reread-firstmate: yes|no    (did the running firstmate's instructions change)
 #   - nudge-secondmates: <pane-targets...>|none   (updated live secondmates to nudge)
 #
-# Usage: fm-update.sh [--help]
+# Usage: fm-update.sh [--repair-links] [--rebase-autostash] [--help]
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
-STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
-SECONDMATES_MD="$FM_HOME/data/secondmates.md"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-root-lib.sh
+. "$SCRIPT_DIR/fm-root-lib.sh"
+fm_init_roots "${BASH_SOURCE[0]}"
+SECONDMATES_MD="$DATA/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
+REPAIR_LINKS=0
+REBASE_AUTOSTASH=0
 
-usage() { echo "usage: fm-update.sh [--help]" >&2; }
+usage() { echo "usage: fm-update.sh [--repair-links] [--rebase-autostash] [--help]" >&2; }
 
-if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-  usage
-  exit 0
-fi
-[ $# -eq 0 ] || { usage; exit 1; }
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repair-links) REPAIR_LINKS=1 ;;
+    --rebase-autostash) REBASE_AUTOSTASH=1 ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage; exit 1 ;;
+  esac
+  shift
+done
 
 # --- helpers ---------------------------------------------------------------
 
@@ -258,7 +264,11 @@ ff_target() {
     return 0
   fi
 
-  local default base cur instr local_rev remote_rev before after out
+  local default base cur instr local_rev remote_rev before after out rebase_autostash
+  rebase_autostash=0
+  if [ "$label" = firstmate ] && [ "$REBASE_AUTOSTASH" -eq 1 ]; then
+    rebase_autostash=1
+  fi
   default=$(default_branch "$dir") || {
     echo "$label: skipped: cannot determine default branch"
     return 0
@@ -279,7 +289,7 @@ ff_target() {
     return 0
   fi
 
-  if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ]; then
+  if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ] && [ "$rebase_autostash" -ne 1 ]; then
     echo "$label: skipped: dirty working tree"
     return 0
   fi
@@ -297,11 +307,28 @@ ff_target() {
     echo "$label: already current"
     return 0
   fi
-  if ! git -C "$dir" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
+  if ! git -C "$dir" merge-base --is-ancestor HEAD "$base" 2>/dev/null && [ "$rebase_autostash" -ne 1 ]; then
     echo "$label: skipped: diverged from $base"
     return 0
   fi
 
+  instr=$(changed_instr "$dir" "$base")
+  before=$(git -C "$dir" rev-parse --short HEAD)
+  if [ "$rebase_autostash" -eq 1 ]; then
+    if ! out=$(git -C "$dir" rebase --autostash "$base" 2>&1); then
+      echo "$label: skipped: rebase-autostash failed: $(first_line "$out")"
+      return 0
+    fi
+    after=$(git -C "$dir" rev-parse --short HEAD)
+    FF_STATUS="updated"
+    FF_INSTR="$instr"
+    if [ -n "$instr" ]; then
+      echo "$label: updated $before..$after (rebase-autostash, instructions changed: $instr)"
+    else
+      echo "$label: updated $before..$after (rebase-autostash)"
+    fi
+    return 0
+  fi
   instr=$(changed_instr "$dir" "$base")
   before=$(git -C "$dir" rev-parse --short HEAD)
   if ! out=$(git -C "$dir" merge --ff-only "$base" 2>&1); then
@@ -334,11 +361,35 @@ seen_homes=""
 fm_root_real=$(resolve_path "$FM_ROOT")
 
 process_secondmate() {
-  local id=$1 home=$2 pane=${3:-} home_real
+  local id=$1 home=$2 pane=${3:-} home_real link_mode link_out
   [ -n "$id" ] || return 0
   [ -n "$home" ] || return 0
   home_real=$(resolve_path "$home")
   [ "$home_real" != "$fm_root_real" ] || return 0
+
+  if [ -d "$home" ] && ! git -C "$home" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    link_mode=--check
+    [ "$REPAIR_LINKS" -eq 0 ] || link_mode=--repair
+    if ! link_out=$("$FM_ROOT/bin/fm-home-link.sh" "$home" "$link_mode" 2>&1); then
+      echo "secondmate $id: skipped: link check failed: $link_out"
+      return 0
+    fi
+    if ! validate_secondmate_home "$id" "$home"; then
+      echo "secondmate $id: skipped: unsafe home: $VALIDATION_ERROR"
+      return 0
+    fi
+    home_real="$VALIDATED_HOME"
+    case " $seen_homes " in
+      *" $home_real "*) return 0 ;;
+    esac
+    seen_homes="$seen_homes $home_real"
+    echo "secondmate $id: symlink home verified"
+    if [ "$reread_firstmate" = yes ] && [ -n "$pane" ]; then
+      nudge_windows="$nudge_windows $pane"
+    fi
+    return 0
+  fi
+
   if ! validate_secondmate_home "$id" "$home"; then
     echo "secondmate $id: skipped: unsafe home: $VALIDATION_ERROR"
     return 0
