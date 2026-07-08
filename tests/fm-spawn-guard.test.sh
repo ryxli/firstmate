@@ -34,7 +34,6 @@ mkdir -p "$FM_TEST_HOME/state" \
          "$FM_TEST_HOME/data" \
          "$FM_TEST_HOME/projects" \
          "$FM_TEST_HOME/config"
-touch "$FM_TEST_HOME/state/.last-watcher-beat"
 
 # Build a minimal valid secondmate home for the given id.
 # Returns the abs path via echo.

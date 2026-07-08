@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Tests for the fm-send.sh dispatch gate (freeze + focus lock).
-# Stubs herdr via a minimal fake binary on PATH, following the same pattern
-# as fm-wake-queue.test.sh.
+# Stubs herdr via a minimal fake binary on PATH.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

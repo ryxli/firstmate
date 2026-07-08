@@ -75,9 +75,6 @@ SH
   # Add a worktree on a fresh task branch; that branch is where the crewmate commits.
   git -C "$case_dir/project" worktree add -q -b fm/task-x1 "$case_dir/wt" main
 
-  # Fresh watcher beacon so fm-guard stays quiet.
-  touch "$case_dir/state/.last-watcher-beat"
-
   printf '%s\n' "$case_dir"
 }
 

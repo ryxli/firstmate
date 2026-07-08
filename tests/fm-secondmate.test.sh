@@ -1218,7 +1218,6 @@ test_fm_send_resolves_bare_firstmate_window_from_home_meta() {
   local home fakebin log err
   home="$TMP_ROOT/send-home"
   mkdir -p "$home/state"
-  touch "$home/state/.last-watcher-beat"
   cat > "$home/state/domain.meta" <<EOF
 pane=w3:p7
 kind=secondmate
