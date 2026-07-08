@@ -283,6 +283,11 @@ fi
 
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
+# Preflight: validate harness binary and worktree base before creating anything.
+if [ "$KIND" != secondmate ]; then
+  "$SCRIPT_DIR/fm-resolve-spawn.sh" "$PROJ_ABS" "$HARNESS" || exit $?
+fi
+
 # Create a git worktree for ship/scout tasks.
 WTBASE="${FM_WORKTREE_BASE:-$FM_HOME/worktrees}"
 if [ "$KIND" != secondmate ]; then
