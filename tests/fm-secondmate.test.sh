@@ -1058,7 +1058,7 @@ test_secondmate_spawn_records_home_meta() {
   mark_firstmate_home "$subhome"
   subhome_abs=$(cd "$subhome" && pwd -P)
   printf 'spawn-sub\n' > "$subhome/.fm-secondmate-home"
-  printf '%s\n' '- spawn-sub - spawn domain (home: '"$subhome"'; scope: spawn domain; projects: alpha, beta; added 2026-06-22)' > "$home/data/secondmates.md"
+  printf '%s\n' '- spawn-sub - spawn domain (home: '"$subhome"'; workspace: wT; scope: spawn domain; projects: alpha, beta; added 2026-06-22)' > "$home/data/secondmates.md"
   printf 'stale parent charter\n' > "$home/data/spawn-sub/brief.md"
   printf 'current persistent charter\n' > "$subhome/data/charter.md"
   fakebin=$(make_fake_herdr "$TMP_ROOT/spawn-fake")
@@ -1072,6 +1072,8 @@ test_secondmate_spawn_records_home_meta() {
   grep -Fx 'kind=secondmate' "$meta" >/dev/null || fail "meta did not record kind=secondmate"
   grep -Fx "home=$subhome_abs" "$meta" >/dev/null || fail "meta did not record subhome"
   grep -Fx 'projects=alpha, beta' "$meta" >/dev/null || fail "meta did not record project clone list"
+  grep -Fx 'workspace=wT' "$meta" >/dev/null || fail "meta did not record registered workspace"
+  grep -F -- '--workspace wT' "$log" >/dev/null || fail "secondmate spawn did not land in registered workspace"
   grep -F 'worktree create' "$log" >/dev/null && fail "secondmate spawn should not call herdr worktree create for explicit home path"
   grep -F "FM_HOME='$subhome_abs'" "$log" >/dev/null || fail "secondmate launch did not set FM_HOME to subhome"
   grep -F 'FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE=' "$log" >/dev/null || fail "secondmate launch did not clear operational overrides"

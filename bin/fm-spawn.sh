@@ -35,14 +35,25 @@ KIND=ship
 WORKSPACE=""
 TAB=""
 POS=()
-for a in "$@"; do
-  case "$a" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --scout) KIND=scout ;;
     --secondmate) KIND=secondmate ;;
-    --workspace=*) WORKSPACE=${a#*=} ;;
-    --tab=*) TAB=${a#*=} ;;
-    *) POS+=("$a") ;;
+    --workspace=*) WORKSPACE=${1#*=} ;;
+    --workspace)
+      shift
+      [ "$#" -gt 0 ] || { echo "error: --workspace requires a value" >&2; exit 2; }
+      WORKSPACE=$1
+      ;;
+    --tab=*) TAB=${1#*=} ;;
+    --tab)
+      shift
+      [ "$#" -gt 0 ] || { echo "error: --tab requires a value" >&2; exit 2; }
+      TAB=$1
+      ;;
+    *) POS+=("$1") ;;
   esac
+  shift
 done
 
 # Batch dispatch: each positional is an id=repo pair.
@@ -136,8 +147,9 @@ secondmate_registry_value() {
   line=$(grep -E "^- $id( |$)" "$reg" | tail -1 || true)
   [ -n "$line" ] || return 1
   case "$key" in
-    home) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: \([^;)]*\);.*/\1/p') ;;
-    projects) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*; scope: [^;)]*; projects: \([^;)]*\); added .*/\1/p') ;;
+    home) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: \([^;)]*\).*/\1/p') ;;
+    workspace) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*; workspace: \([^;)]*\).*/\1/p') ;;
+    projects) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*;.*projects: \([^;)]*\); added .*/\1/p') ;;
     *) return 1 ;;
   esac
   [ -n "$value" ] || return 1
@@ -248,6 +260,9 @@ if [ "$KIND" = secondmate ]; then
   fi
   if [ -z "$FIRSTMATE_HOME" ]; then
     FIRSTMATE_HOME=$(secondmate_registry_value "$ID" home || true)
+  fi
+  if [ -z "$WORKSPACE" ]; then
+    WORKSPACE=$(secondmate_registry_value "$ID" workspace || true)
   fi
 fi
 
@@ -369,6 +384,8 @@ mkdir -p "$STATE"
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
+    if [ -n "$WORKSPACE" ]; then echo "workspace=$WORKSPACE"; fi
+    if [ -n "$TAB" ]; then echo "tab=$TAB"; fi
   fi
 } > "$STATE/$ID.meta"
 
