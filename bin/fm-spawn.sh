@@ -48,6 +48,8 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 # shellcheck source=bin/fm-spawn-lib.sh
 . "$SCRIPT_DIR/fm-spawn-lib.sh"
+# shellcheck source=bin/fm-browser-lib.sh
+. "$SCRIPT_DIR/fm-browser-lib.sh"
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 
@@ -478,6 +480,12 @@ herdr_place_agent_tab() {
     start_env+=(--env "FM_CODE_ROOT_OVERRIDE=$FM_AGENT_START_CODE_ROOT")
     start_env+=(--env "FM_ROOT_OVERRIDE=$FM_AGENT_START_CODE_ROOT")
   fi
+  if [ -n "${BROWSER_SESSION:-}" ]; then
+    start_env+=(--env "FM_BROWSER_SESSION=$BROWSER_SESSION")
+  fi
+  if [ -n "${BROWSER_STATE_DIR:-}" ]; then
+    start_env+=(--env "FM_BROWSER_STATE_DIR=$BROWSER_STATE_DIR")
+  fi
   # Idempotent respawn: a herdr session restore can bring this task's tab back as
   # a husk (pane restored, agent process gone) while its agent SLOT stays
   # registered, so `herdr agent start "$slot"` would fail agent_name_taken and
@@ -605,8 +613,12 @@ validate_firstmate_operational_dirs() {
   done
 }
 
+SECONDMATE_RESUME=0
 if [ "$KIND" = secondmate ]; then
-  if [ -z "$FIRSTMATE_HOME" ] && [ -f "$STATE/$ID.meta" ]; then
+  if [ -f "$STATE/$ID.meta" ]; then
+    SECONDMATE_RESUME=1
+  fi
+  if [ -z "$FIRSTMATE_HOME" ] && [ "$SECONDMATE_RESUME" -eq 1 ]; then
     FIRSTMATE_HOME=$(grep '^home=' "$STATE/$ID.meta" | cut -d= -f2- || true)
   fi
   if [ -z "$FIRSTMATE_HOME" ]; then
@@ -669,6 +681,12 @@ else
     WORKSPACE_LABEL="$DOMAIN"
   fi
 fi
+BROWSER_SESSION="fm-$(fm_browser_slug "$(basename "$FM_HOME")-$ID")"
+if [ "$KIND" = secondmate ]; then
+  BROWSER_STATE_DIR="$PROJ_ABS/state/browser"
+else
+  BROWSER_STATE_DIR="$STATE/browser"
+fi
 
 # Create the isolated git worktree for ship/scout tasks. herdr placement (below)
 # is the workspace/tab layer; the git worktree is a plain per-task checkout so a
@@ -706,9 +724,13 @@ fi
 sq_brief=$(fm_shell_quote "$BRIEF")
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT")
-LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
-LAUNCH_CMD=${LAUNCH_CMD//__MODELFLAG__/$MODELFLAG}
-LAUNCH_CMD=${LAUNCH_CMD//__EFFORTFLAG__/$EFFORTFLAG}
+if [ "$HARNESS" = omp ] && [ "$KIND" = secondmate ] && [ "$SECONDMATE_RESUME" -eq 1 ]; then
+  LAUNCH_CMD="omp --auto-approve ${MODELFLAG}${EFFORTFLAG}-c"
+else
+  LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
+  LAUNCH_CMD=${LAUNCH_CMD//__MODELFLAG__/$MODELFLAG}
+  LAUNCH_CMD=${LAUNCH_CMD//__EFFORTFLAG__/$EFFORTFLAG}
+fi
 if [ "$HARNESS" = omp ] && [ "$KIND" = secondmate ]; then
   LAUNCH_CMD=$(apply_omp_overlay "$LAUNCH_CMD" "$PROJ_ABS")
   LAUNCH_CMD=${LAUNCH_CMD/omp --auto-approve /omp --auto-approve --approval-mode=write }
@@ -853,6 +875,8 @@ mkdir -p "$STATE"
   echo "worker=$WORKER_LABEL"
   echo "supervisor=$(fm_supervisor_name "$CONFIG")"
   echo "agent_identity=$AGENT_IDENTITY"
+  echo "browser_session=$BROWSER_SESSION"
+  echo "browser_state_dir=$BROWSER_STATE_DIR"
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"

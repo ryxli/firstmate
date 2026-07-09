@@ -164,8 +164,9 @@ SH
 }
 
 test_crewmate_lands_in_spawners_current_workspace() {
-  local home fakebin out meta
+  local home home_abs fakebin out meta
   home=$(make_case crew-new myproj Mate)
+  home_abs=$(cd "$home" && pwd -P)
   fakebin=$(make_fake_herdr "$home")
   # The spawner (main firstmate) lives in workspace wV labeled "firstmate".
   printf 'firstmate\twV\n' > "$home/ws.tsv"
@@ -176,7 +177,7 @@ test_crewmate_lands_in_spawners_current_workspace() {
     || fail "spawn failed: $out"
 
   # The whole point: a crewmate lands in the spawner's CURRENT workspace as a new
-  # tab. No project-named workspace is ever created (that was the old sprawl).
+  # tab. No project-labeled workspace is ever created (that was the old sprawl).
   ! grep -qF 'workspace create' "$home/herdr.log" \
     || fail "crew created a workspace instead of using the spawner's current one: $(cat "$home/herdr.log")"
   grep -qF 'tab create --workspace wV --label fix-login' "$home/herdr.log" \
@@ -188,6 +189,10 @@ test_crewmate_lands_in_spawners_current_workspace() {
     || fail "agent not started in its own tab under the unique task-id slot: $(cat "$home/herdr.log")"
   grep -q 'agent start fix-login-k3 .*--env PATH=' "$home/herdr.log" \
     || fail "agent start did not pass --env PATH (omp would not resolve on the daemon PATH): $(cat "$home/herdr.log")"
+  grep -qF -- '--env FM_BROWSER_SESSION=fm-crew-new-fix-login-k3' "$home/herdr.log" \
+    || fail "agent start did not pass the browser session env: $(cat "$home/herdr.log")"
+  grep -qF -- "--env FM_BROWSER_STATE_DIR=$home_abs/state/browser" "$home/herdr.log" \
+    || fail "agent start did not pass the browser state-dir env: $(cat "$home/herdr.log")"
   grep -qF 'pane rename wX:p10 fix-login' "$home/herdr.log" \
     || fail "pane was not given its worker display label: $(cat "$home/herdr.log")"
   ! grep -qF 'agent rename' "$home/herdr.log" \
@@ -202,6 +207,10 @@ test_crewmate_lands_in_spawners_current_workspace() {
   grep -qF 'domain=firstmate' "$meta" || fail "meta domain not the spawner's current workspace label"
   grep -qF 'supervisor=Mate' "$meta" || fail "meta missing supervisor name"
   grep -qF 'agent_identity=omp' "$meta" || fail "meta missing agent_identity=omp"
+  grep -qF 'browser_session=fm-crew-new-fix-login-k3' "$meta" \
+    || fail "meta missing browser_session"
+  grep -qF "browser_state_dir=$home_abs/state/browser" "$meta" \
+    || fail "meta missing browser_state_dir"
   ! grep -q '^workspace_id=' "$meta" \
     || fail "meta recorded workspace_id; teardown would destroy the shared workspace"
   pass "crewmate lands in the spawner's current workspace as a new tab (no project workspace)"
@@ -306,6 +315,7 @@ test_secondmate_lands_in_own_named_workspace() {
   fakebin=$(make_fake_herdr "$home")
   : > "$home/ws.tsv"
   smhome=$(make_secondmate_home sm-ship anchor Anchor 1)
+  smhome_abs=$(cd "$smhome" && pwd -P)
 
   out=$(run_spawn "$home" "$fakebin" anchor "$smhome" omp --secondmate) \
     || fail "secondmate spawn failed: $out"
@@ -323,12 +333,20 @@ test_secondmate_lands_in_own_named_workspace() {
     || fail "secondmate agent not started under the unique task-id slot: $(cat "$home/herdr.log")"
   grep -q 'agent start anchor .*--env PATH=' "$home/herdr.log" \
     || fail "secondmate agent start did not pass --env PATH (binary would not resolve on the daemon PATH): $(cat "$home/herdr.log")"
+  grep -qF -- '--env FM_BROWSER_SESSION=fm-sm-ship-anchor' "$home/herdr.log" \
+    || fail "secondmate agent start did not pass the browser session env: $(cat "$home/herdr.log")"
+  grep -qF -- "--env FM_BROWSER_STATE_DIR=$smhome_abs/state/browser" "$home/herdr.log" \
+    || fail "secondmate agent start did not pass the browser state-dir env: $(cat "$home/herdr.log")"
   grep -qF 'pane rename wX:p10 home' "$home/herdr.log" \
     || fail "secondmate spawn-time pane label not 'home' (it renames to its name at bootstrap): $(cat "$home/herdr.log")"
   ! grep -qF 'agent rename' "$home/herdr.log" \
     || fail "agent rename appeared; it breaks the omp<->herdr status binding: $(cat "$home/herdr.log")"
   grep -qF 'agent_identity=omp' "$home/state/anchor.meta" \
     || fail "secondmate meta missing agent_identity=omp"
+  grep -qF 'browser_session=fm-sm-ship-anchor' "$home/state/anchor.meta" \
+    || fail "secondmate meta missing browser_session"
+  grep -qF "browser_state_dir=$smhome_abs/state/browser" "$home/state/anchor.meta" \
+    || fail "secondmate meta missing browser_state_dir"
   grep -qF 'tab=wX:t9' "$home/state/anchor.meta" \
     || fail "secondmate meta missing herdr tab id"
   grep -qF 'pane close wX:p1' "$home/herdr.log" \
@@ -500,6 +518,29 @@ test_secondmate_reuses_existing_named_workspace() {
     || fail "secondmate reuse path closed a workspace init pane, but no workspace was created: $(cat "$home/herdr.log")"
   pass "secondmate reuses its existing named workspace on respawn instead of leaking one"
 }
+
+test_secondmate_relaunch_continues_existing_omp_session() {
+  local home fakebin smhome smhome_abs out
+  home=$(make_case sm-continue shipproj Mate)
+  fakebin=$(make_fake_herdr "$home")
+  smhome=$(make_secondmate_home sm-continue anchor Anchor 1)
+  smhome_abs=$(cd "$smhome" && pwd -P)
+  printf 'Anchor\twSM\n' > "$home/ws.tsv"
+  mkdir -p "$home/state"
+  printf 'pane=wOLD:p1\nhome=%s\n' "$smhome_abs" > "$home/state/anchor.meta"
+
+  out=$(run_spawn "$home" "$fakebin" anchor omp --secondmate) \
+    || fail "secondmate relaunch failed: $out"
+
+  grep -qF -- 'omp --auto-approve --approval-mode=write -c' "$home/herdr.log" \
+    || fail "secondmate relaunch did not continue the existing omp session: $(cat "$home/herdr.log")"
+  ! grep -qF -- '$(cat ' "$home/herdr.log" \
+    || fail "secondmate relaunch resent the charter instead of continuing: $(cat "$home/herdr.log")"
+  grep -qF "home=$smhome_abs" "$home/state/anchor.meta" \
+    || fail "secondmate relaunch meta did not preserve home"
+  pass "secondmate relaunch continues the existing omp session"
+}
+
 # --model/--effort are threaded into the crewmate's launch command (omp: --model
 # + --thinking) and recorded in meta, so an easy task can spawn on a cheap model.
 test_crewmate_model_effort_threaded_into_launch() {
@@ -659,6 +700,7 @@ test_crewmate_fallback_creates_project_workspace_outside_herdr
 test_crewmate_fallback_reuses_existing_project_workspace
 test_secondmate_lands_in_own_named_workspace
 test_secondmate_reuses_existing_named_workspace
+test_secondmate_relaunch_continues_existing_omp_session
 test_secondmate_home_autolinks_missing_files
 test_secondmate_omp_overlay_is_injected_when_present
 test_secondmate_omp_overlay_is_omitted_when_absent
