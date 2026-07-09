@@ -1,6 +1,6 @@
 // wbl command extension tests. Run: bun .omp/extensions/wbl.test.ts
 
-import wbl, { WB_LOOP_MESSAGE } from "./wbl";
+import wbl, { buildWbLoopMessage, WB_LOOP_MESSAGE } from "./wbl";
 
 let failures = 0;
 function check(name: string, cond: boolean): void {
@@ -43,6 +43,9 @@ check("message type", sent[0]?.message?.customType === "wb-loop");
 check("message contains protocol", sent[0]?.message?.content === WB_LOOP_MESSAGE && WB_LOOP_MESSAGE.includes("reserved `/wb` whiteboard FIRST"));
 check("message triggers turn", sent[0]?.options?.deliverAs === "nextTurn" && sent[0]?.options?.triggerTurn === true);
 check("notifies queued", notices.includes("wbl: loop queued"));
+
+await registered.wbl.handler("im certain", ctx);
+check("passes captain note", sent[1]?.message?.content === buildWbLoopMessage("im certain") && sent[1]?.message?.content.includes("Captain note: im certain"));
 
 if (failures) process.exit(1);
 console.log("ok - wbl command queues the whiteboard protocol");

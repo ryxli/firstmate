@@ -15,7 +15,13 @@ export const WB_LOOP_MESSAGE = [
 	"Report back in no more than 5 delta lines.",
 ].join("\n");
 
-const HELP = "Usage: /wbl - run the local reserved `/wb` whiteboard loop in this pane.";
+export function buildWbLoopMessage(args = ""): string {
+	const note = args.trim();
+	if (!note) return WB_LOOP_MESSAGE;
+	return `${WB_LOOP_MESSAGE}\nCaptain note: ${note}`;
+}
+
+const HELP = "Usage: /wbl [captain note] - run the local reserved `/wb` whiteboard loop in this pane.";
 
 export default function wbl(pi: ExtensionAPI) {
 	pi.setLabel?.("wbl");
@@ -28,12 +34,13 @@ export default function wbl(pi: ExtensionAPI) {
 				{ value: "loop", label: "loop", description: "run the local reserved /wb loop" },
 			].filter(v => v.value.startsWith(p));
 		},
-		handler: async (_args: string, ctx) => {
+		handler: async (args: string, ctx) => {
 			const c = ctx as { hasUI?: boolean; ui?: { notify?: (m: string, l?: string) => void } } | undefined;
+			const content = buildWbLoopMessage(args);
 
 			try {
 				pi.sendMessage?.(
-					{ customType: "wb-loop", content: WB_LOOP_MESSAGE, display: true },
+					{ customType: "wb-loop", content, display: true },
 					{ deliverAs: "nextTurn", triggerTurn: true },
 				);
 				if (c?.hasUI !== false) c?.ui?.notify?.("wbl: loop queued", "info");
