@@ -1080,6 +1080,7 @@ test_secondmate_spawn_records_home_meta() {
   grep -F 'FM_CONFIG_OVERRIDE=' "$log" >/dev/null || fail "secondmate launch did not clear config override"
   grep -F "$subhome_abs/data/charter.md" "$log" >/dev/null || fail "secondmate launch did not use persistent charter"
   grep -F "$home/data/spawn-sub/brief.md" "$log" >/dev/null && fail "secondmate launch used stale parent brief"
+  grep -F '; exec "${SHELL:-/bin/zsh}" -l' "$log" >/dev/null || fail "secondmate launch did not leave an interactive shell after agent exit"
   grep -F 'notify=' "$log" >/dev/null && fail "secondmate codex launch should not install parent turn-end notify"
   grep -F 'turn-ended' "$log" >/dev/null && fail "secondmate launch should not reference parent turn-end marker"
   pass "kind=secondmate spawn launches in the home and records routing meta"

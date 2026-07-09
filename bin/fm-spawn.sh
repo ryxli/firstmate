@@ -335,11 +335,12 @@ fi
 # Build the launch command with placeholders filled.
 sq_brief=$(shell_quote "$BRIEF")
 LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
-
 if [ "$KIND" = secondmate ]; then
   sq_home=$(shell_quote "$PROJ_ABS")
   LAUNCH_CMD="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH_CMD"
 fi
+PANE_CMD=$LAUNCH_CMD'; exec "${SHELL:-/bin/zsh}" -l'
+
 
 # Launch the agent via herdr. The agent name is "fm-<id>" so it is uniquely
 # addressable by name. The worktree (or secondmate home) is the --cwd.
@@ -352,7 +353,7 @@ AGENT_NAME="fm-$ID"
 PLACE_ARGS=()
 if [ -n "$WORKSPACE" ]; then PLACE_ARGS+=(--workspace "$WORKSPACE"); fi
 if [ -n "$TAB" ]; then PLACE_ARGS+=(--tab "$TAB"); fi
-LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" ${PLACE_ARGS[@]+"${PLACE_ARGS[@]}"} --no-focus -- sh -c "$LAUNCH_CMD" 2>&1) || {
+LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" ${PLACE_ARGS[@]+"${PLACE_ARGS[@]}"} --no-focus -- sh -c "$PANE_CMD" 2>&1) || {
   # Clean up the worktree we just created before failing.
   if [ "$KIND" != secondmate ] && [ -d "$WT" ]; then
     git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
