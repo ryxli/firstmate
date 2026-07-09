@@ -649,17 +649,18 @@ function handleHerdrPush(sup: Supervisor, push: HerdrPush): void {
 		return;
 	}
 	// idle / unknown / done: turn-end.
-	// - secondmate: a working->idle after routed work is the completion signal
-	//   the main firstmate misses today (a resting secondmate never transitions,
-	//   so arming on the TRANSITION does not nag one). Arm a short, corroborated
-	//   completion backstop (target-existence + herdr-idle corroboration +
-	//   status-log check) so a genuine completion wakes without spuriously
-	//   flagging a mid-tool-call or resting secondmate.
+	// - secondmate: only a working->idle/done/unknown transition is a completion
+	//   signal for routed work. A resting secondmate may re-seed as idle/done after
+	//   restart or pane drift; that is healthy and must not nag.
 	// - ship/scout: arm the stale backstop as before. A status line written
 	//   right after the turn-end is caught by fs.watch and supersedes the timer
 	//   (it calls clearStaleTimer).
-	if (crew.kind === "secondmate") armCompletionTimer(sup, crew);
-	else armStaleTimer(sup, crew);
+	if (crew.kind === "secondmate") {
+		if (prev === "working") armCompletionTimer(sup, crew);
+		else clearStaleTimer(sup, push.pane);
+	} else {
+		armStaleTimer(sup, crew);
+	}
 }
 
 function dropPane(sup: Supervisor, pane: string): void {
