@@ -889,12 +889,19 @@ async function paneShowsBusyBanner(sup: Supervisor, pane: string): Promise<boole
 	} catch {
 		return false;
 	}
-	const source = process.env.FM_BUSY_REGEX ?? "esc (to )?interrupt|Working\\.\\.\\.";
+	const source =
+		process.env.FM_BUSY_REGEX ??
+		[
+			"esc (to )?interrupt",
+			"⟨esc⟩",
+			"Working(\\.\\.\\.|…)?",
+			"Thinking",
+		].join("|");
 	let re: RegExp;
 	try {
 		re = new RegExp(source, "i");
 	} catch {
-		re = /esc (to )?interrupt|Working\.\.\./i;
+		re = /esc (to )?interrupt|⟨esc⟩|Working(\.\.\.|…)?|Thinking/i;
 	}
 	return text
 		.split("\n")
