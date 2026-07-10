@@ -12,10 +12,11 @@
 # FM_DISPATCH_OVERRIDE=1.
 #
 # Text submission uses herdr pane run (text+Enter atomically) and verifies
-# delivery: if a positively-confirmed swallow is detected (text still in the
-# composer after all retries), fm-send exits NON-ZERO. The compose/submit
-# logic lives in bin/fm-herdr-lib.sh. Tune with FM_SEND_RETRIES (default 3)
-# and FM_SEND_SLEEP (0.4).
+# delivery. If text is still stuck in the composer after retries, fm-send writes
+# a durable sendq item and starts a background drain loop; the drain retries on a
+# timer and appends state/sendq.status if the item is still pending after
+# FM_SENDQ_ALERT_SECS (default 300). Tune direct retries with FM_SEND_RETRIES
+# (default 3) and FM_SEND_SLEEP (0.4).
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +26,24 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 # shellcheck source=bin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
+
+fm_sendq_enqueue() {
+  local state=$1 target=$2 pane=$3 text=$4 dir id tmp out
+  dir="$state/sendq"
+  mkdir -p "$dir"
+  id="$(date +%s)-$$-$RANDOM"
+  tmp="$dir/$id.tmp"
+  out="$dir/$id.json"
+  SENDQ_ID="$id" SENDQ_CREATED_AT="$(date +%s)" SENDQ_TARGET="$target" SENDQ_PANE="$pane" SENDQ_TEXT="$text" \
+    python3 -c 'import json, os, sys; json.dump({"id": os.environ["SENDQ_ID"], "created_at": int(os.environ["SENDQ_CREATED_AT"]), "target": os.environ["SENDQ_TARGET"], "pane": os.environ["SENDQ_PANE"], "text": os.environ["SENDQ_TEXT"]}, sys.stdout); print()' > "$tmp"
+  mv "$tmp" "$out"
+  printf '%s\n' "$id"
+}
+
+fm_sendq_start_background() {
+  [ "${FM_SENDQ_NO_BACKGROUND:-0}" = "1" ] && return 0
+  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-sendq-drain.sh" >/dev/null 2>&1 &
+}
 
 _target="$1"
 P=$(fm_resolve_live_pane "$1" "$STATE")
@@ -62,11 +81,13 @@ else
   case "$*" in /*) settle=1.2 ;; *) settle=0.3 ;; esac
   retries=${FM_SEND_RETRIES:-3}
   sleep_s=${FM_SEND_SLEEP:-0.4}
-  verdict=$(fm_herdr_submit_core "$P" "$*" "$retries" "$sleep_s" "$settle")
+  text="$*"
+  verdict=$(fm_herdr_submit_core "$P" "$text" "$retries" "$sleep_s" "$settle")
   case "$verdict" in
     pending)
-      echo "error: text not submitted to $P (Enter swallowed; text left in composer)" >&2
-      exit 1
+      qid=$(fm_sendq_enqueue "$STATE" "$_target" "$P" "$text")
+      fm_sendq_start_background
+      echo "queued: text not submitted to $P; sendq item $qid will retry in background" >&2
       ;;
     send-failed)
       echo "error: text not sent to $P (herdr pane run failed)" >&2
