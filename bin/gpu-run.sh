@@ -8,7 +8,8 @@
 # - which renders as 3 tool cards plus raw `{"id":"cli:..."}` JSON blobs plus
 # leaked sentinels in the agent pane the captain watches, into ONE quiet command
 # whose stdout is just the remote command's output: no herdr JSON, no sentinels,
-# no triple card.
+# no triple card. The remote pane is also scrubbed after capture so the visible
+# shell does not retain gpu-run plumbing or command output.
 #
 # Usage: gpu-run.sh <pane_id> "<remote command>" [--timeout-ms N] [--lines N]
 #   <pane_id>   the local herdr pane bound to the remote shell (re-discover it;
@@ -39,15 +40,18 @@ done
 id="$$_$(date +%s)_${RANDOM}"
 start_tok="GRUN_START_${id}"
 end_tok="GRUN_END_${id}"
+remote_cmd="__grun_dir=\$(mktemp -d /tmp/gpu-run.XXXXXX) || exit 1; ( ${cmd} ) >\"\${__grun_dir}/out\" 2>&1; __grun_rc=\$?; printf '\\033[3J\\033[H\\033[2J'; printf 'GRUN_START_%s\n' '${id}'; cat \"\${__grun_dir}/out\"; printf 'GRUN_END_%s\n' '${id}'; rm -rf \"\${__grun_dir}\"; unset __grun_dir __grun_rc"
 
-# Fire the bracketed command; swallow all herdr CLI chatter.
-herdr pane run "$pane" "printf 'GRUN_START_%s\n' '${id}'; ${cmd}; printf 'GRUN_END_%s\n' '${id}'" >/dev/null 2>&1
+# Fire the scratch-wrapped command; swallow all herdr CLI chatter.
+herdr pane run "$pane" "$remote_cmd" >/dev/null 2>&1
 herdr wait output "$pane" --match "$end_tok" --timeout "$timeout_ms" >/dev/null 2>&1 || true
 
-# Emit only the lines strictly between the markers (the command's real output).
+# Emit only the lines strictly between the markers (the command's real output),
+# then scrub the visible pane so neither markers nor command output remain.
 herdr pane read "$pane" --source recent-unwrapped --lines "$lines" 2>/dev/null \
   | awk -v s="$start_tok" -v e="$end_tok" '
       index($0, s) {grab=1; next}
       index($0, e) {grab=0}
       grab {print}
     '
+herdr pane run "$pane" "printf '\\033[3J\\033[H\\033[2J'" >/dev/null 2>&1
