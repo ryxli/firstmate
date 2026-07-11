@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export FM_CRON_DROP_SCRIPT_DIR="$SCRIPT_DIR"
+exec python3 - "$@" <<'PY'
 """Manage per-FM_HOME cron/launchd drop-ins.
 
 V1 contract:
@@ -26,7 +30,7 @@ def env_value(name: str) -> str | None:
     return value if value else None
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(env_value("FM_CRON_DROP_SCRIPT_DIR") or Path(__file__).resolve().parent).resolve()
 FM_ROOT = Path(env_value("FM_ROOT_OVERRIDE") or SCRIPT_DIR.parent).resolve()
 FM_HOME = Path(env_value("FM_HOME") or env_value("FM_ROOT_OVERRIDE") or str(FM_ROOT)).resolve()
 STATE = Path(env_value("FM_STATE_OVERRIDE") or FM_HOME / "state").resolve()
@@ -345,3 +349,4 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+PY

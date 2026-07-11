@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior tests for bin/fm-idle-digest.sh, the bounded idle-digest loop's state
+# Behavior tests for sbin/fm-idle-digest.sh, the bounded idle-digest loop's state
 # machine. The loop replaces a trickle of tiny idle closeouts with ONE running
 # digest the first mate relays as a single ~one-screen summary when the captain
 # returns. This helper owns the mechanical bounds the documented protocol relies
@@ -18,7 +18,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ID="$ROOT/bin/fm-idle-digest.sh"
+ID="$ROOT/sbin/fm-idle-digest.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-idle-digest.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 

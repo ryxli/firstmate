@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for bin/fm-update.sh: fast-forward-only self-update of a running
+# Tests for sbin/fm-update.sh: fast-forward-only self-update of a running
 # firstmate repo and every registered secondmate home.
 #
 # The guarantees under test mirror fm-fleet-sync.sh and prime directive #3:
@@ -20,7 +20,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UPDATE="$ROOT/bin/fm-update.sh"
+UPDATE="$ROOT/sbin/fm-update.sh"
 TMP_ROOT=
 
 # Deterministic, isolated git identity and config for fixture commits.
@@ -62,7 +62,7 @@ assert_not_contains() {
 
 # Build a fresh world: a bare origin seeded with one commit, a firstmate repo
 # clone checked out on main, and a home dir with state/ and data/. Echoes the
-# world dir. Files seeded: AGENTS.md, README.md, bin/tool.sh, a skill note.
+# world dir. Files seeded: AGENTS.md, README.md, sbin/tool.sh, a skill note.
 new_world() {
   local name=$1 w
   w="$TMP_ROOT/$name"
@@ -74,8 +74,8 @@ new_world() {
 
   printf 'v1\n' > "$w/seed/AGENTS.md"
   printf 'r1\n' > "$w/seed/README.md"
-  mkdir -p "$w/seed/bin" "$w/seed/.agents/skills"
-  printf 'echo a\n' > "$w/seed/bin/tool.sh"
+  mkdir -p "$w/seed/sbin" "$w/seed/.agents/skills"
+  printf 'echo a\n' > "$w/seed/sbin/tool.sh"
   printf 's1\n' > "$w/seed/.agents/skills/note.md"
   git -C "$w/seed" add -A
   git -C "$w/seed" commit -qm c1
@@ -101,14 +101,14 @@ add_sm() {
 }
 
 # Advance origin by one commit. mode=instr changes the instruction surface
-# (AGENTS.md, bin, skills) plus README; mode=readme changes only README.
+# (AGENTS.md, sbin, skills) plus README; mode=readme changes only README.
 bump_origin() {
   local w=$1 mode=$2
   git -C "$w/seed" pull -q origin main >/dev/null 2>&1 || true
   printf 'r-%s\n' "$mode" >> "$w/seed/README.md"
   if [ "$mode" = instr ]; then
     printf 'v2\n' > "$w/seed/AGENTS.md"
-    printf 'echo b\n' > "$w/seed/bin/tool.sh"
+    printf 'echo b\n' > "$w/seed/sbin/tool.sh"
     printf 's2\n' > "$w/seed/.agents/skills/note.md"
   fi
   git -C "$w/seed" add -A
@@ -371,7 +371,7 @@ test_not_a_git_repo_message_includes_path() {
   # Register it as a secondmate with no git repo so ff_target fires the not-a-git-repo path.
   printf 't13sm\n' > "$bad_home/.fm-secondmate-home"
   printf 'v1\n' > "$bad_home/AGENTS.md"
-  mkdir -p "$bad_home/bin"
+  mkdir -p "$bad_home/sbin"
   {
     printf 'pane=w1:p1\n'
     printf 'kind=secondmate\n'

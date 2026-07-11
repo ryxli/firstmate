@@ -24,4 +24,4 @@ echo "kind=ship" >> "$TMP"
 mv "$TMP" "$META"
 
 echo "promoted $ID to ship (teardown protection restored)"
-echo "next: bin/fm-send.sh fm-$ID '<ship instructions: review scratch state with git status and git log; reset to a clean default-branch base; carry over only intended fix changes; create branch fm/$ID; implement; report done>'"
+echo "next: sbin/fm-send.sh fm-$ID '<ship instructions: review scratch state with git status and git log; reset to a clean default-branch base; carry over only intended fix changes; create branch fm/$ID; implement; report done>'"

@@ -21,18 +21,18 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
-# shellcheck source=bin/fm-tasks-axi-lib.sh
+# shellcheck source=sbin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 
 fleet_sync() {
-  [ -x "$FM_ROOT/bin/fm-fleet-sync.sh" ] || return 0
+  [ -x "$FM_ROOT/sbin/fm-fleet-sync.sh" ] || return 0
   [ -d "$PROJECTS" ] || return 0
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/fm-fleet-sync.XXXXXX" 2>/dev/null) || return 0
   monitor_was_on=0
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m 2>/dev/null || true
-  "$FM_ROOT/bin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null &
+  "$FM_ROOT/sbin/fm-fleet-sync.sh" >"$tmp" 2>/dev/null &
   pid=$!
 
   timeout=${FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT:-20}

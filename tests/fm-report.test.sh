@@ -7,7 +7,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPORT="$ROOT/bin/fm-report.sh"
+REPORT="$ROOT/sbin/fm-report.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-report.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 

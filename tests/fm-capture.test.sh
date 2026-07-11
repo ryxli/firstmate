@@ -24,7 +24,7 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-capture-tests.XXXXXX")
 
 EVENTS="$TMP_ROOT/events.jsonl"
 
-CAPTURE_EVENTS_PATH="$EVENTS" "$ROOT/bin/fm-capture.sh" steer fm-riggs "focus on the dispatcher first" "" \
+CAPTURE_EVENTS_PATH="$EVENTS" "$ROOT/sbin/fm-capture.sh" steer fm-riggs "focus on the dispatcher first" "" \
   || fail "fm-capture.sh exited non-zero on first write"
 
 [ -f "$EVENTS" ] || fail "events.jsonl not created"
@@ -84,7 +84,7 @@ pass "target field matches mate"
 # Append-only: second write adds a second line, first line intact
 # ---------------------------------------------------------------------------
 
-CAPTURE_EVENTS_PATH="$EVENTS" "$ROOT/bin/fm-capture.sh" steer fm-atlas "check the GPU memory" "" \
+CAPTURE_EVENTS_PATH="$EVENTS" "$ROOT/sbin/fm-capture.sh" steer fm-atlas "check the GPU memory" "" \
   || fail "second fm-capture.sh call failed"
 
 linecount=$(wc -l < "$EVENTS")
@@ -120,8 +120,9 @@ pass "all written lines are valid JSON after process exit"
 # ---------------------------------------------------------------------------
 
 SPECIAL_EVENTS="$TMP_ROOT/special.jsonl"
-CAPTURE_EVENTS_PATH="$SPECIAL_EVENTS" "$ROOT/bin/fm-capture.sh" steer fm-fran \
-  'use "double quotes" and $vars and '\''single'\'' freely' "" \
+SPECIAL_MSG="use \"double quotes\" and \$vars and 'single' freely"
+CAPTURE_EVENTS_PATH="$SPECIAL_EVENTS" "$ROOT/sbin/fm-capture.sh" steer fm-fran \
+  "$SPECIAL_MSG" "" \
   || fail "special char write failed"
 
 special_line=$(head -n1 "$SPECIAL_EVENTS")
@@ -136,9 +137,11 @@ pass "special characters in message are JSON-safe"
 # Fail-open: bad events path (unwritable dir) does not exit non-zero
 # ---------------------------------------------------------------------------
 
-CAPTURE_EVENTS_PATH="/proc/no-such-path/events.jsonl" "$ROOT/bin/fm-capture.sh" steer fm-riggs "test" "" \
-  && pass "fail-open: bad path exits 0" \
-  || fail "fail-open: bad path should not exit non-zero"
+if CAPTURE_EVENTS_PATH="/proc/no-such-path/events.jsonl" "$ROOT/sbin/fm-capture.sh" steer fm-riggs "test" ""; then
+  pass "fail-open: bad path exits 0"
+else
+  fail "fail-open: bad path should not exit non-zero"
+fi
 
 echo ""
 echo "All fm-capture tests passed."

@@ -57,7 +57,7 @@ SH
 
 run_bootstrap() {
   local home=$1 fakebin=$2
-  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" "$ROOT/bin/fm-bootstrap.sh"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" "$ROOT/sbin/fm-bootstrap.sh"
 }
 
 test_bootstrap_clean_with_all_tools() {

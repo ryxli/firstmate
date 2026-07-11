@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fm-fleet-view.sh - read-only visual fleet dashboard for the firstmate crew.
 #
-# Runs `bin/fm-lineage.sh --json --recursive`, embeds the normalized model into
+# Runs `sbin/fm-lineage.sh --json --recursive`, embeds the normalized model into
 # a self-contained HTML artifact (default .lavish/fleet.html), and opens it for
 # review with `bunx lavish-axi`. The HTML renders the lineage tree client side:
 # supervisor home -> workspaces -> tabs -> panes -> task, with status dots,

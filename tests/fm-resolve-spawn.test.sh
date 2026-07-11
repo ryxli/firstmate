@@ -3,8 +3,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RESOLVE="$ROOT/bin/fm-resolve-spawn.sh"
-SPAWN="$ROOT/bin/fm-spawn.sh"
+RESOLVE="$ROOT/sbin/fm-resolve-spawn.sh"
+SPAWN="$ROOT/sbin/fm-spawn.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-resolve-spawn.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 

@@ -24,7 +24,7 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
-# shellcheck source=bin/fm-herdr-lib.sh
+# shellcheck source=sbin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
 fm_sendq_enqueue() {

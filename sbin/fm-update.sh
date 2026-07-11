@@ -184,8 +184,8 @@ validate_secondmate_home() {
     VALIDATION_ERROR="not a firstmate home (missing AGENTS.md)"
     return 1
   fi
-  if [ ! -d "$abs_home/bin" ]; then
-    VALIDATION_ERROR="not a firstmate home (missing bin/)"
+  if [ ! -d "$abs_home/sbin" ] && [ ! -L "$abs_home/sbin" ]; then
+    VALIDATION_ERROR="not a firstmate home (missing sbin/)"
     return 1
   fi
   VALIDATED_HOME="$abs_home"
@@ -213,10 +213,10 @@ fetch_once() {
 
 # Which watched instruction paths changed between HEAD and BASE (comma list).
 # These are the files a running agent actually reads or runs: its instructions
-# (AGENTS.md, which CLAUDE.md symlinks), its skills, and its tooling (bin/).
+# (AGENTS.md, which CLAUDE.md symlinks), its skills, and its tooling (sbin/).
 changed_instr() {
   local dir=$1 base=$2 p out=""
-  for p in AGENTS.md bin .agents/skills; do
+  for p in AGENTS.md sbin .agents/skills; do
     if ! git -C "$dir" diff --quiet HEAD "$base" -- "$p" 2>/dev/null; then
       out="$out${out:+, }$p"
     fi

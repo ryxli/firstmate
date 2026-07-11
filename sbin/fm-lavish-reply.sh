@@ -13,7 +13,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=bin/fm-lavish-lib.sh
+# shellcheck source=sbin/fm-lavish-lib.sh
 . "$SCRIPT_DIR/fm-lavish-lib.sh"
 
 FILE=${1:-}

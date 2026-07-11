@@ -12,11 +12,11 @@
 // git, data, or state.
 //
 // Usage:
-//   bin/fm-focus            ranked table, #1 (most important) on top
-//   bin/fm-focus --json     ranked JSON (for agents / the digest)
-//   bin/fm-focus --home P   rank a specific firstmate home (default $FM_HOME or repo root)
-//   bin/fm-focus --items F  rank items from a JSON file directly (bypass gather; for tests)
-//   bin/fm-focus --no-color force plain output even on a TTY
+//   sbin/fm-focus            ranked table, #1 (most important) on top
+//   sbin/fm-focus --json     ranked JSON (for agents / the digest)
+//   sbin/fm-focus --home P   rank a specific firstmate home (default $FM_HOME or repo root)
+//   sbin/fm-focus --items F  rank items from a JSON file directly (bypass gather; for tests)
+//   sbin/fm-focus --no-color force plain output even on a TTY
 
 import { readFileSync, statSync, readdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";

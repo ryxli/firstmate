@@ -507,7 +507,7 @@ verify_firstmate_home() {
   local home=$1
   refuse_active_home_path "$home" || return 1
   [ -f "$home/AGENTS.md" ] || { echo "error: $home is not a firstmate home (missing AGENTS.md)" >&2; return 1; }
-  [ -d "$home/bin" ] || { echo "error: $home is not a firstmate home (missing bin/)" >&2; return 1; }
+  [ -d "$home/sbin" ] || [ -L "$home/sbin" ] || { echo "error: $home is not a firstmate home (missing sbin/)" >&2; return 1; }
   validate_operational_dirs "$home" || return 1
   printf '%s\n' "$(cd "$home" && pwd -P)"
 }
@@ -546,7 +546,7 @@ clone_project() {
   [ -d "$src" ] || { echo "error: project $project not found at $src" >&2; return 1; }
   git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error: project $project is not a git repo" >&2; return 1; }
   read -r mode _ <<EOF
-$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project")
+$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/sbin/fm-project-mode.sh" "$project")
 EOF
   if [ "$mode" = local-only ]; then
     echo "error: project $project is local-only; secondmate routes support only no-mistakes and direct-PR projects" >&2
@@ -573,7 +573,7 @@ validate_seed_project() {
   [ -d "$src" ] || { echo "error: project $project not found at $src" >&2; return 1; }
   git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error: project $project is not a git repo" >&2; return 1; }
   read -r mode _ <<EOF
-$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project")
+$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/sbin/fm-project-mode.sh" "$project")
 EOF
   if [ "$mode" = local-only ]; then
     echo "error: project $project is local-only; secondmate routes support only no-mistakes and direct-PR projects" >&2
@@ -774,7 +774,7 @@ registry_line_for_project() {
 project_mode_in_home() {
   local home=$1 project=$2 mode
   read -r mode _ <<EOF
-$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_HOME="$home" "$FM_ROOT/bin/fm-project-mode.sh" "$project")
+$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_HOME="$home" "$FM_ROOT/sbin/fm-project-mode.sh" "$project")
 EOF
   printf '%s\n' "$mode"
 }
@@ -973,7 +973,7 @@ seed_home() {
       return 1
     }
     [ -d "$DATA/$id" ] || SEED_PARENT_BRIEF_DIR_CREATED=1
-    "$FM_ROOT/bin/fm-brief.sh" "$id" --secondmate "$@"
+    "$FM_ROOT/sbin/fm-brief.sh" "$id" --secondmate "$@"
     SEED_PARENT_BRIEF_CREATED=1
   fi
   if grep -F '{TASK}' "$SEED_PARENT_BRIEF" >/dev/null 2>&1; then

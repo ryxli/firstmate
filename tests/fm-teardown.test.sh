@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for bin/fm-teardown.sh's unpushed-work safety check.
+# Tests for sbin/fm-teardown.sh's unpushed-work safety check.
 #
 # Covers the local-only fork-remote fix: a local-only-registered project whose
 # task pushes its work to a fork (upstream-contribution PRs) must be teardown-
@@ -16,7 +16,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEARDOWN="$ROOT/bin/fm-teardown.sh"
+TEARDOWN="$ROOT/sbin/fm-teardown.sh"
 TMP_ROOT=
 
 fail() {

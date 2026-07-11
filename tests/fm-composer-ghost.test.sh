@@ -10,9 +10,9 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LIB="$ROOT/bin/fm-herdr-lib.sh"
+LIB="$ROOT/sbin/fm-herdr-lib.sh"
 
-# shellcheck source=bin/fm-herdr-lib.sh
+# shellcheck source=sbin/fm-herdr-lib.sh
 . "$LIB"
 
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-pane-tests.XXXXXX")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for bin/fm-overlap.sh
+# Tests for sbin/fm-overlap.sh
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,7 +19,7 @@ mkdir -p "$DATA" "$STATE"
 # Run fm-overlap.sh with fixture overrides.
 RUN() {
   FM_DATA_OVERRIDE="$DATA" FM_STATE_OVERRIDE="$STATE" \
-    FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-overlap.sh" "$@"
+    FM_ROOT_OVERRIDE="$ROOT" "$ROOT/sbin/fm-overlap.sh" "$@"
 }
 
 # --- fixture helpers ---
@@ -40,7 +40,7 @@ make_brief() {
 # ---- syntax check ----
 
 test_bash_syntax() {
-  bash -n "$ROOT/bin/fm-overlap.sh" || fail "bash -n failed"
+  bash -n "$ROOT/sbin/fm-overlap.sh" || fail "bash -n failed"
   pass "bash -n passes"
 }
 
@@ -96,14 +96,14 @@ test_task_path_prefix_overlap() {
 }
 
 test_task_path_exact_overlap() {
-  make_brief "te1" "bin/fm-spawn.sh"
-  make_brief "te2" "README.md" "bin/fm-spawn.sh"
+  make_brief "te1" "sbin/fm-spawn.sh"
+  make_brief "te2" "README.md" "sbin/fm-spawn.sh"
   make_meta  "te1" "/code/firstmate"
   make_meta  "te2" "/code/firstmate"
   local out rc=0
   out=$(RUN te1 te2) || rc=$?
   [ "$rc" -eq 1 ] || fail "expected exit 1, got $rc"
-  printf '%s\n' "$out" | grep -q 'bin/fm-spawn.sh' || fail "expected shared path; got: $out"
+  printf '%s\n' "$out" | grep -q 'sbin/fm-spawn.sh' || fail "expected shared path; got: $out"
   pass "task path overlap: exact path match exits 1"
 }
 

@@ -6,7 +6,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPAWN="$ROOT/bin/fm-spawn.sh"
+SPAWN="$ROOT/sbin/fm-spawn.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-spawn-batch.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 

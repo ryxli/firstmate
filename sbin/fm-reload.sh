@@ -39,7 +39,7 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
-# shellcheck source=bin/fm-herdr-lib.sh
+# shellcheck source=sbin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
 TARGET=""
@@ -56,7 +56,7 @@ session_id_from_store() {
   [ -n "$_cwd" ] || return 0
   _rel_cwd="$_cwd"
   case "$_rel_cwd" in
-    "$HOME"/*) _rel_cwd="${_rel_cwd#$HOME}" ;;
+    "$HOME"/*) _rel_cwd="${_rel_cwd#"$HOME"}" ;;
     "$HOME") _rel_cwd="/" ;;
   esac
   _bucket="${_rel_cwd//\//-}"
@@ -176,7 +176,7 @@ fi
 # Validate --cmd template before doing anything destructive.
 if [ -n "$RESUME_CMD" ]; then
   case "$RESUME_CMD" in
-    *{id}*)
+    *"{id}"*)
       if [ -z "$SESSION_ID" ]; then
         echo "fm-reload.sh: --cmd contains '{id}' but no session id found in pane $PANE output" >&2
         exit 1
@@ -221,7 +221,7 @@ fi
 EFFECTIVE_CMD=""
 if [ -n "$RESUME_CMD" ]; then
   case "$RESUME_CMD" in
-    *{id}*)
+    *"{id}"*)
       # Already validated above that SESSION_ID is set.
       EFFECTIVE_CMD="${RESUME_CMD//\{id\}/$SESSION_ID}"
       ;;

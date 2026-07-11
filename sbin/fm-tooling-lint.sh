@@ -3,7 +3,7 @@
 # non-bun JS/TS invocation.
 #
 # This workstation runs bun (see the "House tooling conventions" block that
-# bin/fm-brief.sh bakes into every crewmate brief and secondmate charter). A
+# sbin/fm-brief.sh bakes into every crewmate brief and secondmate charter). A
 # tool firstmate ships must be invoked via `bunx <tool>` or a bun-linked bare
 # command - never the generic ecosystem runner, and never by running built
 # output or a raw script file directly in docs, help text, or any user-facing
@@ -12,13 +12,13 @@
 # reads and fails (exit 1) listing every offending line.
 #
 # Scanned surfaces under the root (default: this repo): README.md,
-# CONTRIBUTING.md, .agents/skills/*/SKILL.md, and bin/*.sh help/echo text.
+# CONTRIBUTING.md, .agents/skills/*/SKILL.md, and sbin/*.sh help/echo text.
 #
 # Usage:
 #   fm-tooling-lint.sh            # scan this repo
 #   fm-tooling-lint.sh <root>     # scan an alternate root (used by the test)
 #
-# Two files are deliberately NOT scanned: this guard and bin/fm-brief.sh. Both
+# Two files are deliberately NOT scanned: this guard and sbin/fm-brief.sh. Both
 # exist to STATE the convention, so they legitimately name the forbidden forms
 # as prohibition text; scanning them would flag the very rule they define. For
 # any other one-off counterexample a line may carry the marker
@@ -44,13 +44,13 @@ files=()
 if [ -d "$ROOT/.agents/skills" ]; then
   while IFS= read -r f; do files+=("$f"); done < <(find "$ROOT/.agents/skills" -name SKILL.md -type f 2>/dev/null)
 fi
-if [ -d "$ROOT/bin" ]; then
+if [ -d "$ROOT/sbin" ]; then
   while IFS= read -r f; do
     case "$(basename "$f")" in
       "$SELF"|"$GENERATOR") continue ;;
     esac
     files+=("$f")
-  done < <(find "$ROOT/bin" -name '*.sh' -type f 2>/dev/null)
+  done < <(find "$ROOT/sbin" -name '*.sh' -type f 2>/dev/null)
 fi
 
 [ "${#files[@]}" -gt 0 ] || { echo "ok - no tooling surfaces to scan under $ROOT"; exit 0; }
@@ -81,8 +81,8 @@ scan() { # <label> <extra-grep-flags> <pattern>
 scan "npx invocation" "-w" 'npx'
 # 2) running built output directly: `node <path-with-dist>` (e.g. node dist/cli.js).
 scan "node dist invocation" "-w" 'node[[:space:]]+[^[:space:]]*dist'
-# 3) a raw .js script file as a user-facing command (./bin/x.js, bin/x.js).
-scan ".js script invocation" "" '(^|[[:space:]]|`)\.?/?bin/[^[:space:]]*\.js'
+# 3) a raw .js script file as a user-facing command (./sbin/x.js, sbin/x.js).
+scan ".js script invocation" "" '(^|[[:space:]]|`)\.?/?sbin/[^[:space:]]*\.js'
 
 if [ "$fail" -ne 0 ]; then
   echo "--" >&2

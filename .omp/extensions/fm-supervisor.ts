@@ -65,7 +65,7 @@
  *     still carries every captain-relevant signal (crewmates write blocked:/
  *     done: lines to disk), so coverage degrades gracefully.
  *
- * ===================== firstmate state contract (parity with bin/) ==========
+ * ===================== firstmate state contract (parity with sbin/) ==========
  *   - state dir = $FM_STATE_OVERRIDE || $FM_HOME/state || <cwd>/state.
  *   - state/<task>.meta: key=value lines; pane=, kind=, pr= consumed
  *     (last pr= wins, matching bash `tail -1`).
@@ -80,7 +80,7 @@
  *     done-PR / PR-ready line); see benchmarks/model-lib.ts isParkedOnGreenPR.
  *
  * The PURE export `classifyAndDigest` below is the single source of truth for
- * relevance + digest building (mirrors bin/fm-classify-status.sh and
+ * relevance + digest building (mirrors sbin/fm-classify-status.sh and
  * benchmarks/relevance.ts exactly). It has no I/O and no omp/herdr imports, so
  * the benchmark imports it standalone under Bun. The live loop calls it too.
  */
@@ -121,7 +121,7 @@ export interface ClassifyResult {
 	detected: number; // distinct relevant events that produced a wake
 }
 
-// Matches bin/fm-classify-status.sh byte-for-byte (case-insensitive).
+// Matches sbin/fm-classify-status.sh byte-for-byte (case-insensitive).
 const CAPTAIN_RE =
 	/done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged/i;
 

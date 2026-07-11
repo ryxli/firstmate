@@ -131,8 +131,8 @@ validate_secondmate_home() {
     echo "error: $home is not a firstmate home (missing AGENTS.md)" >&2
     return 1
   fi
-  if [ ! -d "$abs_home/bin" ]; then
-    echo "error: $home is not a firstmate home (missing bin/)" >&2
+  if [ ! -d "$abs_home/sbin" ] && [ ! -L "$abs_home/sbin" ]; then
+    echo "error: $home is not a firstmate home (missing sbin/)" >&2
     return 1
   fi
   printf '%s\n' "$abs_home"

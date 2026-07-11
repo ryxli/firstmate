@@ -7,7 +7,7 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
-# shellcheck source=bin/fm-herdr-lib.sh
+# shellcheck source=sbin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
 QUEUE_DIR="$STATE/sendq"
@@ -41,7 +41,7 @@ queue_has_items() {
 
 drain_once() {
   [ -d "$QUEUE_DIR" ] || return 0
-  local file id_b64 id created target_b64 target pane_b64 pane text_b64 text now age verdict summary alert
+  local file id_b64 created target_b64 target pane_b64 pane text_b64 text now age verdict summary alert
   now=$(date +%s)
   for file in "$QUEUE_DIR"/*.json; do
     [ -e "$file" ] || continue
@@ -50,7 +50,7 @@ drain_once() {
     target_b64=$(read_queue_field "$file" target) || { rm -f "$file"; continue; }
     pane_b64=$(read_queue_field "$file" pane) || { rm -f "$file"; continue; }
     text_b64=$(read_queue_field "$file" text) || { rm -f "$file"; continue; }
-    id=$(decode_b64 "$id_b64")
+    decode_b64 "$id_b64" >/dev/null
     target=$(decode_b64 "$target_b64")
     pane=$(decode_b64 "$pane_b64")
     text=$(decode_b64 "$text_b64")

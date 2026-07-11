@@ -30,9 +30,9 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 SECONDMATE_REG="$DATA/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
-# shellcheck source=bin/fm-tasks-axi-lib.sh
+# shellcheck source=sbin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
-# shellcheck source=bin/fm-herdr-lib.sh
+# shellcheck source=sbin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 ID=$1
 FORCE=${2:-}
@@ -349,7 +349,7 @@ validate_firstmate_home_children_removal() {
 }
 
 cleanup_firstmate_home_children() {
-  local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home
+  local home=$1 sub_state child_meta child_id child_wt child_proj child_kind child_home
   sub_state="$home/state"
   [ -d "$sub_state" ] || return 0
   for child_meta in "$sub_state"/*.meta; do
@@ -448,7 +448,7 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
         echo "REFUSED: local-only worktree $WT has work not yet merged into $DEFAULT and not on any remote." >&2
         [ -n "$dirty" ] && echo "uncommitted changes present" >&2
         [ -n "$unmerged" ] && printf 'commits not yet on %s:\n%s\n' "$DEFAULT" "$unmerged" >&2
-        echo "Merge the branch into local $DEFAULT first (bin/fm-merge-local.sh after the captain approves), or push to a fork/remote, or get the captain's explicit OK to discard, then --force." >&2
+        echo "Merge the branch into local $DEFAULT first (sbin/fm-merge-local.sh after the captain approves), or push to a fork/remote, or get the captain's explicit OK to discard, then --force." >&2
         exit 1
       fi
     elif [ -n "$dirty" ] || [ -n "$unpushed" ]; then
@@ -482,7 +482,7 @@ PANE_KEY=$(printf '%s' "$PANE" | tr ':' '_')
 rm -f "$STATE/$ID.status" "$STATE/$ID.check.sh" "$STATE/$ID.meta"
 rm -f "$STATE/.herdr-prev-status-$PANE_KEY" "$STATE/.herdr-idle-count-$PANE_KEY" "$STATE/.herdr-turn-$PANE_KEY" "$STATE/.stale-$PANE_KEY"
 if [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$MODE" != local-only ]; then
-  "$FM_ROOT/bin/fm-fleet-sync.sh" "$PROJ" || true
+  "$FM_ROOT/sbin/fm-fleet-sync.sh" "$PROJ" || true
 fi
 echo "teardown $ID complete (pane $PANE, worktree $WT)"
 backlog_refresh_reminder

@@ -7,17 +7,17 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LIB="$ROOT/bin/fm-lavish-lib.sh"
-OPEN="$ROOT/bin/fm-lavish-open.sh"
-REPLY="$ROOT/bin/fm-lavish-reply.sh"
-STEWARD="$ROOT/bin/fm-lavish-steward.sh"
+LIB="$ROOT/sbin/fm-lavish-lib.sh"
+OPEN="$ROOT/sbin/fm-lavish-open.sh"
+REPLY="$ROOT/sbin/fm-lavish-reply.sh"
+STEWARD="$ROOT/sbin/fm-lavish-steward.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-lavish.XXXXXX")
 trap 'pkill -f "$TMP_ROOT" 2>/dev/null; rm -rf "$TMP_ROOT"' EXIT
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
-# shellcheck source=bin/fm-lavish-lib.sh
+# shellcheck source=sbin/fm-lavish-lib.sh
 . "$LIB"
 
 test_key_is_sha256_16_and_deterministic() {

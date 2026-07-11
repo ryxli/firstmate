@@ -6,7 +6,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-KPI="$ROOT/bin/fm-kpi.sh"
+KPI="$ROOT/sbin/fm-kpi.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

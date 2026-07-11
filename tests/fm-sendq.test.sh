@@ -18,7 +18,7 @@ trap cleanup EXIT
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-sendq-tests.XXXXXX")
 
 make_fake_herdr() {
-  local dir=$1 fb="$1/fakebin" log="$1/herdr.log"
+  local dir=$1 fb="$1/fakebin"
   mkdir -p "$fb"
   cat > "$fb/herdr" <<'SH'
 #!/usr/bin/env bash
@@ -67,7 +67,7 @@ test_send_queues_when_composer_stays_busy() {
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ still typed │" \
     FM_SEND_RETRIES=1 FM_SENDQ_NO_BACKGROUND=1 \
-    "$ROOT/bin/fm-send.sh" fm-task "queued work" >"$dir/send.out" 2>"$err" \
+    "$ROOT/sbin/fm-send.sh" fm-task "queued work" >"$dir/send.out" 2>"$err" \
     || fail "fm-send should return success after queueing a pending delivery"
 
   qcount=$(find "$home/state/sendq" -name '*.json' | wc -l | tr -d ' ')
@@ -88,12 +88,12 @@ test_drain_surfaces_stale_pending_item() {
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ still typed │" \
     FM_SEND_RETRIES=1 FM_SENDQ_NO_BACKGROUND=1 \
-    "$ROOT/bin/fm-send.sh" fm-task "queued work" >/dev/null 2>/dev/null \
+    "$ROOT/sbin/fm-send.sh" fm-task "queued work" >/dev/null 2>/dev/null \
     || fail "fm-send failed to queue stale test item"
 
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ still typed │" \
-    FM_SENDQ_ALERT_SECS=0 "$ROOT/bin/fm-sendq-drain.sh" --once \
+    FM_SENDQ_ALERT_SECS=0 "$ROOT/sbin/fm-sendq-drain.sh" --once \
     || fail "sendq drain failed"
 
   status="$home/state/sendq.status"
@@ -114,12 +114,12 @@ test_drain_removes_delivered_item() {
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ still typed │" \
     FM_SEND_RETRIES=1 FM_SENDQ_NO_BACKGROUND=1 \
-    "$ROOT/bin/fm-send.sh" fm-task "queued work" >/dev/null 2>/dev/null \
+    "$ROOT/sbin/fm-send.sh" fm-task "queued work" >/dev/null 2>/dev/null \
     || fail "fm-send failed to queue delivered test item"
 
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="working" FM_FAKE_PANE_LINES="" \
-    "$ROOT/bin/fm-sendq-drain.sh" --once \
+    "$ROOT/sbin/fm-sendq-drain.sh" --once \
     || fail "sendq drain failed delivery test"
 
   qcount=$(find "$home/state/sendq" -name '*.json' | wc -l | tr -d ' ')

@@ -2,7 +2,7 @@
 # fm-lavish-lib.sh - shared primitives for the Lavish render-delegation flow.
 #
 # The render-delegation flow keeps firstmate (and any crewmate) off the Lavish
-# long-poll: a dedicated steward worker process (bin/fm-lavish-steward.sh) holds
+# long-poll: a dedicated steward worker process (sbin/fm-lavish-steward.sh) holds
 # `lavish-axi poll <file>` for each open session and relays the captain's feedback
 # back to the originating agent's pane, so the agent's own thread is never tied up
 # polling. This library is the seam those scripts share.
@@ -70,7 +70,7 @@ fm_lavish_base_url() {
 
 # fm_lavish_state_dir: the per-home directory where steward metadata + relayed
 # feedback live (under the firstmate state dir, gitignored). Honors the same
-# FM_HOME / FM_STATE_OVERRIDE resolution as the rest of bin/.
+# FM_HOME / FM_STATE_OVERRIDE resolution as the rest of sbin/.
 fm_lavish_state_dir() {
   local script_dir root home state
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

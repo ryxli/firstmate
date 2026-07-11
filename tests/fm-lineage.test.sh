@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior tests for bin/fm-lineage.sh, the read-only lineage visualizer.
+# Behavior tests for sbin/fm-lineage.sh, the read-only lineage visualizer.
 #
 # These exercise the real reconstruction path with a fake `herdr` on PATH that
 # records every invocation and emits the documented one-shot JSON shapes
@@ -21,7 +21,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LINEAGE="$ROOT/bin/fm-lineage.sh"
+LINEAGE="$ROOT/sbin/fm-lineage.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-lineage-test.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -285,13 +285,14 @@ test_missing_pane_degrades_to_state_view() {
 }
 
 
-# Unit tests for fm_json_get (the pure-JSON accessor in bin/fm-herdr-lib.sh).
+# Unit tests for fm_json_get (the pure-JSON accessor in sbin/fm-herdr-lib.sh).
 # These do NOT use a fake herdr; they source the library directly and call the
 # function on controlled input.
 
-FM_HERDR_LIB="$ROOT/bin/fm-herdr-lib.sh"
+FM_HERDR_LIB="$ROOT/sbin/fm-herdr-lib.sh"
 
 test_fm_json_get_basic() {
+  # shellcheck source=sbin/fm-herdr-lib.sh
   . "$FM_HERDR_LIB"
   out=$(printf '{"result":{"pane_id":"w8:p3"}}' | fm_json_get result pane_id)
   [ "$out" = "w8:p3" ] || fail "fm_json_get basic: expected w8:p3, got [$out]"
@@ -299,6 +300,7 @@ test_fm_json_get_basic() {
 }
 
 test_fm_json_get_missing_key() {
+  # shellcheck source=sbin/fm-herdr-lib.sh
   . "$FM_HERDR_LIB"
   out=$(printf '{"result":{}}' | fm_json_get result pane_id)
   [ -z "$out" ] || fail "fm_json_get missing key: expected empty, got [$out]"
@@ -306,6 +308,7 @@ test_fm_json_get_missing_key() {
 }
 
 test_fm_json_get_bad_json() {
+  # shellcheck source=sbin/fm-herdr-lib.sh
   . "$FM_HERDR_LIB"
   out=$(printf 'not-json' | fm_json_get result pane_id)
   [ -z "$out" ] || fail "fm_json_get bad JSON: expected empty, got [$out]"

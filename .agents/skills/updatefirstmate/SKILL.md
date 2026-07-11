@@ -1,13 +1,13 @@
 ---
 name: updatefirstmate
-description: Self-update a running firstmate and its secondmates to the latest from origin. Use when the captain invokes /updatefirstmate (e.g. "/updatefirstmate", "update firstmate", "pull the latest firstmate"). Fast-forwards this firstmate repo's default branch and every secondmate home from origin (fast-forward only, never forced, never disruptive), then re-reads AGENTS.md and nudges each updated secondmate to do the same, so the whole tree runs the latest bin/ and instructions.
+description: Self-update a running firstmate and its secondmates to the latest from origin. Use when the captain invokes /updatefirstmate (e.g. "/updatefirstmate", "update firstmate", "pull the latest firstmate"). Fast-forwards this firstmate repo's default branch and every secondmate home from origin (fast-forward only, never forced, never disruptive), then re-reads AGENTS.md and nudges each updated secondmate to do the same, so the whole tree runs the latest sbin/ and instructions.
 user-invocable: true
 ---
 
 # updatefirstmate
 
 Self-update firstmate in place.
-Firstmate is its own repo, behind the same no-mistakes gate as any project, so new tracked material (AGENTS.md, bin/, skills) reaches `main` and then sits there until each running firstmate pulls it.
+Firstmate is its own repo, behind the same no-mistakes gate as any project, so new tracked material (AGENTS.md, sbin/, skills) reaches `main` and then sits there until each running firstmate pulls it.
 This skill performs that pull for the running main firstmate and every secondmate, without disturbing any in-flight work.
 
 The update is **fast-forward only** - the same sanctioned self-write as the fleet sync firstmate already runs.
@@ -19,7 +19,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
 
 1. **Run the updater:**
    ```sh
-   bin/fm-update.sh
+   sbin/fm-update.sh
    ```
    It fast-forwards this firstmate repo's default branch from origin, then fast-forwards every registered secondmate home (each a herdr-managed git worktree of this repo, or a plain-clone secondmate home) the same way.
    It prints one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
@@ -27,14 +27,14 @@ This touches only the firstmate repo and its own worktrees, never anything under
    - `nudge-secondmates: <window-targets...>|none`
 
 2. **Re-read AGENTS.md if your own instructions changed.**
-   When the updater printed `reread-firstmate: yes`, the tracked instruction surface (AGENTS.md, bin/, or skills) just advanced under you.
+   When the updater printed `reread-firstmate: yes`, the tracked instruction surface (AGENTS.md, sbin/, or skills) just advanced under you.
    **Read `AGENTS.md` now** (CLAUDE.md is a symlink to it) to refresh your operating instructions before doing anything else, so you are acting on the new instructions rather than the stale ones you were started with.
    When it printed `reread-firstmate: no`, nothing changed for you - skip the re-read.
 
 3. **Nudge each updated live secondmate.**
    For every target listed on the `nudge-secondmates:` line (do nothing when it says `none`), send a one-line re-read nudge so that secondmate picks up its new instructions too:
    ```sh
-   bin/fm-send.sh <window-target> 'firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'
+   sbin/fm-send.sh <window-target> 'firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'
    ```
    This is a gentle steer, not an interruption: the secondmate already got a safe tracked-files fast-forward, and the nudge never forces, tears down, or discards its work.
    A secondmate that was skipped, already current, or has no live metadata is not on the list and needs no nudge.

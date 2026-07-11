@@ -68,13 +68,13 @@ run_peek() {
     FM_FAKE_PEEK_PANE_FILE="$PANE_FILE" \
     FM_FAKE_PANE_STATUS="idle" \
     FM_STATE_OVERRIDE="$STATE_DIR" \
-    "$ROOT/bin/fm-peek.sh" "$@"
+    "$ROOT/sbin/fm-peek.sh" "$@"
 }
 
 # ---- tests ----
 
 test_bash_n() {
-  bash -n "$ROOT/bin/fm-peek.sh" || fail "bash -n syntax check failed"
+  bash -n "$ROOT/sbin/fm-peek.sh" || fail "bash -n syntax check failed"
   pass "bash -n passes"
 }
 

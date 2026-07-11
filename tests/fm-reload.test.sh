@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior tests for bin/fm-reload.sh.
+# Behavior tests for sbin/fm-reload.sh.
 #
 # Covers:
 #   (a) explicit pane + session-id captured pre-quit  -> omp --resume <id> + proof passes
@@ -16,7 +16,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RELOAD="$ROOT/bin/fm-reload.sh"
+RELOAD="$ROOT/sbin/fm-reload.sh"
 TMP_ROOT=
 
 fail() {

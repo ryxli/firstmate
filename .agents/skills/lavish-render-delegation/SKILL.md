@@ -23,7 +23,7 @@ immediately. This is the standard way to open any Lavish artifact here.
 
 2. **Open it through the steward**, NOT through `lavish-axi` directly:
    ```sh
-   bin/fm-lavish-open.sh <file.html>
+   sbin/fm-lavish-open.sh <file.html>
    ```
    This opens (or resumes) the session in the browser AND launches a detached
    steward that owns the long-poll. The relay target defaults to your current
@@ -41,7 +41,7 @@ immediately. This is the standard way to open any Lavish artifact here.
    command. Read the feedback, apply the requested changes to the artifact, then
    acknowledge in the browser - non-blocking, write-only:
    ```sh
-   bin/fm-lavish-reply.sh <file.html> "<message for the captain>"
+   sbin/fm-lavish-reply.sh <file.html> "<message for the captain>"
    ```
    `fm-lavish-reply.sh` POSTs to the write-only `agent-reply` endpoint and
    returns instantly; it NEVER polls, so it can never consume feedback or race
@@ -55,7 +55,7 @@ immediately. This is the standard way to open any Lavish artifact here.
 At session start / recovery, relaunch a steward for any still-open session this
 home owns that lost its worker (e.g. a firstmate restart):
 ```sh
-bin/fm-lavish-open.sh --recover
+sbin/fm-lavish-open.sh --recover
 ```
 It relaunches a steward only for sessions still open server-side, reaps any
 orphaned poll a hard-crashed steward left behind (so exactly one poll ever owns a
@@ -74,9 +74,9 @@ session), and drops state for sessions that already ended.
 
 ## Pieces
 
-- `bin/fm-lavish-open.sh` - entry point: open/resume + launch steward; `--recover`.
-- `bin/fm-lavish-steward.sh` - the worker loop (launched detached; not run by hand).
-- `bin/fm-lavish-reply.sh` - write-only, non-blocking agent reply.
-- `bin/fm-lavish-lib.sh` - shared session-key / URL / state primitives.
+- `sbin/fm-lavish-open.sh` - entry point: open/resume + launch steward; `--recover`.
+- `sbin/fm-lavish-steward.sh` - the worker loop (launched detached; not run by hand).
+- `sbin/fm-lavish-reply.sh` - write-only, non-blocking agent reply.
+- `sbin/fm-lavish-lib.sh` - shared session-key / URL / state primitives.
 - State lives under `state/lavish/` (gitignored): `<key>.steward` (worker meta),
   `<key>.feedback.md` (relayed feedback), `<key>.steward.log` (diagnostics).

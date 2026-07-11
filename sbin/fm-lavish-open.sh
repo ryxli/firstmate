@@ -4,7 +4,7 @@
 # This is the render-delegation entry point. Instead of opening a session and
 # then holding `lavish-axi poll` on your own thread, you call this: it opens the
 # session in the browser, then launches a DETACHED steward worker
-# (bin/fm-lavish-steward.sh) that owns the long-poll and relays the captain's
+# (sbin/fm-lavish-steward.sh) that owns the long-poll and relays the captain's
 # feedback back to YOUR pane. Control returns to you immediately, so firstmate's
 # supervision thread (or a crewmate's work thread) is never tied up polling.
 #
@@ -23,7 +23,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=bin/fm-lavish-lib.sh
+# shellcheck source=sbin/fm-lavish-lib.sh
 . "$SCRIPT_DIR/fm-lavish-lib.sh"
 
 STATE_DIR=$(fm_lavish_state_dir)

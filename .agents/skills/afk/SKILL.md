@@ -27,7 +27,7 @@ batched digest rather than per-wake injections.
    if [ -f state/.supervise-daemon.pid ] && kill -0 "$(cat state/.supervise-daemon.pid)" 2>/dev/null; then
      : # daemon already alive — it picks up the flag on its next cycle
    else
-     nohup bin/fm-supervise-daemon.sh >/dev/null 2>&1 &
+     nohup sbin/fm-supervise-daemon.sh >/dev/null 2>&1 &
    fi
    ```
    The daemon is **presence-gated**: it injects escalations only while
@@ -49,7 +49,7 @@ No `/back` is needed. The first genuine message is the return signal:
   distilled "while you were out" catch-up (drain `state/.wake-queue`, summarize
   any pending escalations from `state/.subsuper-escalations` and any
   `state/.subsuper-inject-wedged` marker), and resume full per-wake
-  responsiveness (arm `bin/fm-watch.sh`).
+  responsiveness (arm `sbin/fm-watch.sh`).
 - A message **with** the sentinel marker (`FM_INJECT_MARK`, ASCII 0x1f) → it
   is a daemon escalation; stay afk and process it.
 - Re-invoking `/afk` while already away → stay afk (refresh the flag); this
@@ -77,7 +77,7 @@ opencode, and pi).
 ## Busy-guard and composer guard
 
 The daemon never injects into an in-use pane. Two checks run before every
-injection (shared with `fm-send.sh` via `bin/fm-herdr-lib.sh`):
+injection (shared with `fm-send.sh` via `sbin/fm-herdr-lib.sh`):
 
 - **`pane_is_busy`** — the harness shows a busy footer (agent mid-turn).
 - **`pane_input_pending`** — the cursor line holds real unsubmitted text (a

@@ -29,7 +29,7 @@ import {
 /**
  * A directory is a MAIN firstmate home if it carries the canonical spawn script
  * and is NOT a secondmate home (secondmate homes are leased clones that link in
- * bin/ too, but carry the .fm-secondmate-home marker).
+ * sbin/ too, but carry the .fm-secondmate-home marker).
  */
 function isMainHome(dir: string): boolean {
 	return existsSync(join(dir, "bin", "fm-spawn.sh")) && !existsSync(join(dir, ".fm-secondmate-home"));
@@ -227,7 +227,7 @@ async function fetchHerdrAgents(): Promise<{ agents: HerdrAgent[]; ok: boolean }
 // fm-focus integration: the SINGLE ranking authority.
 // ---------------------------------------------------------------------------
 // The bridge does NOT classify "what needs the captain" itself. It calls the
-// firstmate's bin/fm-focus.mjs rank()/gather()/reason(), so the /bridge PENDING
+// firstmate's sbin/fm-focus.mjs rank()/gather()/reason(), so the /bridge PENDING
 // list is the SAME ranking the captain gets from `fm-focus` - the two glance
 // surfaces can never disagree. Best-effort: if fm-focus is unreachable the
 // bridge degrades to an empty pending list plus a note.
@@ -252,15 +252,15 @@ interface FocusModule {
 
 /** Rank the whole fleet via fm-focus and keep the rows that actually need the captain. */
 async function computeFocusPending(main: string, prByUrl: Map<string, PrInfo>, notes: string[]): Promise<PendingItem[]> {
-	const focusPath = join(main, "bin", "fm-focus.mjs");
+	const focusPath = join(main, "sbin", "fm-focus.mjs");
 	if (!existsSync(focusPath)) {
-		notes.push("priority ranking unavailable - bin/fm-focus.mjs not found");
+		notes.push("priority ranking unavailable - sbin/fm-focus.mjs not found");
 		return [];
 	}
 	let mod: FocusModule;
 	try {
 		// Runtime-selected path: fm-focus.mjs lives in the resolved main firstmate
-		// home's bin/, a separate repo whose absolute path is only known at runtime
+		// home's sbin/, a separate repo whose absolute path is only known at runtime
 		// (resolveMainHome walks the filesystem). A static import cannot name it.
 		mod = await import(focusPath);
 	} catch (err) {

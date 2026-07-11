@@ -21,7 +21,7 @@ cleanup() {
 trap cleanup EXIT
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-identity-migrate-tests.XXXXXX")
 
-MIGRATE="$ROOT/bin/fm-identity-migrate.sh"
+MIGRATE="$ROOT/sbin/fm-identity-migrate.sh"
 
 # Build a minimal registry and home structure for tests.
 make_home() {

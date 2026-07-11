@@ -72,9 +72,9 @@ else
   DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 fi
 
-# shellcheck source=bin/fm-identity-lib.sh
+# shellcheck source=sbin/fm-identity-lib.sh
 . "$SCRIPT_DIR/fm-identity-lib.sh"
-# shellcheck source=bin/fm-herdr-lib.sh
+# shellcheck source=sbin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
 ROOT_HOME="$FM_HOME"
@@ -199,9 +199,9 @@ gather_home() {
       fi
 
       if [ "$HERDR_OK" != 1 ]; then
-        degraded=herdr-unreachable
+        degraded="herdr-unreachable"
       elif [ -z "$pane" ]; then
-        degraded=state-only
+        degraded="state-only"
       else
         local pjson live_pid ajson astat
         pjson=$(pane_json "$pane")
@@ -220,7 +220,7 @@ gather_home() {
           [ -n "$astat" ] || astat=$(printf '%s' "$pjson" | fm_json_get result pane agent_status)
           pane_status="$astat"
         else
-          degraded=missing-pane
+          degraded="missing-pane"
         fi
       fi
 

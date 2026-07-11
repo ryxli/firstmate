@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic tests for bin/fm-focus: the priority ranking guarantee.
+# Hermetic tests for sbin/fm-focus: the priority ranking guarantee.
 #
 # Asserts the total order against fixtures WITHOUT a live herdr (FM_FOCUS_NO_HERDR
 # skips the agent_status subprocess), so the status-line-driven classes - the
@@ -9,7 +9,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FOCUS="$ROOT/bin/fm-focus.sh"
+FOCUS="$ROOT/sbin/fm-focus.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export FM_FOCUS_NO_HERDR=1

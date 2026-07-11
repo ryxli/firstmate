@@ -62,8 +62,6 @@ write_meta() {
 }
 
 # Common env knobs shared by send-exercising tests.
-SEND_ENV="FM_SEND_SLEEP=0.05 FM_SEND_RETRIES=1"
-
 # -----------------------------------------------------------------------
 # 1. Normal send with no gate flags active -> succeeds
 # -----------------------------------------------------------------------
@@ -75,7 +73,7 @@ test_normal_send_unaffected() {
   PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" FM_SEND_SLEEP=0.05 FM_SEND_RETRIES=1 \
     FM_GATE_SENT_LOG="$sent" \
-    "$ROOT/bin/fm-send.sh" w1:p1 'do some work' >/dev/null 2>"$err" \
+    "$ROOT/sbin/fm-send.sh" w1:p1 'do some work' >/dev/null 2>"$err" \
     || fail "normal send failed when no gate flags exist: $(cat "$err")"
   grep -qF 'do some work' "$sent" || fail "sent log missing expected text"
   pass "normal send succeeds with no gate flags"
@@ -91,7 +89,7 @@ test_freeze_blocks_send() {
   printf 'ship is on standby\n' > "$state/.dispatch-freeze"
   if PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" FM_SEND_SLEEP=0.05 FM_SEND_RETRIES=1 \
-    "$ROOT/bin/fm-send.sh" w1:p1 'new task' >/dev/null 2>"$err"; then
+    "$ROOT/sbin/fm-send.sh" w1:p1 'new task' >/dev/null 2>"$err"; then
     fail "fm-send succeeded despite a dispatch freeze"
   fi
   grep -qF 'frozen' "$err" \
@@ -113,7 +111,7 @@ test_steer_bypasses_freeze() {
   PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" FM_SEND_SLEEP=0.05 FM_SEND_RETRIES=1 \
     FM_GATE_SENT_LOG="$sent" \
-    "$ROOT/bin/fm-send.sh" w1:p1 --steer 'course correction' >/dev/null 2>"$err" \
+    "$ROOT/sbin/fm-send.sh" w1:p1 --steer 'course correction' >/dev/null 2>"$err" \
     || fail "--steer did not bypass the dispatch freeze: $(cat "$err")"
   grep -qF 'course correction' "$sent" \
     || fail "--steer message was not delivered to the pane"
@@ -132,7 +130,7 @@ test_override_env_bypasses_freeze() {
   PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" FM_SEND_SLEEP=0.05 FM_SEND_RETRIES=1 \
     FM_GATE_SENT_LOG="$sent" FM_DISPATCH_OVERRIDE=1 \
-    "$ROOT/bin/fm-send.sh" w1:p1 'override message' >/dev/null 2>"$err" \
+    "$ROOT/sbin/fm-send.sh" w1:p1 'override message' >/dev/null 2>"$err" \
     || fail "FM_DISPATCH_OVERRIDE=1 did not bypass freeze: $(cat "$err")"
   grep -qF 'override message' "$sent" \
     || fail "override message not delivered to pane"
@@ -150,7 +148,7 @@ test_focus_lock_blocks_send() {
   printf 'working on REI-999 only\n' > "$state/.focus-target"
   if PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" FM_SEND_SLEEP=0.05 FM_SEND_RETRIES=1 \
-    "$ROOT/bin/fm-send.sh" fm-target 'new assignment' >/dev/null 2>"$err"; then
+    "$ROOT/sbin/fm-send.sh" fm-target 'new assignment' >/dev/null 2>"$err"; then
     fail "fm-send succeeded despite a focus lock"
   fi
   grep -qF 'focus-locked' "$err" \
@@ -173,7 +171,7 @@ test_focus_lock_absent_allows_send() {
   PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" FM_SEND_SLEEP=0.05 FM_SEND_RETRIES=1 \
     FM_GATE_SENT_LOG="$sent" \
-    "$ROOT/bin/fm-send.sh" fm-target 'new task' >/dev/null 2>"$err" \
+    "$ROOT/sbin/fm-send.sh" fm-target 'new task' >/dev/null 2>"$err" \
     || fail "fm-send failed when no focus lock exists: $(cat "$err")"
   grep -qF 'new task' "$sent" \
     || fail "message not delivered when focus lock is absent"
@@ -193,7 +191,7 @@ test_steer_bypasses_focus_lock() {
   PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" FM_SEND_SLEEP=0.05 FM_SEND_RETRIES=1 \
     FM_GATE_SENT_LOG="$sent" \
-    "$ROOT/bin/fm-send.sh" fm-target --steer 'quick correction' >/dev/null 2>"$err" \
+    "$ROOT/sbin/fm-send.sh" fm-target --steer 'quick correction' >/dev/null 2>"$err" \
     || fail "--steer did not bypass the focus lock: $(cat "$err")"
   grep -qF 'quick correction' "$sent" \
     || fail "--steer message not delivered past focus lock"
@@ -210,7 +208,7 @@ test_steer_key_send_bypasses_freeze() {
   printf 'frozen\n' > "$state/.dispatch-freeze"
   PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" \
-    "$ROOT/bin/fm-send.sh" w1:p1 --steer --key Escape >/dev/null 2>"$err" \
+    "$ROOT/sbin/fm-send.sh" w1:p1 --steer --key Escape >/dev/null 2>"$err" \
     || fail "--steer --key send blocked by freeze: $(cat "$err")"
   pass "--steer --key send bypasses freeze"
 }

@@ -5,14 +5,14 @@
 # `bunx lavish-axi poll <file>` (the official, stable long-poll), and every time
 # the captain sends feedback it:
 #   1. appends the feedback to state/lavish/<key>.feedback.md (durable record),
-#   2. wakes the ORIGINATING agent's pane via bin/fm-send.sh with a one-line
+#   2. wakes the ORIGINATING agent's pane via sbin/fm-send.sh with a one-line
 #      pointer to that file plus the reply command,
 # then loops back into the poll. It exits when the session ends (the captain
 # closes it) or when it is told to stop. Because the steward is a separate
 # process from the agent that opened the artifact, the agent's own thread is
 # NEVER tied up polling Lavish - it just gets woken when there is feedback.
 #
-# Usage (normally launched detached by bin/fm-lavish-open.sh, not by hand):
+# Usage (normally launched detached by sbin/fm-lavish-open.sh, not by hand):
 #   fm-lavish-steward.sh <canonical-file> <session-key> <relay-pane> [<session-url>]
 #     <canonical-file> realpath of the artifact (the lavish session key source)
 #     <session-key>    16-hex key (fm_lavish_key); names the state files
@@ -22,7 +22,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=bin/fm-lavish-lib.sh
+# shellcheck source=sbin/fm-lavish-lib.sh
 . "$SCRIPT_DIR/fm-lavish-lib.sh"
 
 FILE=${1:-}

@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
-# shellcheck source=bin/fm-spawn-lib.sh
+# shellcheck source=sbin/fm-spawn-lib.sh
 . "$SCRIPT_DIR/fm-spawn-lib.sh"
 
 project=${1:-}
@@ -19,7 +19,7 @@ if [ -z "$project" ]; then
 fi
 
 if [ -z "$harness_arg" ]; then
-  harness=$("$FM_ROOT/bin/fm-harness.sh" crew)
+  harness=$("$FM_ROOT/sbin/fm-harness.sh" crew)
 elif printf '%s' "$harness_arg" | grep '[[:space:]]' >/dev/null; then
   harness=$(fm_first_command_word "$harness_arg" || true)
 else

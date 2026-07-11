@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fm-kpi-view.sh - read-only visual KPI dashboard for the firstmate workflow.
 #
-# Runs `bin/fm-kpi.sh --json`, embeds the canonical KPI object (schema
+# Runs `sbin/fm-kpi.sh --json`, embeds the canonical KPI object (schema
 # "fm-kpi/1") into a self-contained HTML artifact (default .lavish/kpi.html),
 # and opens it for review with `bunx lavish-axi`. The HTML renders the KPI
 # object client side: a workspace header, headline efficiency stat cards,

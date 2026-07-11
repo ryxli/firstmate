@@ -6,8 +6,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HARNESS="$ROOT/bin/fm-harness.sh"
-SPAWN="$ROOT/bin/fm-spawn.sh"
+HARNESS="$ROOT/sbin/fm-harness.sh"
+SPAWN="$ROOT/sbin/fm-spawn.sh"
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
@@ -66,7 +66,7 @@ test_omp_launch_template() {
   load_launch_template || fail "could not load launch_template from fm-spawn.sh"
   local out
   out=$(launch_template omp)
-  [ "$out" = 'omp --auto-approve "$(cat __BRIEF__)"' ] \
+  [ "$out" = "omp --auto-approve \"\$(cat __BRIEF__)\"" ] \
     || fail "omp launch template wrong: '$out'"
   pass "omp launch template uses --auto-approve and the brief"
 }

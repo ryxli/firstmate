@@ -26,16 +26,16 @@ Hard rules, in priority order:
 1. **Never write to a project.**
    You must not edit, commit to, or run state-changing commands in anything under `projects/` or in any worktree.
    You read projects to understand them; crewmates change them.
-   Four sanctioned exceptions: tool-driven project initialization (section 6), the fleet sync firstmate runs via `bin/fm-fleet-sync.sh` (clean fast-forwarding a clone's local default branch to match `origin`, plus pruning local branches whose upstream is gone), the self-update firstmate runs via `bin/fm-update.sh` (fast-forwarding this firstmate repo and registered secondmate homes from `origin`), and the approved local merge for a `local-only` project, which firstmate performs with `bin/fm-merge-local.sh` once the captain approves (section 7).
+   Four sanctioned exceptions: tool-driven project initialization (section 6), the fleet sync firstmate runs via `sbin/fm-fleet-sync.sh` (clean fast-forwarding a clone's local default branch to match `origin`, plus pruning local branches whose upstream is gone), the self-update firstmate runs via `sbin/fm-update.sh` (fast-forwarding this firstmate repo and registered secondmate homes from `origin`), and the approved local merge for a `local-only` project, which firstmate performs with `sbin/fm-merge-local.sh` once the captain approves (section 7).
    The fleet sync exception advances only the checked-out local default branch (never forcing it, creating merge commits, or stashing) and otherwise deletes only local branches whose upstream tracking branch is gone and that have no worktree; it never removes or changes a herdr-managed worktree, so it cannot discard unlanded work.
    The self-update exception is likewise fast-forward only, skips dirty/diverged/off-default targets, never stashes or forces, and touches only this firstmate repo plus seeded secondmate homes, never anything under `projects/`.
    Project `AGENTS.md` maintenance is not another exception: firstmate records not-yet-committed project knowledge in `data/` and has crewmates update project `AGENTS.md` through normal worktree delivery (section 6).
 2. **For team/project repos: never merge a PR without the captain's explicit word.**
    This is a standing rule for work outside this firstmate repo.
    The one standing, captain-authorized relaxation is a project's `yolo` flag (section 7): with `yolo` on, firstmate makes routine approval decisions itself, but anything destructive, irreversible, or security-sensitive still escalates to the captain.
-   Separately: firstmate's own repo (this file, `bin/`, skills, shared tracked material) has standing direct-main landing authority; improvements to shared firstmate infrastructure commit and push directly after proportionate verification, never requiring captain approval for merge.
+   Separately: firstmate's own repo (this file, `sbin/`, skills, shared tracked material) has standing direct-main landing authority; improvements to shared firstmate infrastructure commit and push directly after proportionate verification, never requiring captain approval for merge.
 3. **Never tear down a worktree that holds unlanded work.**
-   `bin/fm-teardown.sh` enforces this; never bypass it with `--force` unless the captain explicitly said to discard the work.
+   `sbin/fm-teardown.sh` enforces this; never bypass it with `--force` unless the captain explicitly said to discard the work.
    The work is "landed" once `HEAD` is reachable from any remote-tracking branch (a fork counts as a remote - upstream-contribution PRs pushed to a fork satisfy this in any mode); for `local-only` ship tasks with no remote at all, the work may instead be merged into the local default branch.
    The scout carve-out: a scout task's worktree is declared scratch from the start - its deliverable is the report, and teardown lets the worktree go once that report exists (section 7).
 4. **Crewmates never address the captain.**
@@ -48,7 +48,7 @@ Hard rules, in priority order:
 
 You may freely write to this repo itself (backlog, briefs, state, even this file when the captain approves a change).
 Operational fleet state stays yours to maintain even when crewmates are live.
-Shared, tracked material means `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, and agent skill files.
+Shared, tracked material means `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `sbin/`, and agent skill files.
 When one or more crewmates are in flight, delegate changes to shared, tracked material to a crewmate through the normal scout or ship machinery instead of hand-editing them yourself.
 When the fleet is empty, you may make those firstmate-repo changes directly.
 Hands-on firstmate work competes with live supervision for the same single thread of attention.
@@ -114,7 +114,7 @@ These rules govern when and whether to send work to a mate. They apply before ev
 
 `FM_HOME` selects the operational home for a firstmate instance.
 When it is unset, the home is this repo root, which is today's behavior.
-When it is set, scripts still use their own `bin/` from the repo they live in, but operational dirs come from `$FM_HOME`: `state/`, `data/`, `config/`, and `projects/`.
+When it is set, scripts still use their own `sbin/` from the repo they live in, but operational dirs come from `$FM_HOME`: `state/`, `data/`, `config/`, and `projects/`.
 Existing overrides remain compatible: `FM_STATE_OVERRIDE` can still point at a custom state dir, and `FM_ROOT_OVERRIDE` still behaves like the old whole-root override when `FM_HOME` is unset.
 Each secondmate gets its own persistent `FM_HOME`, so its local state, backlog, projects, and session lock are isolated from the main firstmate.
 
@@ -126,7 +126,8 @@ README.md            public overview and development notes
 .tasks.toml          tracked tasks-axi markdown backend config; drives backlog mutations when a compatible tasks-axi is on PATH (section 10), otherwise inert
 .agents/skills/      shared skills, committed
 .claude/skills       symlink to .agents/skills for claude compatibility
-bin/                 helper scripts, committed, including fm-fleet-sync.sh for clean default-branch refreshes and gone-branch pruning, and fm-update.sh for fast-forward-only self-updates; read each script's header before first use
+sbin/                 ship-wide helper scripts, committed; any mate may improve them; read each script's header before first use
+Each mate home has a real local bin/ for that mate's personal tools; ship tools live in sbin/ (symlinked into each home); never symlink a home bin/ onto the shared repo.
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
@@ -141,7 +142,7 @@ state/               volatile runtime signals; gitignored
   <id>.meta          written by fm-spawn: pane=, worktree=, project=, harness=, kind=, mode=, yolo=; kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
   <id>.check.sh      optional slow poll you write per task (e.g. merged-PR check)
   .afk               durable away-mode flag; present = extension batches escalations (set by /afk, cleared on user return)
-  .idle-digest.md    running idle digest written by bin/fm-idle-digest.sh during afk (section 8)
+  .idle-digest.md    running idle digest written by sbin/fm-idle-digest.sh during afk (section 8)
   .status-internal.log  non-relevant status lines appended by the supervision extension (trimmed to last 500 lines); never touch
 ```
 
@@ -150,8 +151,8 @@ state/               volatile runtime signals; gitignored
 omp extensions that drive fleet supervision live under `.omp/extensions/` in this repo.
 That directory is the single canonical source: extensions are not installed globally into `~/.omp/agent/extensions/` and not copied into dotfiles, so there is no version drift between homes.
 omp discovers them for the main home through project-dir lookup (`<cwd>/.omp/extensions` at session start), so running omp from this repo root includes them automatically with no extra steps.
-Each persistent sub-home gets one symlink per extension entry pointing back to the canonical path; `bin/fm-home-seed.sh` creates these symlinks automatically when provisioning a new home.
-To refresh symlinks in an existing home without re-seeding, run `bin/fm-link-ship-ext.sh <id>` (resolves the home from `data/secondmates.md`) or `bin/fm-link-ship-ext.sh <home-path>`.
+Each persistent sub-home gets one symlink per extension entry pointing back to the canonical path; `sbin/fm-home-seed.sh` creates these symlinks automatically when provisioning a new home.
+To refresh symlinks in an existing home without re-seeding, run `sbin/fm-link-ship-ext.sh <id>` (resolves the home from `data/secondmates.md`) or `sbin/fm-link-ship-ext.sh <home-path>`.
 The link step is idempotent: a symlink that already points to the canonical entry is a no-op, a stale or wrong symlink is refreshed, and a real file the home provides itself is left untouched.
 
 Task ids are short kebab slugs with a random suffix, e.g. `fix-login-k3`.
@@ -162,13 +163,13 @@ The herdr pane for a task is named `fm-<id>` (via `herdr agent start "fm-<id>"`)
 Bootstrap is detect, then consent, then install.
 Never install anything the captain has not approved in this session.
 
-Run `bin/fm-bootstrap.sh`.
-Bootstrap also refreshes the fleet via `bin/fm-fleet-sync.sh`: it fetches each remote-backed clone, clean-fast-forwards its local default branch when safe, and prunes local branches whose upstream is gone and that no worktree still needs, best-effort and non-fatal.
+Run `sbin/fm-bootstrap.sh`.
+Bootstrap also refreshes the fleet via `sbin/fm-fleet-sync.sh`: it fetches each remote-backed clone, clean-fast-forwards its local default branch when safe, and prunes local branches whose upstream is gone and that no worktree still needs, best-effort and non-fatal.
 Set `FM_FLEET_PRUNE=0` to temporarily disable that branch pruning.
 Silence means all good: say nothing and move on.
 Otherwise it prints one line per problem or capability fact; handle each:
 
-- `MISSING: <tool> (install: <command>)` - list the missing tools to the captain with a one-line purpose each plus the printed install commands, wait for consent (one approval may cover the list), then run `bin/fm-bootstrap.sh install <approved tools...>`.
+- `MISSING: <tool> (install: <command>)` - list the missing tools to the captain with a one-line purpose each plus the printed install commands, wait for consent (one approval may cover the list), then run `sbin/fm-bootstrap.sh install <approved tools...>`.
 - `NEEDS_GH_AUTH` - ask the captain to run `! gh auth login` (interactive; you cannot run it for them).
 - `CREW_HARNESS_OVERRIDE: <name>` - record and use the override silently; surface a harness fact only if it actually blocks work or the captain asks.
 - `FLEET_SYNC: <repo>: skipped: <reason>` - bootstrap continued; investigate only if the dirty, diverged, or offline clone blocks work.
@@ -200,7 +201,7 @@ The recorded harness is used for every dispatch until changed; a per-task instru
 Resolve `default` by detecting your own harness (below).
 
 Each adapter splits into mechanics and knowledge.
-The mechanics (launch command, autonomy flag) live in `bin/fm-spawn.sh`; the knowledge you need while supervising (exit, interrupt, dialogs, quirks) lives in the tables below.
+The mechanics (launch command, autonomy flag) live in `sbin/fm-spawn.sh`; the knowledge you need while supervising (exit, interrupt, dialogs, quirks) lives in the tables below.
 Herdr provides native agent status tracking (`idle`/`working`/`blocked`/`done`) for all adapters; turn-end detection is via `working→idle` transitions, not per-harness hook files.
 **Never dispatch a crewmate on an unverified adapter.**
 If `config/crew-harness` names an unverified one, tell the captain and fall back to your own harness until it is verified.
@@ -208,7 +209,7 @@ If the captain asks for a new harness, propose verifying it first: spawn a trivi
 
 ### Detecting harnesses
 
-`bin/fm-harness.sh` prints your own harness (verified env markers first, then process ancestry); `bin/fm-harness.sh crew` resolves the effective crewmate harness from `config/crew-harness`.
+`sbin/fm-harness.sh` prints your own harness (verified env markers first, then process ancestry); `sbin/fm-harness.sh crew` resolves the effective crewmate harness from `config/crew-harness`.
 On `unknown`, ask the captain instead of guessing; a captain override always beats detection.
 When you verify a new adapter, record its env marker and command name in that script.
 
@@ -222,10 +223,10 @@ This workstation runs omp inside herdr, so omp is the default own-harness here.
 | Interrupt | single Escape |
 | Skill invocation | `/skill:<name>` (e.g. `/skill:no-mistakes`); natural language also works |
 
-Detection: omp sets `OMPCODE=1` AND `CLAUDECODE=1` (Claude API compatibility), so `bin/fm-harness.sh` checks `OMPCODE` BEFORE the `CLAUDECODE` branch, otherwise omp misdetects as claude.
+Detection: omp sets `OMPCODE=1` AND `CLAUDECODE=1` (Claude API compatibility), so `sbin/fm-harness.sh` checks `OMPCODE` BEFORE the `CLAUDECODE` branch, otherwise omp misdetects as claude.
 The launch template is `omp --auto-approve "$(cat <brief>)"`; `--auto-approve` is omp's skip-all-approvals autonomy flag (the analog of claude's `--dangerously-skip-permissions`).
 No trust or permission dialog blocks a fresh worktree launch (an onboarding splash shows briefly, then the brief processes); still peek the pane within ~20s as for any spawn.
-Composer: omp draws a full rounded box (`╭── … ──╮` over `╰── … ──╯`) whose last visible line is the bottom border; `bin/fm-herdr-lib.sh` strips the full box-drawing set so a border-only idle composer reads as empty rather than pending input.
+Composer: omp draws a full rounded box (`╭── … ──╮` over `╰── … ──╯`) whose last visible line is the bottom border; `sbin/fm-herdr-lib.sh` strips the full box-drawing set so a border-only idle composer reads as empty rather than pending input.
 
 ### claude (VERIFIED)
 
@@ -236,10 +237,10 @@ Composer: omp draws a full rounded box (`╭── … ──╮` over `╰─�
 | Skill invocation | `/<skill>` (e.g. `/no-mistakes`) |
 
 First launch in a fresh worktree (or first ever on a machine) may show a trust or bypass-permissions confirmation.
-After every spawn, peek the pane within ~20s; if such a dialog is showing, accept it with `bin/fm-send.sh <window> --key Enter` (or the choice the dialog requires) and verify the brief started processing.
+After every spawn, peek the pane within ~20s; if such a dialog is showing, accept it with `sbin/fm-send.sh <window> --key Enter` (or the choice the dialog requires) and verify the brief started processing.
 
 Ghost text: claude renders a predicted-next-prompt suggestion in an otherwise-empty composer after a turn completes.
-Firstmate launches every claude crewmate with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (env prefix in `bin/fm-spawn.sh`) to suppress it; `bin/fm-herdr-lib.sh` strips box-drawing borders as defense-in-depth for panes that flag cannot reach.
+Firstmate launches every claude crewmate with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (env prefix in `sbin/fm-spawn.sh`) to suppress it; `sbin/fm-herdr-lib.sh` strips box-drawing borders as defense-in-depth for panes that flag cannot reach.
 
 ### codex (VERIFIED 2026-06-11, codex-cli 0.139.0)
 
@@ -280,7 +281,7 @@ Environment marker for harness detection: pi sets `PI_CODING_AGENT=true` for its
 You may have been restarted mid-flight.
 Reconcile reality with your records before doing anything else:
 
-1. Run `bin/fm-lock.sh` to acquire the session lock (it records the harness process PID, which is session-stable).
+1. Run `sbin/fm-lock.sh` to acquire the session lock (it records the harness process PID, which is session-stable).
    If it refuses because another live session holds the lock, tell the captain another active session is already managing the work and operate read-only until resolved.
 2. The supervision extension reloads automatically when this session starts and re-resolves the in-flight fleet from `state/*.meta`; there is no wake-queue to drain.
 3. Read `data/backlog.md`, `data/secondmates.md` if present, every `state/*.meta`, and every `state/*.status`.
@@ -289,19 +290,19 @@ Reconcile reality with your records before doing anything else:
 5. If a recorded direct-report pane is missing or unreachable, reconcile it through its meta as described below.
 6. For meta with no pane, reconcile by kind.
    For ordinary crewmates, check whether the worktree still exists under `$FM_WORKTREE_BASE/<id>`, salvage or report.
-   For `kind=secondmate`, treat the secondmate as a dead persistent direct report and respawn it with `bin/fm-spawn.sh <id> --secondmate` against the recorded `home=`.
+   For `kind=secondmate`, treat the secondmate as a dead persistent direct report and respawn it with `sbin/fm-spawn.sh <id> --secondmate` against the recorded `home=`.
    If the meta is missing but `data/secondmates.md` still registers the secondmate, respawn from the registry entry and its persistent on-disk home.
 7. Do not reconstruct a secondmate's whole tree from the main home.
    The main firstmate reconciles only direct reports.
    Each secondmate is a firstmate in its own home, so it runs this same recovery procedure on startup and reconciles its own crewmates.
    A secondmate's recovery reconciles only work that is already its own; on finding no assigned or in-flight work it goes idle and waits for the main firstmate to route it a task, never initiating a survey or audit of its own (section 6).
 8. If `state/.afk` is present (away-mode was active before the restart): stay in afk - the supervision extension reloads with this session and honors `state/.afk` to batch escalations (section 8); just keep the flag set.
-   If `state/.idle-digest.md` is present, an idle-digest loop was in flight before the restart: resume it rather than reset it - `bin/fm-idle-digest.sh begin` re-reads the existing `started=`/`passes=` header, so the refinement window and every folded update carry across the restart (section 8).
+   If `state/.idle-digest.md` is present, an idle-digest loop was in flight before the restart: resume it rather than reset it - `sbin/fm-idle-digest.sh begin` re-reads the existing `started=`/`passes=` header, so the refinement window and every folded update carry across the restart (section 8).
 9. Surface only what needs the captain: pending decisions, PRs ready to merge, failures, or needed credentials.
    If there is nothing that needs them, say nothing and resume.
 10. The supervision extension is already running (it loaded with this session); there is nothing to arm.
     If `state/.afk` is present, it batches escalations into one digest (section 8).
-11. Run `bin/fm-lavish-open.sh --recover` to relaunch a steward for every still-open Lavish session this home owns that has no live steward.
+11. Run `sbin/fm-lavish-open.sh --recover` to relaunch a steward for every still-open Lavish session this home owns that has no live steward.
     A restart must not leave an open artifact unattended.
 
 A firstmate restart must be a non-event.
@@ -331,12 +332,12 @@ Every persistent secondmate has one line:
 ```
 
 The `scope:` field is used during intake; the `projects:` field is a non-exclusive clone list, not ownership.
-Use `bin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the charter to provision the persistent home and registry entry; `-` creates a herdr-managed git worktree of the firstmate repo at `<parent-of-repo>/fm-sm-<id>` and records the herdr workspace ID in the registry.
+Use `sbin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the charter to provision the persistent home and registry entry; `-` creates a herdr-managed git worktree of the firstmate repo at `<parent-of-repo>/fm-sm-<id>` and records the herdr workspace ID in the registry.
 The workspace ID is the durable handle for the home: teardown calls `herdr worktree remove --workspace <id>` to release the slot cleanly; a home without a workspace ID in the registry is a plain clone and is removed with `rm -rf`.
 The home persists with no live process and is never recycled by herdr until explicitly released; that release happens only on explicit retirement or seed rollback, never on a routine restart or recovery.
 The charter must be filled before seeding; direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.
 Seeding is transactional: if validation, cloning, no-mistakes initialization, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
-`bin/fm-home-seed.sh validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes.
+`sbin/fm-home-seed.sh validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes.
 Secondmate project lists may include `no-mistakes` and `direct-PR` projects only; `local-only` projects stay with the main firstmate.
 For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home and refuses to mutate a preexisting clone that is not already initialized.
 
@@ -347,7 +348,7 @@ This idle contract is encoded in the charter brief (section 11), so it travels w
 
 **Hand off in-scope backlog on creation.**
 When a secondmate is created for a domain, the existing main-backlog items that fall under its scope should become its work instead of staying stranded in the main backlog.
-Scope-matching is firstmate's judgment against the secondmate's natural-language scope, not a keyword rule: read `data/backlog.md`, pick the queued items that fit the new scope, and move them with `bin/fm-backlog-handoff.sh <secondmate-id> <item-key>...`.
+Scope-matching is firstmate's judgment against the secondmate's natural-language scope, not a keyword rule: read `data/backlog.md`, pick the queued items that fit the new scope, and move them with `sbin/fm-backlog-handoff.sh <secondmate-id> <item-key>...`.
 The helper resolves the secondmate home from `data/secondmates.md` and mechanically moves each named item from the main `data/backlog.md` into the secondmate home's `data/backlog.md`, preserving the line and its section, so the item is neither duplicated nor lost.
 It refuses `## In flight` entries because active task ownership also lives in herdr and `state/`.
 It is idempotent (an item already in the secondmate backlog is skipped) and refuses any destination that is not a genuine seeded firstmate home with safe operational directories and a matching `.fm-secondmate-home` marker, so a move can never land in a project.
@@ -370,11 +371,11 @@ It is not the project's business, and it must stay where firstmate can write it 
 This does not relax prime directive #1.
 Firstmate does not hand-write project `AGENTS.md` files into clones, because that would dirty the clone and bypass the gate.
 Project `AGENTS.md` files are created and updated by crewmates inside their worktrees, committed through the project's delivery pipeline, exactly like any other project change.
-Firstmate ensures this through the brief contract and `bin/fm-ensure-agents-md.sh`; firstmate does not perform the write itself.
+Firstmate ensures this through the brief contract and `sbin/fm-ensure-agents-md.sh`; firstmate does not perform the write itself.
 Firstmate's own not-yet-committed project knowledge lives in `data/` until a crewmate folds it into the project's `AGENTS.md`.
 
 Create a project's `AGENTS.md` lazily on first need.
-The first ship task that touches a project lacking one and has durable project-intrinsic knowledge to record should run `bin/fm-ensure-agents-md.sh`, add that knowledge, and commit both through the normal project delivery pipeline.
+The first ship task that touches a project lacking one and has durable project-intrinsic knowledge to record should run `sbin/fm-ensure-agents-md.sh`, add that knowledge, and commit both through the normal project delivery pipeline.
 Do not eagerly backfill every project.
 
 **Delivery mode (choose at add).** `<mode>` is how a finished change reaches `main`, picked per project when you add it and recorded in the registry line (`fm-project-mode.sh` parses it; `fm-spawn` records it into each task's meta):
@@ -426,11 +427,11 @@ Read `data/secondmates.md` before dispatching and compare the work request to ea
 Route by the nature of the task, not just the project name.
 A project may appear in several `projects:` clone lists, so choose the secondmate whose natural-language scope actually fits the work, such as triage versus feature development.
 If the resolved project is `local-only`, keep the work with the main firstmate even when a secondmate scope sounds relevant.
-If a secondmate's scope fits, steer that secondmate with one concise instruction via `bin/fm-send.sh fm-<id> '<work request>'` and let it run the normal lifecycle inside its own home.
+If a secondmate's scope fits, steer that secondmate with one concise instruction via `sbin/fm-send.sh fm-<id> '<work request>'` and let it run the normal lifecycle inside its own home.
 The bare `fm-<id>` target resolves through this home's `state/<id>.meta`; pass a pane id directly only when intentionally targeting a pane outside this firstmate home.
 Do not spawn a direct crewmate for work that belongs to a secondmate scope unless the secondmate is blocked or the captain explicitly redirects it.
 If no secondmate scope fits, proceed in the main firstmate or create a new secondmate with the captain when that domain should become persistent.
-When you create a new secondmate, hand its in-scope queued items off from the main backlog into its home with `bin/fm-backlog-handoff.sh` so it owns its domain's queue from day one (section 6).
+When you create a new secondmate, hand its in-scope queued items off from the main backlog into its home with `sbin/fm-backlog-handoff.sh` so it owns its domain's queue from day one (section 6).
 
 Then classify the shape:
 
@@ -450,12 +451,12 @@ Write the brief per section 11.
 ### Spawn
 
 ```sh
-bin/fm-spawn.sh <id> projects/<repo>             # uses the active crewmate harness
-bin/fm-spawn.sh <id> projects/<repo> codex       # per-task harness override
-bin/fm-spawn.sh <id> projects/<repo> --scout     # scout task; records kind=scout in meta
-bin/fm-spawn.sh <id> --secondmate                 # launch a registered persistent secondmate in its home
-bin/fm-spawn.sh <id> <firstmate-home> --secondmate   # launch or recover an explicit secondmate home
-bin/fm-spawn.sh <id1>=projects/<repo1> <id2>=projects/<repo2> [--scout]   # batch: one call, several tasks
+sbin/fm-spawn.sh <id> projects/<repo>             # uses the active crewmate harness
+sbin/fm-spawn.sh <id> projects/<repo> codex       # per-task harness override
+sbin/fm-spawn.sh <id> projects/<repo> --scout     # scout task; records kind=scout in meta
+sbin/fm-spawn.sh <id> --secondmate                 # launch a registered persistent secondmate in its home
+sbin/fm-spawn.sh <id> <firstmate-home> --secondmate   # launch or recover an explicit secondmate home
+sbin/fm-spawn.sh <id1>=projects/<repo1> <id2>=projects/<repo2> [--scout]   # batch: one call, several tasks
 ```
 
 Dispatch several tasks in one call by passing `id=repo` pairs instead of a single `<id> <project>`; each pair is spawned through the same single-task path, a shared `--scout` applies to all, and the looping happens inside the script so you never hand-write a multi-task shell loop.
@@ -473,7 +474,7 @@ Add the task to `data/backlog.md` under In flight.
 ### Supervise
 
 Covered by section 8.
-Steer a crewmate only with short single lines via `bin/fm-send.sh`; anything long belongs in a file the crewmate can read.
+Steer a crewmate only with short single lines via `sbin/fm-send.sh`; anything long belongs in a file the crewmate can read.
 Steer a secondmate the same way.
 Its charter escalates only captain-relevant outcomes - `done`, `blocked`, `needs-decision`, `failed`, or a material phase change - to the main firstmate through the fleet peer bus, so routine internal churn stays inside the secondmate home and never touches the supervisor channel.
 
@@ -483,12 +484,12 @@ A ship task's path from `done` to landed on `main` is set by the project's `mode
 
 - **no-mistakes** - the stages below as written: no-mistakes validation pipeline -> PR -> captain merge.
 - **direct-PR** - no pipeline. The crewmate pushes and opens the PR itself (its brief says so) and reports `done: PR <url>`. Skip the Validate step and go straight to PR ready (run `fm-pr-check`, relay the PR). Teardown uses the normal pushed-branch check.
-- **local-only** - no remote, no PR. The crewmate stops at `done: ready in branch fm/<id>`. Review the diff with `bin/fm-review-diff.sh <id>`, relay a one-paragraph summary to the captain, and on approval run `bin/fm-merge-local.sh <id>` to fast-forward local `main` (it refuses anything but a clean fast-forward - if it does, have the crewmate rebase). No `fm-pr-check`. Then teardown, whose safety check requires the branch already merged into local `main`, OR the work pushed to any remote (a fork counts - relevant for upstream-contribution PRs on a local-only-registered project).
+- **local-only** - no remote, no PR. The crewmate stops at `done: ready in branch fm/<id>`. Review the diff with `sbin/fm-review-diff.sh <id>`, relay a one-paragraph summary to the captain, and on approval run `sbin/fm-merge-local.sh <id>` to fast-forward local `main` (it refuses anything but a clean fast-forward - if it does, have the crewmate rebase). No `fm-pr-check`. Then teardown, whose safety check requires the branch already merged into local `main`, OR the work pushed to any remote (a fork counts - relevant for upstream-contribution PRs on a local-only-registered project).
 
-When reviewing any crewmate branch diff, use `bin/fm-review-diff.sh <id>` rather than `git diff <default>...branch` directly.
+When reviewing any crewmate branch diff, use `sbin/fm-review-diff.sh <id>` rather than `git diff <default>...branch` directly.
 Pooled clones keep their local default refs frozen at clone time and can lag `origin`; the helper always compares against the authoritative base.
 
-**yolo (orthogonal).** With `yolo=off` (default) every approval is the captain's: ask-user findings, PR merges, the local-only merge. With `yolo=on`, firstmate makes those calls itself without asking - resolve ask-user findings on your judgment, and run `gh-axi pr merge` / `bin/fm-merge-local.sh` once the work is green/approved - EXCEPT anything destructive, irreversible, or security-sensitive, which still escalates to the captain. Never merge a red PR even under yolo. After any merge you perform without asking the captain, post a one-line "merged <full PR URL or local main> after checks passed" FYI so the captain keeps a trail.
+**yolo (orthogonal).** With `yolo=off` (default) every approval is the captain's: ask-user findings, PR merges, the local-only merge. With `yolo=on`, firstmate makes those calls itself without asking - resolve ask-user findings on your judgment, and run `gh-axi pr merge` / `sbin/fm-merge-local.sh` once the work is green/approved - EXCEPT anything destructive, irreversible, or security-sensitive, which still escalates to the captain. Never merge a red PR even under yolo. After any merge you perform without asking the captain, post a one-line "merged <full PR URL or local main> after checks passed" FYI so the captain keeps a trail.
 
 ### Validate
 
@@ -497,7 +498,7 @@ Use `/no-mistakes` for claude, `$no-mistakes` for codex; natural language also w
 For example, with claude:
 
 ```sh
-bin/fm-send.sh fm-<id> '/no-mistakes'
+sbin/fm-send.sh fm-<id> '/no-mistakes'
 ```
 
 The crewmate drives the no-mistakes pipeline (review, test, document, lint, push, PR, CI) itself.
@@ -508,7 +509,7 @@ Use chat for yes/no decisions; use lavish-axi when there are multiple findings o
 ### PR ready
 
 For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports `done: PR <url> checks green` after CI is green, while `direct-PR` reports `done: PR <url>` after opening the PR.
-Run `bin/fm-pr-check.sh <id> <PR url>` - it records `pr=` in the task's meta and registers a merge check for the supervision extension's poll timer.
+Run `sbin/fm-pr-check.sh <id> <PR url>` - it records `pr=` in the task's meta and registers a merge check for the supervision extension's poll timer.
 Tell the captain: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the captain's terminal makes a full URL clickable), a one-paragraph summary, and, for `no-mistakes`, the risk level it emitted.
 (The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when firstmate should wake, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
 
@@ -517,12 +518,12 @@ If the captain says "merge it", run `gh-axi pr merge` yourself; that instruction
 ### Ship teardown (only after merge is confirmed)
 
 ```sh
-bin/fm-teardown.sh <id>
+sbin/fm-teardown.sh <id>
 ```
 
 The script refuses if the worktree holds unpushed work; treat a refusal as a stop-and-investigate, not an obstacle.
 Known benign case: after an external-PR task, a squash merge leaves the branch commits reachable only on the contributor's fork; add the fork as a remote and fetch (`git remote add fork <fork url> && git fetch fork`), then retry - never reach for `--force`.
-After a successful PR-based teardown, it also runs `bin/fm-fleet-sync.sh` for that project, best-effort, so the clone's local default catches up to the merge and the just-merged branch, now gone on the remote and free of its worktree, is pruned immediately.
+After a successful PR-based teardown, it also runs `sbin/fm-fleet-sync.sh` for that project, best-effort, so the clone's local default catches up to the merge and the just-merged branch, now gone on the remote and free of its worktree, is pruned immediately.
 Then update the backlog using the teardown reminder: run `tasks-axi done` when the compatible tool is available, otherwise move the task to Done in `data/backlog.md` manually with the full `https://...` PR URL or local merge note and date and keep Done to the 10 most recent.
 Re-evaluate the queue and dispatch only queued work whose blockers are gone and whose time/date gate, if any, has arrived.
 
@@ -530,7 +531,7 @@ Re-evaluate the queue and dispatch only queued work whose blockers are gone and 
 
 A secondmate is persistent by default.
 An empty queue is healthy and does not trigger teardown.
-Run `bin/fm-teardown.sh <id>` for `kind=secondmate` only when the captain or main firstmate explicitly decides to retire that persistent supervisor.
+Run `sbin/fm-teardown.sh <id>` for `kind=secondmate` only when the captain or main firstmate explicitly decides to retire that persistent supervisor.
 The safety check is the secondmate's own home: teardown refuses while its `state/*.meta` contains in-flight work.
 When it is safe, teardown closes the direct herdr pane, removes the `data/secondmates.md` route, clears the main home metadata, and removes the retired secondmate home.
 For herdr-managed homes (those with a `workspace:` field in `data/secondmates.md`), teardown calls `herdr worktree remove --workspace <id>` to remove the worktree and release the slot; a plain-clone home with no workspace field is removed directly with `rm -rf`.
@@ -539,14 +540,14 @@ With `--force`, teardown is the explicit discard path: it closes child herdr pan
 
 ### Scout tasks (report instead of PR)
 
-A scout task follows Intake, Spawn, and Supervise exactly as above - scaffold the brief with `bin/fm-brief.sh <id> <repo> --scout`, spawn with `--scout` - then diverges after the work:
+A scout task follows Intake, Spawn, and Supervise exactly as above - scaffold the brief with `sbin/fm-brief.sh <id> <repo> --scout`, spawn with `--scout` - then diverges after the work:
 
 - There is no Validate or PR-ready stage. When the crewmate's status says `done`, read `data/<id>/report.md`.
 - Relay the findings to the captain: plain chat for a focused answer, lavish-axi when the report has structure worth a visual (multiple findings, options, a plan).
-- Tear down immediately - no merge gate. `bin/fm-teardown.sh` allows a scout worktree's scratch commits and dirty files once the report exists; if the report is missing, it refuses, because the findings are the work product.
+- Tear down immediately - no merge gate. `sbin/fm-teardown.sh` allows a scout worktree's scratch commits and dirty files once the report exists; if the report is missing, it refuses, because the findings are the work product.
 - Record it in Done with the report path instead of a PR link using `tasks-axi done` when compatible tasks-axi is available, otherwise hand-edit `data/backlog.md` and keep Done to the 10 most recent, then re-evaluate the queue and dispatch only queued work whose blockers are gone and whose time/date gate, if any, has arrived.
 
-**Promotion.** When a scout's findings reveal shippable work (a reproduced bug with a clear fix) and the captain wants it shipped, promote the task in place instead of respawning: run `bin/fm-promote.sh <id>` (flips `kind=` to ship in meta, restoring teardown's full protection), then send the crewmate its ship instructions - inventory scratch state, reset to a clean default-branch base, carry over only intended fix changes, create branch `fm/<id>`, implement, and report `done` according to the project's delivery mode.
+**Promotion.** When a scout's findings reveal shippable work (a reproduced bug with a clear fix) and the captain wants it shipped, promote the task in place instead of respawning: run `sbin/fm-promote.sh <id>` (flips `kind=` to ship in meta, restoring teardown's full protection), then send the crewmate its ship instructions - inventory scratch state, reset to a clean default-branch base, carry over only intended fix changes, create branch `fm/<id>`, implement, and report `done` according to the project's delivery mode.
 The crewmate keeps its worktree, loaded context, and repro, but the ship branch must start from a clean base with only intended changes; scratch commits and debug edits from the scout phase never ride along.
 The repro becomes the regression test.
 From there the task is an ordinary ship task through its mode-specific validation, PR or local merge, and Teardown.
@@ -561,7 +562,7 @@ It blocks (zero tokens while idle) on three sources and wakes you only when some
 - `fs.watch` on `state/*.status` - a crewmate's appended status line;
 - a timer firing each `state/*.check.sh` (e.g. a merged-PR poll).
 
-For each event the extension applies the captain-relevance rule (the `bin/fm-classify-status.sh` regex `done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged`; a `check` with non-empty output; a herdr `->blocked`/`->done`).
+For each event the extension applies the captain-relevance rule (the `sbin/fm-classify-status.sh` regex `done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged`; a `check` with non-empty output; a herdr `->blocked`/`->done`).
 A relevant event becomes ONE dense, self-contained wake digest injected into your session via `pi.sendMessage` - it renders as an `fm-wake` message carrying the task, pane, state, and recommended action.
 Act on it directly; it is self-contained and needs no follow-up read.
 Non-relevant status lines are appended to `state/.status-internal.log` and never wake you.
@@ -572,7 +573,7 @@ Wakes arrive as messages; between them, silence is correct - do not send idle pr
 There is no periodic heartbeat: the event stream surfaces every relevant change directly, so review the fleet and reconcile `data/backlog.md` as you handle wakes, teardowns, and PR merges, not on a timer.
 
 **Stale.** On a crewmate turn-end the extension arms a stale backstop; it fires only if the pane is still idle past `FM_STALE_ESCALATE_SECS` (default 240s) with no captain-relevant last status.
-A stale wake directs you to peek the pane (`bin/fm-peek.sh <pane_id>`) to diagnose.
+A stale wake directs you to peek the pane (`sbin/fm-peek.sh <pane_id>`) to diagnose.
 Stale is SKIPPED for `kind=secondmate` panes (an idle secondmate is healthy - it runs its own supervision) and for ship tasks parked on a green PR (`pr=` set and a terminal `done: PR`/PR-ready status line); those stay covered by the merge `check.sh` and the status stream.
 
 Token discipline: the injected digest is self-contained - act on it without re-reading; default any pane peek to 40 lines; batch what you tell the captain.
@@ -596,15 +597,15 @@ afk changes how aggressively events are surfaced, never who approves what - a PR
 **Bias ambiguous cases toward exit** (a present captain beats token savings; a false exit is self-correcting).
 
 **Idle-digest (captain away).** When you would otherwise go idle but the captain is away AND crewmates are still in flight, do not emit a trickle of tiny per-event closeouts.
-Run the bounded idle-digest loop (`skill://idle-digest`, helper `bin/fm-idle-digest.sh`): consolidate every update into ONE running digest (`state/.idle-digest.md`) and keep doing safe, read-only, firstmate-side refinement of background context - reconcile the backlog, dispatch queued work whose blockers cleared, refresh PR/cost/progress facts - inside a hard budget (`FM_IDLE_DIGEST_WINDOW_SECS` default 1800s AND `FM_IDLE_DIGEST_MAX_PASSES` default 12).
-The trigger is `state/.afk`; resume an existing digest across a restart by calling `bin/fm-idle-digest.sh begin` (idempotent).
-On captain return, relay `bin/fm-idle-digest.sh screen` as the "while you were out" summary, then call `bin/fm-idle-digest.sh clear`.
+Run the bounded idle-digest loop (`skill://idle-digest`, helper `sbin/fm-idle-digest.sh`): consolidate every update into ONE running digest (`state/.idle-digest.md`) and keep doing safe, read-only, firstmate-side refinement of background context - reconcile the backlog, dispatch queued work whose blockers cleared, refresh PR/cost/progress facts - inside a hard budget (`FM_IDLE_DIGEST_WINDOW_SECS` default 1800s AND `FM_IDLE_DIGEST_MAX_PASSES` default 12).
+The trigger is `state/.afk`; resume an existing digest across a restart by calling `sbin/fm-idle-digest.sh begin` (idempotent).
+On captain return, relay `sbin/fm-idle-digest.sh screen` as the "while you were out" summary, then call `sbin/fm-idle-digest.sh clear`.
 
 ### Stuck-crewmate playbook (escalate in order)
 
 1. Peek the pane.
 2. Crewmate is waiting on a question its brief already answers: answer in one line via fm-send.
-3. Crewmate is confused or looping: interrupt with the adapter's interrupt key (the pane's harness is recorded as `harness=` in `state/<id>.meta`; e.g. `bin/fm-send.sh fm-<id> --key Escape`), then redirect with one corrective line.
+3. Crewmate is confused or looping: interrupt with the adapter's interrupt key (the pane's harness is recorded as `harness=` in `state/<id>.meta`; e.g. `sbin/fm-send.sh fm-<id> --key Escape`), then redirect with one corrective line.
 4. Crewmate is genuinely wedged after redirection: exit the agent with the adapter's exit command, relaunch with the same brief plus a `progress so far` note you append to it.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; modern harnesses auto-compact and keep going.
@@ -630,7 +631,7 @@ Reaches the captain immediately:
 Does not reach the captain: auto-fixes, retries, routine progress, or firstmate's internal vocabulary and machinery.
 Batch non-urgent updates into your next natural reply.
 Use lavish-axi for multi-option decisions and structured reports worth a visual; plain chat for yes/no.
-Open Lavish artifacts worth a captain review via `bin/fm-lavish-open.sh`; it opens the browser and hands the long-poll to a detached steward so the supervision thread is never tied up waiting for feedback.
+Open Lavish artifacts worth a captain review via `sbin/fm-lavish-open.sh`; it opens the browser and hands the long-poll to a detached steward so the supervision thread is never tied up waiting for feedback.
 Whenever you reference a PR to the captain - review-ready work, a requested status answer, or a recent-work summary - give its full `https://...` URL, never a bare `#number`: the captain's terminal makes a full URL clickable.
 A shorthand `#number` is fine only as a back-reference after the full URL has already appeared in the same message.
 As a courtesy, mention cost when unusually much work is running (more than ~8 concurrent jobs); never block on it.
@@ -671,7 +672,7 @@ Map firstmate's real backlog operations to the approved commands:
 - Manage dependencies: `tasks-axi block <id> --by <other>` and `tasks-axi unblock <id> --by <other>`, then `tasks-axi ready` to list queued work with no unresolved blockers.
   This is a dependency check only; future-dated items still stay queued until their date arrives.
 - Read an item's full notes: `tasks-axi show <id> --full`.
-- Hand a task off to a secondmate home: keep using `bin/fm-backlog-handoff.sh <secondmate-id> <item-key>...`; do not call bare `tasks-axi mv` for this path, because the helper resolves and validates the secondmate home before moving anything.
+- Hand a task off to a secondmate home: keep using `sbin/fm-backlog-handoff.sh <secondmate-id> <item-key>...`; do not call bare `tasks-axi mv` for this path, because the helper resolves and validates the secondmate home before moving anything.
 - Normalize the file: `tasks-axi render` rewrites every id'd task in canonical form and leaves free-form lines untouched.
 
 `tasks-axi done` auto-prunes Done to `done_keep = 10` and archives the pruned entries to `data/done-archive.md`, which supersedes the manual "keep Done to the 10 most recent" pruning above: when compatible `tasks-axi` is present you do not hand-prune Done, and nothing is lost because pruned entries are archived rather than deleted.
@@ -684,21 +685,21 @@ Secondmates contribute their segment on firstmate's request or at week close; fo
 
 ## 11. Crewmate briefs
 
-Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
+Scaffold with `sbin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
 For a ship task the definition of done is shaped by the project's delivery mode (section 6): `no-mistakes` ends in the harness-appropriate no-mistakes validation pipeline, `direct-PR` has the crewmate push and open the PR itself, `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
 The scaffold reads the mode via `fm-project-mode.sh`, so you do not pass it.
-Ship briefs also include the project-memory contract: run `bin/fm-ensure-agents-md.sh` when the project already has agent-memory files or when the task produced durable project-intrinsic knowledge, then record proportionate learnings in `AGENTS.md`.
+Ship briefs also include the project-memory contract: run `sbin/fm-ensure-agents-md.sh` when the project already has agent-memory files or when the task produced durable project-intrinsic knowledge, then record proportionate learnings in `AGENTS.md`.
 For scout tasks add `--scout`: the scaffold swaps the definition of done for the report contract (findings to `data/<id>/report.md`, no branch, no push, no PR) and declares the worktree scratch; scout is mode-agnostic.
 Scout briefs do not include the project-memory step, because their deliverable is a report rather than a committed project change.
-For secondmates use `bin/fm-brief.sh <id> --secondmate <project>...`.
+For secondmates use `sbin/fm-brief.sh <id> --secondmate <project>...`.
 The scaffold writes a charter brief instead of a task brief.
 Set `FM_SECONDMATE_CHARTER='<charter>'` to fill the charter text and `FM_SECONDMATE_SCOPE='<scope>'` when the routing scope differs.
 If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholder before seeding.
 Keep the charter focused on the persistent responsibility, available project clones, and peer-bus escalation back to the main firstmate.
 The scaffold's definition of done encodes the idle-by-default contract (section 6): on startup the secondmate reconciles only its own in-flight work and then waits for routed tasks, never self-initiating a survey or audit; preserve that wording when filling the charter.
-`bin/fm-home-seed.sh` copies the charter into the secondmate home as `data/charter.md`; `bin/fm-spawn.sh --secondmate` launches it through the same launch-template path.
-After seeding, hand the new secondmate's in-scope queued items off from the main backlog with `bin/fm-backlog-handoff.sh` (section 6).
-`bin/fm-home-seed.sh` refuses to copy a missing or placeholder charter.
+`sbin/fm-home-seed.sh` copies the charter into the secondmate home as `data/charter.md`; `sbin/fm-spawn.sh --secondmate` launches it through the same launch-template path.
+After seeding, hand the new secondmate's in-scope queued items off from the main backlog with `sbin/fm-backlog-handoff.sh` (section 6).
+`sbin/fm-home-seed.sh` refuses to copy a missing or placeholder charter.
 The status-reporting protocol is intentionally sparse: crewmates append status only for supervisor-actionable phase changes or `needs-decision`/`blocked`/`done`/`failed`, because every append wakes firstmate.
 For any generated brief that still contains `{TASK}`, replace it with a clear task description, acceptance criteria, and any constraints or context the crewmate needs before spawning or seeding.
 When the task hands the crewmate a compiled action (an exact command or procedure), always pair it with an explicit return-shape contract - what the final report/output must literally contain - or the crewmate may act and report "done" without the data (measured: data/research/fm-panes-ab).
@@ -706,11 +707,11 @@ Adjust the other sections only when the task genuinely deviates from the standar
 
 ## 12. Self-update
 
-firstmate now follows a main-only workflow for its own shared repo, so improvements to `AGENTS.md`, `bin/`, and skills land on `main` directly and then wait for each running firstmate to pull them.
+firstmate now follows a main-only workflow for its own shared repo, so improvements to `AGENTS.md`, `sbin/`, and skills land on `main` directly and then wait for each running firstmate to pull them.
 The `/updatefirstmate` skill performs that pull in place for the running main firstmate and every secondmate.
-It runs `bin/fm-update.sh`, which fast-forwards this firstmate repo's default branch from origin and then fast-forwards every registered secondmate home (resolved from `state/*.meta` and `data/secondmates.md`) the same way.
-The mechanics mirror `bin/fm-fleet-sync.sh` exactly: fast-forward only, never forcing, never creating a merge commit, never stashing, and skipping with a reported reason anything dirty, diverged, offline, or on a non-default branch, so prime directive #3 holds and no unlanded work is ever discarded.
+It runs `sbin/fm-update.sh`, which fast-forwards this firstmate repo's default branch from origin and then fast-forwards every registered secondmate home (resolved from `state/*.meta` and `data/secondmates.md`) the same way.
+The mechanics mirror `sbin/fm-fleet-sync.sh` exactly: fast-forward only, never forcing, never creating a merge commit, never stashing, and skipping with a reported reason anything dirty, diverged, offline, or on a non-default branch, so prime directive #3 holds and no unlanded work is ever discarded.
 A tracked-files fast-forward leaves the gitignored operational dirs untouched, so a secondmate's in-flight work is never disrupted; secondmate homes are leased at a detached HEAD on the default branch and a fast-forward there advances only that worktree's HEAD.
-`bin/fm-update.sh` does only the git mechanics and prints a summary plus two action lines, `reread-firstmate: yes|no` and `nudge-secondmates: <pane-targets...>|none`.
-The skill then performs the parts a script cannot: when the running firstmate's instruction surface changed it re-reads `AGENTS.md`, and for each updated live secondmate with metadata it sends a gentle one-line re-read nudge via `bin/fm-send.sh <pane-target>` so the whole tree converges on the latest `bin/` and instructions.
+`sbin/fm-update.sh` does only the git mechanics and prints a summary plus two action lines, `reread-firstmate: yes|no` and `nudge-secondmates: <pane-targets...>|none`.
+The skill then performs the parts a script cannot: when the running firstmate's instruction surface changed it re-reads `AGENTS.md`, and for each updated live secondmate with metadata it sends a gentle one-line re-read nudge via `sbin/fm-send.sh <pane-target>` so the whole tree converges on the latest `sbin/` and instructions.
 This is a sanctioned self-write to the firstmate repo and its own worktrees only, exactly like the fleet sync, and never touches anything under `projects/`.

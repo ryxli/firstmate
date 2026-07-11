@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Shared tasks-axi compatibility probe for bootstrap and teardown.
-# Usage: . bin/fm-tasks-axi-lib.sh
+# Usage: . sbin/fm-tasks-axi-lib.sh
 # Compatible means tasks-axi --version reports 0.1.1 or newer.
 
 fm_tasks_axi_version_parts() {

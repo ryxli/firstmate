@@ -71,9 +71,9 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
       rc=2
       continue
     elif [ "$KIND" = scout ]; then
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" --scout; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
+      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" --scout; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
     else
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
+      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
     fi
   done
   exit "$rc"
@@ -131,7 +131,7 @@ case "$ARG3" in
     done
     ;;
   '')
-    HARNESS=$("$FM_ROOT/bin/fm-harness.sh" crew)
+    HARNESS=$("$FM_ROOT/sbin/fm-harness.sh" crew)
     LAUNCH=$(launch_template "$HARNESS") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     ;;
   *)
@@ -222,8 +222,8 @@ validate_firstmate_home_for_spawn() {
   if [ ! -f "$abs_home/AGENTS.md" ]; then
     echo "error: $home is not a firstmate home (missing AGENTS.md)" >&2; return 1
   fi
-  if [ ! -d "$abs_home/bin" ]; then
-    echo "error: $home is not a firstmate home (missing bin/)" >&2; return 1
+  if [ ! -d "$abs_home/sbin" ] && [ ! -L "$abs_home/sbin" ]; then
+    echo "error: $home is not a firstmate home (missing sbin/)" >&2; return 1
   fi
   printf '%s\n' "$abs_home"
 }
@@ -328,7 +328,7 @@ if [ "$KIND" = secondmate ]; then
 else
   PROJ_NAME=$(basename "$PROJ_ABS")
   read -r MODE YOLO <<EOF
-$("$FM_ROOT/bin/fm-project-mode.sh" "$PROJ_NAME")
+$("$FM_ROOT/sbin/fm-project-mode.sh" "$PROJ_NAME")
 EOF
 fi
 
@@ -339,7 +339,7 @@ if [ "$KIND" = secondmate ]; then
   sq_home=$(shell_quote "$PROJ_ABS")
   LAUNCH_CMD="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH_CMD"
 fi
-PANE_CMD=$LAUNCH_CMD'; exec "${SHELL:-/bin/zsh}" -l'
+PANE_CMD="$LAUNCH_CMD; exec \"\${SHELL:-/bin/zsh}\" -l"
 
 
 # Launch the agent via herdr. The agent name is "fm-<id>" so it is uniquely

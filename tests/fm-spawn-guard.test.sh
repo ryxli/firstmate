@@ -5,7 +5,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPAWN="$ROOT/bin/fm-spawn.sh"
+SPAWN="$ROOT/sbin/fm-spawn.sh"
 TMP_ROOT=
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
 
@@ -40,7 +40,7 @@ mkdir -p "$FM_TEST_HOME/state" \
 make_sm_home() {
   local id=$1 dir
   dir="$TMP_ROOT/homes/$id"
-  mkdir -p "$dir/bin" "$dir/data" "$dir/state" "$dir/config" "$dir/projects"
+  mkdir -p "$dir/sbin" "$dir/data" "$dir/state" "$dir/config" "$dir/projects"
   printf '%s\n' "$id" > "$dir/.fm-secondmate-home"
   printf 'v1\n' > "$dir/AGENTS.md"
   ( cd "$dir" && pwd -P )

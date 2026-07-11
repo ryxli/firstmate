@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for bin/fm-status-compact.sh
+# Tests for sbin/fm-status-compact.sh
 #
 # Fixtures:
 #   1. terminal-line compaction  - done history is archived, newest terminal line kept
@@ -9,7 +9,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPACT="$ROOT/bin/fm-status-compact.sh"
+COMPACT="$ROOT/sbin/fm-status-compact.sh"
 TMP_ROOT=
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
@@ -116,7 +116,7 @@ test_archive_created() {
 
   # Archive directory and file must exist
   local arc_file
-  arc_file=$(ls "$STATE/.status-archive/arc."*.log 2>/dev/null | head -n1)
+  arc_file=$(find "$STATE/.status-archive" -name "arc.*.log" -type f 2>/dev/null | head -n1)
   [ -n "$arc_file" ] \
     || fail "archive_created: no archive file found under $STATE/.status-archive/"
 
