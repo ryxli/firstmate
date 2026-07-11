@@ -28,7 +28,7 @@ make_fake_toolchain() {
   local dir=$1 fakebin tool
   fakebin="$dir/fakebin"
   mkdir -p "$fakebin"
-  for tool in node no-mistakes gh-axi chrome-devtools-axi lavish-axi; do
+  for tool in node gh-axi chrome-devtools-axi lavish-axi; do
     cat > "$fakebin/$tool" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -60,15 +60,15 @@ run_bootstrap() {
   PATH="$fakebin:$BASE_PATH" FM_HOME="$home" "$ROOT/sbin/fm-bootstrap.sh"
 }
 
-test_bootstrap_clean_with_all_tools() {
+test_bootstrap_silent_without_no_mistakes() {
   local case_dir fakebin out
-  case_dir="$TMP_ROOT/all-tools"
+  case_dir="$TMP_ROOT/without-no-mistakes"
   mkdir -p "$case_dir/home"
   fakebin=$(make_fake_toolchain "$case_dir")
 
   out=$(run_bootstrap "$case_dir/home" "$fakebin")
   [ -z "$out" ] || fail "bootstrap reported problems with all tools present: $out"
-  pass "bootstrap is silent when all required tools are present"
+  pass "bootstrap is silent without no-mistakes installed"
 }
 
 test_bootstrap_reports_tasks_axi_when_available() {
@@ -109,6 +109,6 @@ SH
   pass "bootstrap ignores incompatible optional tasks-axi"
 }
 
-test_bootstrap_clean_with_all_tools
+test_bootstrap_silent_without_no_mistakes
 test_bootstrap_reports_tasks_axi_when_available
 test_bootstrap_ignores_incompatible_tasks_axi

@@ -192,7 +192,7 @@ test_fm_home_parameterization() {
   out=$(FM_HOME="$home_one" "$ROOT/sbin/fm-project-mode.sh" app)
   [ "$out" = "local-only on" ] || fail "fm-project-mode did not read projects.md from FM_HOME"
   out=$(FM_HOME="$home_two" "$ROOT/sbin/fm-project-mode.sh" app 2>/dev/null)
-  [ "$out" = "direct-PR off" ] || fail "fm-project-mode did not isolate missing registry by home"
+  [ "$out" = "direct-PR off" ] || fail "unconfigured project did not default to direct-PR with yolo off"
 
   FM_HOME="$home_one" "$ROOT/sbin/fm-brief.sh" task-a app >/dev/null || fail "brief scaffold failed under FM_HOME"
   brief="$home_one/data/task-a/brief.md"
