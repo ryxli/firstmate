@@ -32,6 +32,10 @@
 # replacement pane in the same workspace and cwd and resumes the session
 # there; the session-id continuity proof runs against whichever pane hosts
 # the resume. This applies to inline reloads as well as detached ones.
+# When the target was a durable fm-<id> and the resume landed in a
+# replacement pane, the target's state/<id>.meta is rebound (pane= and tab=)
+# before success is reported, so supervision and later recovery follow the
+# resumed session instead of the closed pane.
 #
 # Options:
 #   --cmd <template>       Custom relaunch command. '{id}' is replaced with the
@@ -53,6 +57,9 @@
 #                           (the agent finishes its turn before honoring /quit). Default: 60.
 #   FM_RELOAD_NO_GUARD      Set to 1 to skip self-reload detection and run inline.
 #   FM_RELOAD_DETACHED      Internal: set on the detached worker; do not set by hand.
+#   FM_RELOAD_META          Internal: durable target's meta file, carried to the
+#                           detached worker so it can rebind pane=/tab= after a
+#                           replacement-pane recovery; do not set by hand.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -181,10 +188,17 @@ fi
 # Supports: w1:p3 (raw), fm-<name> (durable identity), or auto-detect.
 # ---------------------------------------------------------------------------
 PANE=""
+META_FILE="${FM_RELOAD_META:-}"
 if [ -n "$TARGET" ]; then
   if ! PANE=$(fm_resolve_live_pane "$TARGET" "$STATE"); then
     exit 1
   fi
+  # Durable target: remember the meta file so a replacement-pane recovery
+  # can rebind pane=/tab= to the pane that actually hosts the resume.
+  case "$TARGET" in
+    *:*) ;;
+    fm-*) META_FILE="$STATE/${TARGET#fm-}.meta" ;;
+  esac
 else
   PANE="$(herdr pane current 2>/dev/null \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])' \
@@ -260,7 +274,7 @@ if [ -z "${FM_RELOAD_DETACHED:-}" ] && [ -z "${FM_RELOAD_NO_GUARD:-}" ]; then
     WORKER_ARGS=("$PANE" --timeout "$SELF_TIMEOUT" --proof-timeout "$PROOF_TIMEOUT")
     if [ -n "$RESUME_CMD" ]; then WORKER_ARGS+=(--cmd "$RESUME_CMD"); fi
     if [ -n "$ALLOW_FRESH" ]; then WORKER_ARGS+=(--allow-fresh); fi
-    WORKER_PID="$(FM_RELOAD_DETACHED=1 FM_RELOAD_SESSION_ID="$SESSION_ID" python3 -c '
+    WORKER_PID="$(FM_RELOAD_DETACHED=1 FM_RELOAD_SESSION_ID="$SESSION_ID" FM_RELOAD_META="$META_FILE" python3 -c '
 import os, sys
 script, log = sys.argv[1], sys.argv[2]
 args = sys.argv[3:]
@@ -350,6 +364,7 @@ fi
 # session has somewhere usable to resume.
 # ---------------------------------------------------------------------------
 RELAUNCH_PANE="$PANE"
+RELAUNCH_TAB=""
 if ! herdr pane get "$PANE" 2>/dev/null \
   | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("result",{}).get("pane") else 1)' \
   2>/dev/null; then
@@ -357,9 +372,9 @@ if ! herdr pane get "$PANE" 2>/dev/null \
   TAB_ARGS=(--no-focus --label "${PANE_LABEL:-fm-reload-recovered}")
   if [ -n "${PANE_WS:-}" ]; then TAB_ARGS+=(--workspace "$PANE_WS"); fi
   if [ -n "${PANE_CWD:-}" ]; then TAB_ARGS+=(--cwd "$PANE_CWD"); fi
-  RELAUNCH_PANE="$(herdr tab create "${TAB_ARGS[@]}" 2>/dev/null \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("root_pane",{}).get("pane_id",""))' \
-    2>/dev/null || true)"
+  RELAUNCH_JSON="$(herdr tab create "${TAB_ARGS[@]}" 2>/dev/null || true)"
+  RELAUNCH_PANE="$(printf '%s' "$RELAUNCH_JSON" | fm_json_get result root_pane pane_id)"
+  RELAUNCH_TAB="$(printf '%s' "$RELAUNCH_JSON" | fm_json_get result tab tab_id)"
   if [ -z "$RELAUNCH_PANE" ]; then
     echo "fm-reload.sh: could not create a replacement pane for $PANE; session $SESSION_ID not resumed" >&2
     exit 1
@@ -407,4 +422,23 @@ if [ -n "$SESSION_ID" ] && [ -z "$RESUME_CMD" ] && [ -z "$ALLOW_FRESH" ]; then
     echo "fm-reload.sh: session id mismatch after reload (expected $SESSION_ID, saw ${PROOF_SID:-none})" >&2
     exit 1
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# Durable-target rebind: the resume landed in a replacement pane, so point
+# the fm-<id> metadata at it before reporting success; otherwise supervision
+# and later recovery keep following the closed pane.
+# ---------------------------------------------------------------------------
+if [ -n "$META_FILE" ] && [ "$RELAUNCH_PANE" != "$PANE" ] && [ -f "$META_FILE" ]; then
+  if ! fm_meta_set "$META_FILE" pane "$RELAUNCH_PANE"; then
+    echo "fm-reload.sh: session resumed in pane $RELAUNCH_PANE but failed to rebind pane= in $META_FILE" >&2
+    exit 1
+  fi
+  if [ -n "$RELAUNCH_TAB" ]; then
+    if ! fm_meta_set "$META_FILE" tab "$RELAUNCH_TAB"; then
+      echo "fm-reload.sh: session resumed in pane $RELAUNCH_PANE but failed to rebind tab= in $META_FILE" >&2
+      exit 1
+    fi
+  fi
+  echo "fm-reload.sh: rebound $META_FILE to replacement pane $RELAUNCH_PANE${RELAUNCH_TAB:+ (tab $RELAUNCH_TAB)}" >&2
 fi

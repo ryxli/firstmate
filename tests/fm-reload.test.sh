@@ -19,6 +19,9 @@
 #   (o) self-reload, omp never restarts               -> worker FAILED line observable
 #   (p) pane closes with agent (inline)               -> replacement pane, exact resume
 #   (q) self-reload + pane closes                     -> detached worker recovers in replacement pane
+#   (r) durable fm-<name> target + pane closes        -> meta rebound to replacement pane= and tab=
+#   (s) durable fm-<name> target, pane survives       -> meta untouched (no rebind)
+#   (t) self-reload of durable target + pane closes   -> detached worker rebinds meta
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -591,6 +594,99 @@ test_self_reload_pane_closes_full_recovery() {
   pass "(q) self-reload + pane closed -> detached worker recovers in replacement pane"
 }
 
+# ---------------------------------------------------------------------------
+# (r) durable fm-<name> target whose pane closes with the agent -> the state
+#     meta is rebound to the replacement pane= and tab= before success
+# ---------------------------------------------------------------------------
+test_durable_target_meta_rebound() {
+  local CASE="$TMP_ROOT/case-r"
+  mkdir -p "$CASE/state"
+  make_fake_herdr "$CASE" >/dev/null
+
+  # Seed a durable mate meta: pane wr:p1 in tab w1:t9, plus an unrelated key
+  # that the rebind must preserve.
+  printf 'pane=wr:p1\ntab=w1:t9\nworktree=/wt/rebind-mate\n' > "$CASE/state/rebind-mate.meta"
+
+  local sid="abcd1234-0000-0000-0000-000000000011"
+  FM_FAKE_HERDR_PANE_CLOSES=1 \
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_STATE_OVERRIDE="$CASE/state" \
+    run_reload "$CASE" fm-rebind-mate >/dev/null 2>/dev/null \
+    || fail "(r) expected zero exit when the replacement pane hosts the resume"
+
+  herdr_log "$CASE" | grep -q "pane run wR:p1 omp --resume $sid" \
+    || fail "(r) expected exact-session resume in the replacement pane wR:p1"
+  grep -q '^pane=wR:p1$' "$CASE/state/rebind-mate.meta" \
+    || fail "(r) expected meta pane= rebound to replacement pane wR:p1"
+  grep -q '^tab=wR:t1$' "$CASE/state/rebind-mate.meta" \
+    || fail "(r) expected meta tab= rebound to replacement tab wR:t1"
+  grep -q '^worktree=/wt/rebind-mate$' "$CASE/state/rebind-mate.meta" \
+    || fail "(r) expected unrelated meta keys preserved by the rebind"
+
+  pass "(r) durable target + pane closes -> meta rebound to replacement pane= and tab="
+}
+
+# ---------------------------------------------------------------------------
+# (s) durable fm-<name> target whose pane survives the quit -> the state
+#     meta is left untouched (no replacement pane, nothing to rebind)
+# ---------------------------------------------------------------------------
+test_durable_target_meta_untouched_when_pane_survives() {
+  local CASE="$TMP_ROOT/case-s"
+  mkdir -p "$CASE/state"
+  make_fake_herdr "$CASE" >/dev/null
+
+  printf 'pane=ws:p1\ntab=w1:t3\n' > "$CASE/state/steady-mate.meta"
+
+  local sid="abcd1234-0000-0000-0000-000000000012"
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_STATE_OVERRIDE="$CASE/state" \
+    run_reload "$CASE" fm-steady-mate >/dev/null \
+    || fail "(s) fm-reload.sh exited non-zero for surviving durable target"
+
+  herdr_log "$CASE" | grep -q "pane run ws:p1 omp --resume $sid" \
+    || fail "(s) expected resume in the original pane ws:p1"
+  printf 'pane=ws:p1\ntab=w1:t3\n' | cmp -s - "$CASE/state/steady-mate.meta" \
+    || fail "(s) expected meta untouched when the original pane hosts the resume"
+
+  pass "(s) durable target, pane survives -> meta untouched"
+}
+
+# ---------------------------------------------------------------------------
+# (t) self-reload of a durable fm-<name> target whose pane closes -> the
+#     detached worker rebinds the meta to the replacement pane= and tab=
+# ---------------------------------------------------------------------------
+test_self_reload_durable_target_meta_rebound() {
+  local CASE="$TMP_ROOT/case-t"
+  mkdir -p "$CASE/state"
+  make_fake_herdr "$CASE" >/dev/null
+
+  printf 'pane=wt:p1\ntab=w1:t7\n' > "$CASE/state/self-mate.meta"
+
+  local sid="abcd1234-0000-0000-0000-000000000013"
+  FM_RELOAD_NO_GUARD='' \
+  FM_FAKE_HERDR_CURRENT="wt:p1" \
+  FM_FAKE_HERDR_PANE_CLOSES=1 \
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_STATE_OVERRIDE="$CASE/state" \
+    run_reload "$CASE" fm-self-mate >/dev/null \
+    || fail "(t) expected zero exit from the handoff caller"
+
+  local rlog="$CASE/state/.reload.wt-p1.log"
+  wait_worker_done "$rlog" || fail "(t) detached worker never wrote a final outcome to $rlog"
+
+  grep -q "detached self-reload of pane wt:p1 succeeded (session live in pane wR:p1)" "$rlog" \
+    || fail "(t) expected success line naming the replacement pane in $rlog"
+  grep -q '^pane=wR:p1$' "$CASE/state/self-mate.meta" \
+    || fail "(t) expected meta pane= rebound by the detached worker"
+  grep -q '^tab=wR:t1$' "$CASE/state/self-mate.meta" \
+    || fail "(t) expected meta tab= rebound by the detached worker"
+
+  pass "(t) self-reload of durable target + pane closes -> detached worker rebinds meta"
+}
+
 # Run all tests.
 test_resume_path
 test_fail_closed_no_session
@@ -609,3 +705,6 @@ test_self_reload_fails_closed_before_handoff
 test_self_reload_worker_failure_observable
 test_pane_closes_replacement_pane
 test_self_reload_pane_closes_full_recovery
+test_durable_target_meta_rebound
+test_durable_target_meta_untouched_when_pane_survives
+test_self_reload_durable_target_meta_rebound
