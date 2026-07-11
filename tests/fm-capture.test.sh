@@ -120,9 +120,9 @@ pass "all written lines are valid JSON after process exit"
 # ---------------------------------------------------------------------------
 
 SPECIAL_EVENTS="$TMP_ROOT/special.jsonl"
-SPECIAL_MSG="use \"double quotes\" and \$vars and 'single' freely"
+# shellcheck disable=SC2016 # literal $vars/quotes are the special-character test payload
 CAPTURE_EVENTS_PATH="$SPECIAL_EVENTS" "$ROOT/sbin/fm-capture.sh" steer fm-fran \
-  "$SPECIAL_MSG" "" \
+  'use "double quotes" and $vars and '\''single'\'' freely' "" \
   || fail "special char write failed"
 
 special_line=$(head -n1 "$SPECIAL_EVENTS")

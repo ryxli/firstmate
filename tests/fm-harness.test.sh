@@ -66,7 +66,8 @@ test_omp_launch_template() {
   load_launch_template || fail "could not load launch_template from fm-spawn.sh"
   local out
   out=$(launch_template omp)
-  [ "$out" = "omp --auto-approve \"\$(cat __BRIEF__)\"" ] \
+  # shellcheck disable=SC2016 # literal command-substitution text is the expected template
+  [ "$out" = 'omp --auto-approve "$(cat __BRIEF__)"' ] \
     || fail "omp launch template wrong: '$out'"
   pass "omp launch template uses --auto-approve and the brief"
 }

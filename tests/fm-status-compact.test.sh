@@ -115,8 +115,13 @@ test_archive_created() {
   run_compact arc
 
   # Archive directory and file must exist
-  local arc_file
-  arc_file=$(find "$STATE/.status-archive" -name "arc.*.log" -type f 2>/dev/null | head -n1)
+  local arc_file _f
+  arc_file=""
+  for _f in "$STATE/.status-archive/arc."*.log; do
+    [ -e "$_f" ] || continue
+    arc_file=$_f
+    break
+  done
   [ -n "$arc_file" ] \
     || fail "archive_created: no archive file found under $STATE/.status-archive/"
 

@@ -41,16 +41,16 @@ queue_has_items() {
 
 drain_once() {
   [ -d "$QUEUE_DIR" ] || return 0
-  local file id_b64 created target_b64 target pane_b64 pane text_b64 text now age verdict summary alert
+  local file created target_b64 target pane_b64 pane text_b64 text now age verdict summary alert
   now=$(date +%s)
   for file in "$QUEUE_DIR"/*.json; do
     [ -e "$file" ] || continue
-    id_b64=$(read_queue_field "$file" id) || { rm -f "$file"; continue; }
+    read_queue_field "$file" id >/dev/null || { rm -f "$file"; continue; }
     created=$(read_queue_field "$file" created_at) || { rm -f "$file"; continue; }
     target_b64=$(read_queue_field "$file" target) || { rm -f "$file"; continue; }
     pane_b64=$(read_queue_field "$file" pane) || { rm -f "$file"; continue; }
     text_b64=$(read_queue_field "$file" text) || { rm -f "$file"; continue; }
-    decode_b64 "$id_b64" >/dev/null
+
     target=$(decode_b64 "$target_b64")
     pane=$(decode_b64 "$pane_b64")
     text=$(decode_b64 "$text_b64")
