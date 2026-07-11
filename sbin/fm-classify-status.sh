@@ -7,8 +7,8 @@ if [ "$#" -ne 1 ]; then
   exit 2
 fi
 
-line=$1
-if printf '%s' "$line" | grep -qiE 'done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged'; then
+line=$(printf '%s' "$1" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^[:space:]]+[[:space:]]+//')
+if printf '%s' "$line" | grep -qiE '^(done|blocked|failed|needs-decision):|(^|[^[:alpha:]])(PR ready|checks green|ready in branch|merged)([^[:alpha:]]|$)'; then
   echo captain
   exit 0
 fi

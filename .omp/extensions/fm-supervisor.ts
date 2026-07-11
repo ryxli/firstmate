@@ -75,10 +75,15 @@
  *     inject ONE combined digest.
  *   - state/.status-internal.log: non-relevant status lines appended here, no
  *     wake (trimmed to the last STATUS_INTERNAL_LOG_MAX lines like bash).
- *   - stale wakes are SKIPPED for kind=secondmate panes and for ship tasks
- *     parked on a green PR (pr= set AND last status line is a terminal
- *     done-PR / PR-ready line); see benchmarks/model-lib.ts isParkedOnGreenPR.
+ *   - periodic stale wakes are skipped for kind=secondmate panes and for ship
+ *     tasks parked on a green PR (pr= set AND last status line is a terminal
+ *     done-PR / PR-ready line). A secondmate working-to-idle/done transition
+ *     instead arms a short completion backstop, so idle-by-default supervision
+ *     remains quiet while completion of routed work is still observable.
  *
+ *   - a live pane is refreshed from its durable herdr task identity before
+ *     subscribing, and an idle backstop confirms that the pane still exists and
+ *     is not rendering a busy banner before waking.
  * The PURE export `classifyAndDigest` below is the single source of truth for
  * relevance + digest building (mirrors sbin/fm-classify-status.sh and
  * benchmarks/relevance.ts exactly). It has no I/O and no omp/herdr imports, so
@@ -121,9 +126,16 @@ export interface ClassifyResult {
 	detected: number; // distinct relevant events that produced a wake
 }
 
-// Matches sbin/fm-classify-status.sh byte-for-byte (case-insensitive).
-const CAPTAIN_RE =
-	/done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged/i;
+// Matches sbin/fm-classify-status.sh: optional ISO-ish timestamp prefix, then
+// captain-relevant status prefixes or whole status phrases. Avoid substring
+// matches such as "already", "unmerged", or "readying".
+const STATUS_PREFIX_RE = /^(done|blocked|failed|needs-decision):/i;
+const STATUS_PHRASE_RE = /(^|[^A-Za-z])(PR ready|checks green|ready in branch|merged)([^A-Za-z]|$)/i;
+
+function captainRelevantStatusLine(line: string): boolean {
+	const stripped = line.replace(/^\d{4}-\d{2}-\d{2}T\S+\s+/, "");
+	return STATUS_PREFIX_RE.test(stripped) || STATUS_PHRASE_RE.test(stripped);
+}
 
 // Same grace as bash FM_SIGNAL_GRACE (30s): same-pane relevant events within
 // this window coalesce into ONE wake (one digest), latest state wins.
@@ -137,7 +149,7 @@ const GRACE_MS = 30_000;
 function isRelevant(e: FleetEvent): boolean {
 	switch (e.kind) {
 		case "status":
-			return e.status_line !== undefined && CAPTAIN_RE.test(e.status_line);
+			return e.status_line !== undefined && captainRelevantStatusLine(e.status_line);
 		case "check":
 			return (e.check_out ?? "").length > 0;
 		case "herdr":
@@ -262,9 +274,12 @@ interface Tunables {
 	flushGraceMs: number; // FM_SIGNAL_GRACE: non-afk coalescing window (default 30s)
 	flushAfkMs: number; // FM_ESCALATE_BATCH_SECS: afk batch window (default 90s)
 	staleMs: number; // FM_STALE_ESCALATE_SECS: idle-without-status backstop (default 240s)
+	secondmateIdleMs: number; // FM_SECONDMATE_IDLE_SECS: secondmate working->idle completion backstop (default 20s)
+	blockedDebounceMs: number; // FM_BLOCKED_DEBOUNCE_SECS: per-pane ship/scout blocked-wake debounce (default 120s)
 	checkIntervalMs: number; // FM_CHECK_INTERVAL: *.check.sh cadence (default 300s)
 	checkTimeoutMs: number; // FM_CHECK_TIMEOUT: per-check timeout (default 30s)
 	herdrGetTimeoutMs: number; // herdr agent get seed timeout (fixed)
+	busyReadTimeoutMs: number; // herdr pane read busy-banner corroboration timeout (fixed)
 }
 
 function envSec(name: string, defSec: number): number {
@@ -279,9 +294,12 @@ function readTunables(): Tunables {
 		flushGraceMs: envSec("FM_SIGNAL_GRACE", 30),
 		flushAfkMs: envSec("FM_ESCALATE_BATCH_SECS", 90),
 		staleMs: envSec("FM_STALE_ESCALATE_SECS", 240),
+		secondmateIdleMs: envSec("FM_SECONDMATE_IDLE_SECS", 20),
+		blockedDebounceMs: envSec("FM_BLOCKED_DEBOUNCE_SECS", 120),
 		checkIntervalMs: envSec("FM_CHECK_INTERVAL", 300),
 		checkTimeoutMs: envSec("FM_CHECK_TIMEOUT", 30),
 		herdrGetTimeoutMs: 5_000,
+		busyReadTimeoutMs: 5_000,
 	};
 }
 
@@ -318,6 +336,7 @@ interface Supervisor {
 	crewByPane: Map<string, Crewmate>;
 	prevStatus: Map<string, HerdrStatus>;
 	staleTimers: Map<string, Timer>;
+	lastBlockedWakeMs: Map<string, number>; // pane -> last blocked-wake ts (ship/scout debounce)
 	pendingEvents: FleetEvent[];
 	pendingStale: string[];
 	flushTimer?: Timer;
@@ -361,6 +380,7 @@ function createSupervisor(pi: ExtensionAPI, ctx: ExtensionContext): Supervisor {
 		socketBuf: "",
 		crewByPane: new Map(),
 		prevStatus: new Map(),
+		lastBlockedWakeMs: new Map(),
 		staleTimers: new Map(),
 		pendingEvents: [],
 		pendingStale: [],
@@ -426,7 +446,8 @@ async function refreshFleet(sup: Supervisor): Promise<void> {
 		const task = f.slice(0, -".meta".length);
 		const meta = await parseMeta(join(sup.stateDir, f));
 		if (!meta.pane) continue;
-		next.set(meta.pane, { ...meta, task, pane: meta.pane });
+		const pane = await resolveLivePane(sup, task, meta.pane);
+		next.set(pane, { ...meta, task, pane });
 	}
 
 	let changed = next.size !== sup.crewByPane.size;
@@ -608,10 +629,16 @@ function handleHerdrPush(sup: Supervisor, push: HerdrPush): void {
 		return;
 	}
 	if (push.status === "blocked") {
-		// blocked transition is a captain wake.
 		clearStaleTimer(sup, push.pane);
+		// Secondmates self-manage and escalate material blockers through the peer
+		// bus. Their transient blocked states must not wake the captain.
+		if (crew.kind === "secondmate") return;
+		const nowMs = Date.now();
+		const lastBlocked = sup.lastBlockedWakeMs.get(push.pane) ?? 0;
+		if (nowMs - lastBlocked < sup.tunables.blockedDebounceMs) return;
+		sup.lastBlockedWakeMs.set(push.pane, nowMs);
 		enqueueEvent(sup, {
-			t: Date.now(),
+			t: nowMs,
 			kind: "herdr",
 			pane: crew.pane,
 			task: crew.task,
@@ -622,15 +649,20 @@ function handleHerdrPush(sup: Supervisor, push: HerdrPush): void {
 		});
 		return;
 	}
-	// idle / unknown: turn-end. NOT a wake by itself; arm the stale backstop.
-	// A status line written right after the turn-end is caught by fs.watch and
-	// supersedes the stale timer (it calls clearStaleTimer).
-	armStaleTimer(sup, crew);
+	// Only a secondmate's working-to-idle/done/unknown transition can signal
+	// completion of routed work. An already idle secondmate is healthy.
+	if (crew.kind === "secondmate") {
+		if (prev === "working") armCompletionTimer(sup, crew);
+		else clearStaleTimer(sup, push.pane);
+	} else {
+		armStaleTimer(sup, crew);
+	}
 }
 
 function dropPane(sup: Supervisor, pane: string): void {
 	sup.crewByPane.delete(pane);
 	sup.prevStatus.delete(pane);
+	sup.lastBlockedWakeMs.delete(pane);
 	clearStaleTimer(sup, pane);
 }
 
@@ -712,10 +744,18 @@ async function fireStale(sup: Supervisor, crew: Crewmate, idleStart: number): Pr
 	if (sup.abort.signal.aborted) return;
 	const cur = sup.prevStatus.get(crew.pane);
 	if (cur !== "idle" && cur !== "unknown") return; // no longer idle
+	if (!(await paneReachable(sup, crew.pane))) {
+		dropPane(sup, crew.pane);
+		return;
+	}
+	if (await paneShowsBusyBanner(sup, crew.pane)) {
+		armStaleTimer(sup, crew);
+		return;
+	}
 	if (await isAwaitingMerge(sup, crew)) return; // parked on a green PR: by design
 	const last = await lastStatusLine(sup, crew.task);
-	if (last && CAPTAIN_RE.test(last)) return; // already reported something captain-worthy
 	const mins = Math.max(1, Math.round((Date.now() - idleStart) / 60_000));
+	if (last && captainRelevantStatusLine(last)) return; // already reported something captain-worthy
 	const lineage = crew.worker ? ` ${crew.worker}` : "";
 	enqueueStale(
 		sup,
@@ -730,6 +770,104 @@ async function isAwaitingMerge(sup: Supervisor, crew: Crewmate): Promise<boolean
 	// awaiting-merge rule (see benchmarks/model-lib.ts isParkedOnGreenPR):
 	// terminal "done:...<space>PR<space>" line, or a "PR ready" line.
 	return /^done:.*\bPR\b/i.test(last) || /PR ready/i.test(last);
+}
+
+// ---------------------- secondmate completion backstop ----------------------
+
+function armCompletionTimer(sup: Supervisor, crew: Crewmate): void {
+	clearStaleTimer(sup, crew.pane);
+	const timer = setTimeout(() => {
+		sup.staleTimers.delete(crew.pane);
+		void fireCompletion(sup, crew);
+	}, sup.tunables.secondmateIdleMs);
+	sup.staleTimers.set(crew.pane, timer);
+}
+
+async function fireCompletion(sup: Supervisor, crew: Crewmate): Promise<void> {
+	if (sup.abort.signal.aborted) return;
+	const cur = sup.prevStatus.get(crew.pane);
+	if (cur !== "idle" && cur !== "unknown" && cur !== "done") return;
+	if (!(await paneReachable(sup, crew.pane))) {
+		dropPane(sup, crew.pane);
+		return;
+	}
+	if (await paneShowsBusyBanner(sup, crew.pane)) {
+		armCompletionTimer(sup, crew);
+		return;
+	}
+	const last = await lastStatusLine(sup, crew.task);
+	if (last && captainRelevantStatusLine(last)) return;
+	const lineage = crew.worker ? ` ${crew.worker}` : "";
+	enqueueStale(
+		sup,
+		`[wake] ${crew.task}${lineage} ${crew.pane} - secondmate idle after routed work, no status \u00b7 action: review + close out`,
+	);
+}
+
+// ---------------------- durable-identity pane resolution ---------------------
+
+async function resolveLivePane(sup: Supervisor, task: string, recordedPane: string): Promise<string> {
+	try {
+		const res = await sup.pi.exec("herdr", ["agent", "get", task], {
+			timeout: sup.tunables.herdrGetTimeoutMs,
+			signal: sup.abort.signal,
+			cwd: sup.ctx.cwd,
+		});
+		const live = res.stdout.match(/"pane_id":"([^"]*)"/)?.[1];
+		if (!live) return recordedPane;
+		if (live !== recordedPane) await writeMetaPane(sup, task, live);
+		return live;
+	} catch {
+		return recordedPane;
+	}
+}
+
+async function writeMetaPane(sup: Supervisor, task: string, pane: string): Promise<void> {
+	const path = join(sup.stateDir, `${task}.meta`);
+	try {
+		const txt = await readFile(path, "utf8");
+		const lines = txt.split("\n");
+		let found = false;
+		const next = lines.map((line) => {
+			if (!line.startsWith("pane=")) return line;
+			found = true;
+			return `pane=${pane}`;
+		});
+		if (!found) next.push(`pane=${pane}`);
+		await writeFile(path, next.join("\n"));
+	} catch {
+		// Best-effort metadata refresh. The recorded pane remains a safe fallback.
+	}
+}
+
+// ------------------------ busy-banner corroboration -------------------------
+
+async function paneShowsBusyBanner(sup: Supervisor, pane: string): Promise<boolean> {
+	let text: string;
+	try {
+		const res = await sup.pi.exec("herdr", ["pane", "read", pane, "--lines", "6", "--source", "visible"], {
+			timeout: sup.tunables.busyReadTimeoutMs,
+			signal: sup.abort.signal,
+			cwd: sup.ctx.cwd,
+		});
+		text = res.stdout;
+	} catch {
+		return false;
+	}
+	const source =
+		process.env.FM_BUSY_REGEX ??
+		["esc (to )?interrupt", "⟨esc⟩", "Working(\\.\\.\\.|…)?", "Thinking"].join("|");
+	let busy: RegExp;
+	try {
+		busy = new RegExp(source, "i");
+	} catch {
+		busy = /esc (to )?interrupt|⟨esc⟩|Working(\.\.\.|…)?|Thinking/i;
+	}
+	return text
+		.split("\n")
+		.map((line) => line.replace(/[\u2502\u2503|\u2500\u2501\u256d\u256e\u2570\u256f\u250c\u2510\u2514\u2518]/g, "").trim())
+		.filter((line) => line.length > 0)
+		.some((line) => busy.test(line));
 }
 
 // ---------------------------- status files ----------------------------
@@ -761,7 +899,7 @@ async function onStatusFileChange(sup: Supervisor, filename: string): Promise<vo
 	const crew = findCrewByTask(sup, task);
 	const pane = crew?.pane ?? "?";
 
-	if (CAPTAIN_RE.test(last)) {
+	if (captainRelevantStatusLine(last)) {
 		clearStaleTimer(sup, pane); // a real status supersedes the stale backstop
 		enqueueEvent(sup, {
 			t: Date.now(),
@@ -902,21 +1040,41 @@ async function flush(sup: Supervisor): Promise<void> {
 	if (all.length === 0) return;
 
 	if (afk) {
-		// classifyAndDigest already combined events; fold any stale lines in so
-		// the captain gets exactly ONE message while away.
-		inject(sup, all.length === 1 ? (all[0] ?? "") : all.join("\n"));
+		// classifyAndDigest already combined events. A stale nudge is intentionally
+		// not an OS notification, even when it is folded into an AFK batch.
+		inject(sup, all.length === 1 ? (all[0] ?? "") : all.join("\n"), digests.length > 0);
 	} else {
-		for (const d of all) inject(sup, d);
+		for (const digest of digests) inject(sup, digest, true);
+		for (const staleDigest of stale) inject(sup, staleDigest, false);
 	}
 }
 
-function inject(sup: Supervisor, content: string): void {
+export const FM_WAKE_DELIVERY_OPTIONS = { deliverAs: "nextTurn", triggerTurn: true } as const;
+
+function inject(sup: Supervisor, content: string, notifyOs = false): void {
 	try {
 		sup.pi.sendMessage(
 			{ customType: "fm-wake", content, display: true },
-			{ deliverAs: "nextTurn", triggerTurn: true },
+			FM_WAKE_DELIVERY_OPTIONS,
 		);
 	} catch (err) {
 		logWarn(sup, `fm-supervisor: inject failed: ${String(err)}`);
 	}
+	if (notifyOs) notifyCaptainOs(sup, content);
+}
+
+function notifyCaptainOs(sup: Supervisor, content: string): void {
+	if (process.env.FM_CAPTAIN_OS_NOTIFY === "0" || process.platform !== "darwin") return;
+	const home = process.env.FM_HOME ?? sup.ctx.cwd;
+	if (existsSync(join(home, ".fm-secondmate-home"))) return;
+	const firstLine = content.replace(/^\[wake[^\]]*\]\s*/, "").split("\n")[0] ?? "";
+	const safe = firstLine.slice(0, 220).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+	const script = `display notification "${safe}" with title "firstmate" sound name "Ping"`;
+	void Promise.resolve(
+		sup.pi.exec("osascript", ["-e", script], {
+			timeout: sup.tunables.herdrGetTimeoutMs,
+			signal: sup.abort.signal,
+			cwd: sup.ctx.cwd,
+		}),
+	).catch(() => {});
 }
