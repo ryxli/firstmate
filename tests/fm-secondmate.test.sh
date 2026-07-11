@@ -94,6 +94,13 @@ case "${1:-}" in
         fi
         exit 0 ;;
     esac ;;
+  tab)
+    case "${2:-}" in
+      create)
+        printf '{"id":"cli:tab:create","result":{"tab":{"tab_id":"w1:t1"},"root_pane":{"pane_id":"w1:p0"}}}\n'
+        exit 0 ;;
+      close) exit 0 ;;
+    esac ;;
   pane)
     case "${2:-}" in
       current) printf '{"pane_id":"w0:p0"}\n'; exit 0 ;;
@@ -103,6 +110,20 @@ case "${1:-}" in
     esac ;;
   notification) exit 0 ;;
   status) printf 'status: running\n'; exit 0 ;;
+  workspace)
+    case "${2:-}" in
+      get)
+        if [ "${3:-}" = "${FM_FAKE_HERDR_MISSING_WORKSPACE:-}" ]; then
+          printf '{"error":{"code":"workspace_not_found","message":"workspace %s not found"}}\n' "${3:-}"
+          exit 1
+        fi
+        printf '{"id":"cli:workspace:get","result":{"workspace":{"workspace_id":"%s"}}}\n' "${3:-wT}"
+        exit 0 ;;
+      create)
+        wid="${FM_FAKE_HERDR_REPLACEMENT_WORKSPACE_ID:-w-replacement}"
+        printf '{"id":"cli:workspace:create","result":{"workspace":{"workspace_id":"%s"}}}\n' "$wid"
+        exit 0 ;;
+    esac ;;
   worktree)
     case "${2:-}" in
       create)
@@ -1206,6 +1227,60 @@ test_recovery_respawn_uses_persistent_home() {
   pass "restart recovery can respawn a secondmate from durable registry and charter"
 }
 
+test_recovery_respawn_replaces_missing_registered_workspace() {
+  local home subhome subhome_abs fakebin log meta
+  home="$TMP_ROOT/missing-workspace-recovery-home"
+  subhome="$TMP_ROOT/missing-workspace-recovery-subhome"
+  mkdir -p "$home/data" "$home/state" "$home/config" "$subhome/config" "$subhome/data" "$subhome/projects" "$subhome/state"
+  subhome_abs=$(cd "$subhome" && pwd -P)
+  printf 'bull\n' > "$subhome/.fm-secondmate-home"
+  printf 'schema_version=1\nname=Bull\n' > "$subhome/config/identity"
+  printf 'persisted child state\n' > "$subhome/state/keep"
+  printf 'charter\n' > "$subhome/data/charter.md"
+  printf 'omp\n' > "$home/config/crew-harness"
+  printf '%s\n' '- bull - recovery domain (home: '"$subhome"'; workspace: w-missing; scope: recovery domain; projects: gamma; added 2026-07-11)' > "$home/data/secondmates.md"
+  cat > "$home/state/bull.meta" <<EOF
+pane=w-old:p-old
+worktree=$subhome
+project=$subhome
+harness=omp
+kind=secondmate
+mode=secondmate
+yolo=off
+workspace=w-missing
+home=$subhome
+projects=gamma
+EOF
+  printf 'persisted supervisor state\n' > "$home/state/bull.status"
+  fakebin=$(make_fake_herdr "$TMP_ROOT/missing-workspace-recovery-fake")
+  log="$TMP_ROOT/missing-workspace-recovery-fake/herdr.log"
+
+  PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
+    FM_FAKE_HERDR_MISSING_WORKSPACE=w-missing FM_FAKE_HERDR_REPLACEMENT_WORKSPACE_ID=w-replacement \
+    "$ROOT/bin/fm-spawn.sh" bull --secondmate >/dev/null \
+    || fail "secondmate recovery did not replace a missing registered workspace"
+
+  meta="$home/state/bull.meta"
+  grep -F 'workspace get w-missing' "$log" >/dev/null || fail "recovery did not verify the recorded workspace"
+  grep -F "workspace create --cwd $subhome_abs --label home --no-focus" "$log" >/dev/null \
+    || fail "recovery did not create a replacement workspace for the existing home"
+  grep -F 'worktree create' "$log" >/dev/null && fail "recovery recreated the persistent home"
+  grep -F -- '--workspace w-replacement' "$log" >/dev/null || fail "spawn did not use the replacement workspace"
+  grep -F 'omp --auto-approve -c' "$log" >/dev/null || fail "recovery did not resume the OMP session"
+  grep -F 'workspace: w-replacement' "$home/data/secondmates.md" >/dev/null \
+    || fail "recovery did not update the durable workspace registration"
+  grep -F 'workspace: w-missing' "$home/data/secondmates.md" >/dev/null \
+    && fail "recovery retained the missing workspace registration"
+  grep -Fx 'workspace=w-replacement' "$meta" >/dev/null || fail "recovery did not update workspace metadata"
+  [ "$(cat "$subhome/config/identity")" = $'schema_version=1\nname=Bull' ] \
+    || fail "recovery changed the persistent home identity"
+  [ "$(cat "$subhome/state/keep")" = 'persisted child state' ] \
+    || fail "recovery changed child operational state"
+  [ "$(cat "$home/state/bull.status")" = 'persisted supervisor state' ] \
+    || fail "recovery changed supervisor operational state"
+  pass "restart recovery replaces a missing workspace without recreating the secondmate home"
+}
+
 test_secondmate_teardown_retires_empty_home() {
   local home subhome subhome_abs fakebin log fmroot
   home="$TMP_ROOT/teardown-home"
@@ -2195,6 +2270,7 @@ test_secondmate_spawn_requires_seeded_matching_home
 test_secondmate_spawn_refuses_operational_dirs_outside_subhome
 test_fm_send_resolves_bare_firstmate_window_from_home_meta
 test_recovery_respawn_uses_persistent_home
+test_recovery_respawn_replaces_missing_registered_workspace
 test_secondmate_teardown_retires_empty_home
 test_secondmate_teardown_refuses_failed_herdr_workspace_remove
 test_secondmate_teardown_removes_plain_clone_home_without_herdr

@@ -163,6 +163,92 @@ secondmate_registry_value() {
   printf '%s\n' "$value"
 }
 
+replace_registered_secondmate_workspace() {
+  local id=$1 old_workspace=$2 new_workspace=$3 reg tmp
+  reg="$DATA/secondmates.md"
+  [ -f "$reg" ] || { echo "error: no secondmate registry at $reg" >&2; return 1; }
+  tmp=$(mktemp "${reg}.XXXXXX") || return 1
+  if ! awk -v id="$id" -v old_workspace="$old_workspace" -v new_workspace="$new_workspace" '
+    BEGIN {
+      prefix = "- " id " "
+      needle = "workspace: " old_workspace ";"
+      replacement = "workspace: " new_workspace ";"
+    }
+    index($0, prefix) == 1 {
+      if (updated++) exit 2
+      position = index($0, needle)
+      if (!position) exit 3
+      $0 = substr($0, 1, position - 1) replacement substr($0, position + length(needle))
+    }
+    { print }
+    END {
+      if (!updated) exit 4
+    }
+  ' "$reg" > "$tmp"; then
+    rm -f "$tmp"
+    echo "error: could not update workspace registration for secondmate $id" >&2
+    return 1
+  fi
+  mv "$tmp" "$reg"
+}
+
+replace_secondmate_meta_workspace() {
+  local id=$1 workspace=$2 meta tmp
+  meta="$STATE/$id.meta"
+  [ -f "$meta" ] || return 0
+  tmp=$(mktemp "${meta}.XXXXXX") || return 1
+  if ! awk -v workspace="$workspace" '
+    /^workspace=/ {
+      if (updated++) exit 2
+      print "workspace=" workspace
+      next
+    }
+    { print }
+    END {
+      if (!updated) print "workspace=" workspace
+    }
+  ' "$meta" > "$tmp"; then
+    rm -f "$tmp"
+    echo "error: could not update workspace metadata for secondmate $id" >&2
+    return 1
+  fi
+  mv "$tmp" "$meta"
+}
+
+recover_missing_registered_secondmate_workspace() {
+  local registered_workspace workspace_get replacement_json replacement_workspace
+  [ "$KIND" = secondmate ] || return 0
+  [ -n "$WORKSPACE" ] || return 0
+  registered_workspace=$(secondmate_registry_value "$ID" workspace || true)
+  [ "$WORKSPACE" = "$registered_workspace" ] || return 0
+
+  workspace_get=$(herdr workspace get "$WORKSPACE" 2>&1) && return 0
+  if ! printf '%s' "$workspace_get" | grep -Eq '"code":"workspace_not_found"|workspace .+ not found'; then
+    echo "error: could not verify registered workspace $WORKSPACE for secondmate $ID" >&2
+    echo "$workspace_get" >&2
+    return 1
+  fi
+
+  replacement_json=$(herdr workspace create --cwd "$PROJ_ABS" --label "$WORKER_LABEL" --no-focus 2>&1) || {
+    echo "error: herdr workspace create failed while recovering secondmate $ID" >&2
+    echo "$replacement_json" >&2
+    return 1
+  }
+  replacement_workspace=$(printf '%s' "$replacement_json" | fm_json_get result workspace workspace_id)
+  [ -n "$replacement_workspace" ] || {
+    echo "error: herdr workspace create did not return a workspace_id while recovering secondmate $ID" >&2
+    echo "$replacement_json" >&2
+    return 1
+  }
+
+  replace_registered_secondmate_workspace "$ID" "$WORKSPACE" "$replacement_workspace" || return 1
+  if ! replace_secondmate_meta_workspace "$ID" "$replacement_workspace"; then
+    replace_registered_secondmate_workspace "$ID" "$replacement_workspace" "$WORKSPACE" || true
+    return 1
+  fi
+  WORKSPACE=$replacement_workspace
+}
+
 
 resolved_existing_dir() {
   local path=$1
@@ -373,6 +459,8 @@ else
 fi
 AGENT_SLOT=$ID
 AGENT_IDENTITY=$HARNESS
+
+recover_missing_registered_secondmate_workspace || exit 1
 
 cleanup_failed_spawn() {
   if [ "${CREATED_TAB:-0}" = 1 ] && [ -n "${TAB_ID:-}" ]; then
