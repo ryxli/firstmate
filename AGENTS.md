@@ -335,10 +335,9 @@ Use `bin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the chart
 The workspace ID is the durable handle for the home: teardown calls `herdr worktree remove --workspace <id>` to release the slot cleanly; a home without a workspace ID in the registry is a plain clone and is removed with `rm -rf`.
 The home persists with no live process and is never recycled by herdr until explicitly released; that release happens only on explicit retirement or seed rollback, never on a routine restart or recovery.
 The charter must be filled before seeding; direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.
-Seeding is transactional: if validation, cloning, no-mistakes initialization, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
+Seeding is transactional: if validation, cloning, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
 `bin/fm-home-seed.sh validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes.
-Secondmate project lists may include `no-mistakes` and `direct-PR` projects only; `local-only` projects stay with the main firstmate.
-For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home and refuses to mutate a preexisting clone that is not already initialized.
+Secondmate project lists may include `direct-PR` projects only; `local-only` projects stay with the main firstmate.
 
 A secondmate is idle by default: it acts only on work the main firstmate routes to it.
 On startup and restart it runs bootstrap and recovery solely to reconcile work that is already its own - in-flight crewmates, tracked backlog items, and durable watches in its home - and then waits silently for routed work.
@@ -379,32 +378,21 @@ Do not eagerly backfill every project.
 
 **Delivery mode (choose at add).** `<mode>` is how a finished change reaches `main`, picked per project when you add it and recorded in the registry line (`fm-project-mode.sh` parses it; `fm-spawn` records it into each task's meta):
 
-- `no-mistakes` (default; `[...]` may be omitted) - full pipeline -> PR -> captain merge. Highest assurance.
-- `direct-PR` - push + open a PR via `gh-axi`, no pipeline -> captain merge.
+- `direct-PR` (default; `[...]` may be omitted) - push + open a PR via `gh-axi`, backed by focused review and tests, with no separate pipeline -> captain merge.
 - `local-only` - local branch, no remote, no PR; firstmate reviews the diff, the captain approves, firstmate merges to local `main` (section 7).
+- `no-mistakes` - legacy alias retained so old registry lines still parse; treated as `direct-PR`, and the no-mistakes pipeline is no longer invoked.
 
-Orthogonal to mode is an optional `+yolo` flag (`[direct-PR +yolo]`), default off and **not recommended**: with `yolo` on, firstmate makes the approval decisions itself instead of asking the captain (section 7). When the captain adds a project without saying, default to `no-mistakes` with yolo off; only set a faster mode or `+yolo` on the captain's explicit say-so.
+Orthogonal to mode is an optional `+yolo` flag (`[direct-PR +yolo]`), default off and **not recommended**: with `yolo` on, firstmate makes the approval decisions itself instead of asking the captain (section 7).
+When the captain adds a project without saying, default to `direct-PR` with yolo off; only set `local-only` or `+yolo` on the captain's explicit say-so.
 
-**Clone existing:** `git clone <url> projects/<name>`, add its registry line with the chosen mode, then initialize only if the mode is `no-mistakes`.
+**Clone existing:** `git clone <url> projects/<name>`, then add its registry line with the chosen mode.
 
-**Create new:** for `no-mistakes` and `direct-PR` modes a new project needs a GitHub repo first (they push to an `origin` remote); a `local-only` project needs no remote at all - a purely local git repo is fine.
+**Create new:** a `direct-PR` project needs a GitHub repo first (it pushes to an `origin` remote); a `local-only` project needs no remote at all - a purely local git repo is fine.
 Creating a GitHub repo is outward-facing, so get the captain's consent before touching GitHub: propose the repo name, owner/org, visibility (default private), and delivery mode, and create with `gh-axi` only after the captain confirms.
-Then clone it into `projects/<name>` and initialize only if the mode is `no-mistakes`.
+Then clone it into `projects/<name>`.
 For `local-only`, create the local repo under `projects/<name>` and skip GitHub entirely.
 
-**Initialize (`no-mistakes` mode only):**
-
-```sh
-cd projects/<name> && no-mistakes init && no-mistakes doctor
-```
-
-`no-mistakes init` sets up the local gate: a bare repo plus post-receive hook, the `no-mistakes` git remote, and a database record for the repo (it needs an `origin` remote).
-It does **not** vendor any skill into the project - the no-mistakes skill is user-level now, available to every crewmate without a per-project copy.
-So init produces nothing to commit; it is a sanctioned exception to the never-write rule (section 1) only in that it runs git remote/config setup inside the project.
-Touch nothing else.
-`direct-PR` and `local-only` projects skip init entirely - they do not run the pipeline (`local-only` has no remote at all).
-
-If `no-mistakes doctor` reports problems, fix the environment (auth, daemon) before dispatching work to that project.
+There is no separate validation pipeline to install or run: a change reaches `main` through focused review and tests plus the captain's merge.
 
 ## 7. Task lifecycle
 
@@ -434,7 +422,7 @@ When you create a new secondmate, hand its in-scope queued items off from the ma
 
 Then classify the shape:
 
-- **Ship** (the default): the deliverable is a change to the project. It ships through the project's delivery mode: `no-mistakes`, `direct-PR`, or `local-only`.
+- **Ship** (the default): the deliverable is a change to the project. It ships through the project's delivery mode: `direct-PR` or `local-only`.
 - **Scout:** the deliverable is knowledge - an investigation, a plan, a bug reproduction, an audit. It ends in a report at `data/<id>/report.md`, never a PR. When the captain asks "what's wrong", "how would we", or "find out why" about a project, that is a scout task; dispatch it instead of doing the digging yourself.
 
 Then classify readiness:
@@ -443,7 +431,7 @@ Then classify readiness:
 - **Blocked:** touches the same files or subsystem as an in-flight task, or explicitly depends on an unmerged PR. Record it in `data/backlog.md` with `blocked-by: <id>` and tell the captain what work is waiting and why. Scout tasks are read-mostly and almost never block on anything.
 
 Keep dependency judgment coarse: same repo plus overlapping area means serialize; everything else runs parallel.
-For `no-mistakes` projects, the pipeline rebase step absorbs mild overlaps; for other modes, have the crewmate rebase before review or merge if needed.
+If work overlaps, have the crewmate rebase before review or merge.
 
 Write the brief per section 11.
 
@@ -479,11 +467,11 @@ Its charter escalates only captain-relevant outcomes - `done`, `blocked`, `needs
 
 ### Delivery modes and yolo
 
-A ship task's path from `done` to landed on `main` is set by the project's `mode` (recorded in meta; section 6); `yolo` decides who approves. The Validate / PR ready / Ship teardown stages below are written for the `no-mistakes` path; the other modes diverge:
+A ship task's path from `done` to landed on `main` is set by the project's `mode` (recorded in meta; section 6); `yolo` decides who approves. The PR ready / Ship teardown stages below apply per mode:
 
-- **no-mistakes** - the stages below as written: no-mistakes validation pipeline -> PR -> captain merge.
-- **direct-PR** - no pipeline. The crewmate pushes and opens the PR itself (its brief says so) and reports `done: PR <url>`. Skip the Validate step and go straight to PR ready (run `fm-pr-check`, relay the PR). Teardown uses the normal pushed-branch check.
+- **direct-PR** (default) - the crewmate does focused review and tests, pushes, and opens the PR itself (its brief says so) and reports `done: PR <url>`. Firstmate runs `fm-pr-check` and relays the PR. Teardown uses the normal pushed-branch check.
 - **local-only** - no remote, no PR. The crewmate stops at `done: ready in branch fm/<id>`. Review the diff with `bin/fm-review-diff.sh <id>`, relay a one-paragraph summary to the captain, and on approval run `bin/fm-merge-local.sh <id>` to fast-forward local `main` (it refuses anything but a clean fast-forward - if it does, have the crewmate rebase). No `fm-pr-check`. Then teardown, whose safety check requires the branch already merged into local `main`, OR the work pushed to any remote (a fork counts - relevant for upstream-contribution PRs on a local-only-registered project).
+- **no-mistakes** - legacy alias; treated exactly as **direct-PR** (no pipeline is run).
 
 When reviewing any crewmate branch diff, use `bin/fm-review-diff.sh <id>` rather than `git diff <default>...branch` directly.
 Pooled clones keep their local default refs frozen at clone time and can lag `origin`; the helper always compares against the authoritative base.
@@ -492,24 +480,17 @@ Pooled clones keep their local default refs frozen at clone time and can lag `or
 
 ### Validate
 
-For `no-mistakes`-mode ship tasks, when a crewmate's status says `done`, trigger validation using the crew's harness from `state/<id>.meta`.
-Use `/no-mistakes` for claude, `$no-mistakes` for codex; natural language also works.
-For example, with claude:
-
-```sh
-bin/fm-send.sh fm-<id> '/no-mistakes'
-```
-
-The crewmate drives the no-mistakes pipeline (review, test, document, lint, push, PR, CI) itself.
-It fixes auto-fix findings on its own.
-When it reports `needs-decision` (ask-user findings), relay the findings to the captain unless `yolo=on` permits routine approval on your judgment, then send the decision back as a short instruction (the crewmate responds via `no-mistakes axi respond`).
+There is no separate firstmate-triggered validation pipeline.
+A ship crewmate runs the project's own focused checks (the tests and lints it already uses) and reviews its own diff before it reports `done` - for `direct-PR` before opening the PR, for `local-only` before reporting `ready in branch`.
+Firstmate's validation is review, not a pipeline: for `direct-PR`, read the opened PR and its CI if the project runs CI; for `local-only`, read the branch diff with `bin/fm-review-diff.sh <id>`.
+Relay anything that needs a decision to the captain unless `yolo=on` permits routine approval on your judgment.
 Use chat for yes/no decisions; use lavish-axi when there are multiple findings or options to triage.
 
 ### PR ready
 
-For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports `done: PR <url> checks green` after CI is green, while `direct-PR` reports `done: PR <url>` after opening the PR.
+For PR-based ship tasks (`direct-PR`), the crewmate reports `done: PR <url>` after opening the PR, adding `checks green` once the project's CI (if any) is green.
 Run `bin/fm-pr-check.sh <id> <PR url>` - it records `pr=` in the task's meta and registers a merge check for the supervision extension's poll timer.
-Tell the captain: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the captain's terminal makes a full URL clickable), a one-paragraph summary, and, for `no-mistakes`, the risk level it emitted.
+Tell the captain: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the captain's terminal makes a full URL clickable) and a one-paragraph summary.
 (The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when firstmate should wake, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
 
 If the captain says "merge it", run `gh-axi pr merge` yourself; that instruction is the explicit approval. If `yolo=on`, merge a green/approved PR yourself and post the required FYI.
@@ -685,7 +666,7 @@ Secondmates contribute their segment on firstmate's request or at week close; fo
 ## 11. Crewmate briefs
 
 Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
-For a ship task the definition of done is shaped by the project's delivery mode (section 6): `no-mistakes` ends in the harness-appropriate no-mistakes validation pipeline, `direct-PR` has the crewmate push and open the PR itself, `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
+For a ship task the definition of done is shaped by the project's delivery mode (section 6): `direct-PR` has the crewmate do focused review and tests, then push and open the PR itself, while `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
 The scaffold reads the mode via `fm-project-mode.sh`, so you do not pass it.
 Ship briefs also include the project-memory contract: run `bin/fm-ensure-agents-md.sh` when the project already has agent-memory files or when the task produced durable project-intrinsic knowledge, then record proportionate learnings in `AGENTS.md`.
 For scout tasks add `--scout`: the scaffold swaps the definition of done for the report contract (findings to `data/<id>/report.md`, no branch, no push, no PR) and declares the worktree scratch; scout is mode-agnostic.
