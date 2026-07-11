@@ -1,7 +1,7 @@
 # Ideas (tiny slices)
 
-Keel's own small, developable ideas for the firstmate/harness system. Tracked and shared so mates can pick a slice from the repo; expect Keel to fast-forward this file with new parked ideas over time.
-Rules: each is ONE super-small slice a mate could pick up and finish in one sitting - not a project, not a track. Harness only (BFL work never goes here; that is the Work track in backlog.md). If a slice grows, promote it to the Harness queue in backlog.md instead.
+Shared idea exchange between firstmate instances that push to this same firstmate remote (peer firstmates, not this fleet's crewmates). This is collaboration on the shared firstmate/harness template itself.
+Rules: each is ONE super-small slice a peer firstmate could pick up and finish in one sitting - not a project, not a track. Harness/template only (a specific fleet's BFL or project work never goes here). If a slice grows, it becomes real shared work, not a parked idea. Claim a slice by noting your instance before developing it, so two firstmates do not collide.
 
 ## Open
 - fm-panes staleness column - add an optional last-status age column to `bin/fm-panes.sh --all` so a glance shows which panes have gone quiet. Pure read, no new deps.
