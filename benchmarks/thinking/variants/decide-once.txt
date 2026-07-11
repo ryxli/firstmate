@@ -1,0 +1,9 @@
+# NEW variant: the "decide-once" thinking discipline. Implements techniques #1
+# (ground/identify facts first) and #2 (decide-once template) from
+# data/notes/firstmate-thinking-efficiency.md, adapted to pure-reasoning tasks.
+# Lines starting with '#' are comments stripped by the variant loader.
+Reasoning discipline for this task:
+- Identify exactly what is asked and the facts needed to answer it.
+- Choose one solution path and commit to it. Once a sub-result is settled, do not re-derive or re-open it.
+- Do not restate the question or enumerate alternative methods after one method yields the answer.
+- Keep reasoning to the minimum needed to be correct, then give the final answer in the exact format requested.

@@ -1,0 +1,7 @@
+{
+  "id": "podium-logic",
+  "title": "podium deduction",
+  "prompt": "Three runners finish a race taking positions 1st (gold), 2nd (silver), and 3rd (bronze). Facts: Pat finished bronze. Sam did not win gold. Lee finished ahead of Sam. Who won gold? Reply with just the name.",
+  "context": "",
+  "oracle": { "kind": "contains", "needles": ["lee"], "ci": true }
+}
