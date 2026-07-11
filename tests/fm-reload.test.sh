@@ -13,6 +13,12 @@
 #   (i) fm-<name> durable target                      -> resolved via state meta, resume used
 #   (j) post-reload proof timeout                     -> omp does not restart -> exit 1
 #   (k) session id mismatch after reload              -> continuity proof fails -> exit 1
+#   (l) scrollback miss                               -> deterministic omp-store lookup
+#   (m) self-reload (own pane)                        -> detached worker, exact resume, success logged
+#   (n) self-reload, no session id, no --allow-fresh  -> fail closed before handoff
+#   (o) self-reload, omp never restarts               -> worker FAILED line observable
+#   (p) pane closes with agent (inline)               -> replacement pane, exact resume
+#   (q) self-reload + pane closes                     -> detached worker recovers in replacement pane
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -55,6 +61,11 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-reload-tests.XXXXXX")
 #   FM_FAKE_HERDR_POST_SESSION - session id in pane read AFTER resume (default: FM_FAKE_HERDR_SESSION)
 #   FM_FAKE_HERDR_CURRENT      - pane_id returned by pane current (empty = failure)
 #   FM_FAKE_HERDR_CWD          - cwd in pane get response (default "")
+#   FM_FAKE_HERDR_PANE_CLOSES  - set to 1 to simulate herdr closing the target
+#                                pane once /quit was sent: pane get for any
+#                                pane except the replacement (wR:p1) errors
+#                                with pane_not_found. 'tab create' returns a
+#                                replacement root pane wR:p1.
 # ---------------------------------------------------------------------------
 make_fake_herdr() {
   local dir=$1 fakebin log
@@ -77,12 +88,17 @@ case "${1:-}" in
         printf '{"id":"cli:pane:current","result":{"pane":{"pane_id":"%s"}}}\n' "$cur"
         exit 0 ;;
       get)
+        pane="${3:-}"
+        if [ -n "${FM_FAKE_HERDR_PANE_CLOSES:-}" ] && [ -f "$STATE_DIR/quit" ] && [ "$pane" != "wR:p1" ]; then
+          printf '{"error":{"code":"pane_not_found","message":"pane %s not found"},"id":"cli:pane:get"}\n' "$pane"
+          exit 0
+        fi
         if [ -f "$RESUMED_FILE" ]; then
           agent="${FM_FAKE_HERDR_POST_AGENT-omp}"
         else
           agent="${FM_FAKE_HERDR_AGENT:-}"
         fi
-        printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","cwd":"%s"}}}\n' "$agent" "${FM_FAKE_HERDR_CWD:-}"
+        printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate"}}}\n' "$agent" "${FM_FAKE_HERDR_CWD:-}"
         exit 0 ;;
       read)
         if [ -f "$RESUMED_FILE" ]; then
@@ -97,12 +113,20 @@ case "${1:-}" in
         fi
         exit 0 ;;
       run)
-        # Non-slash commands = relaunch; create the resumed marker.
+        # /quit leaves a marker (drives pane-closes simulation);
+        # non-slash commands = relaunch; create the resumed marker.
         cmd="${4:-}"
         case "$cmd" in
+          /quit) touch "$STATE_DIR/quit" ;;
           /*) ;;
           ?*) touch "$RESUMED_FILE" ;;
         esac
+        exit 0 ;;
+    esac ;;
+  tab)
+    case "${2:-}" in
+      create)
+        printf '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wR:p1"},"tab":{"tab_id":"wR:t1"}}}\n'
         exit 0 ;;
     esac ;;
   agent)
@@ -121,7 +145,8 @@ SH
   printf '%s\n' "$fakebin"
 }
 
-# Run fm-reload.sh with PATH mocked to fake herdr; guard skipped via env.
+# Run fm-reload.sh with PATH mocked to fake herdr; guard skipped via env
+# by default (set FM_RELOAD_NO_GUARD= empty to exercise the self-reload guard).
 # Caller sets FM_FAKE_HERDR_* vars before calling.
 # Args: case_dir [fm-reload.sh args...]
 run_reload() {
@@ -134,12 +159,27 @@ run_reload() {
   FM_FAKE_HERDR_STATE_DIR="$state_dir" \
   FM_ROOT_OVERRIDE="$ROOT" \
   FM_STATE_OVERRIDE="${FM_STATE_OVERRIDE:-$dir/state}" \
-  FM_RELOAD_NO_GUARD=1 \
+  FM_RELOAD_NO_GUARD="${FM_RELOAD_NO_GUARD-1}" \
   FM_RELOAD_QUIT_GRACE=0 \
   FM_RELOAD_TIMEOUT=1 \
   FM_RELOAD_PROOF_TIMEOUT=1 \
+  FM_RELOAD_SELF_TIMEOUT="${FM_RELOAD_SELF_TIMEOUT:-1}" \
     PATH="$fakebin:$PATH" \
     "$RELOAD" "$@"
+}
+
+# Wait for the detached self-reload worker's final log line (succeeded/FAILED).
+# Args: reload_log [max_wait_seconds]
+wait_worker_done() {
+  local log=$1 max=${2:-10} i=0
+  while [ "$i" -lt $((max * 4)) ]; do
+    if grep -q "detached self-reload of pane .* \(succeeded\|FAILED\)" "$log" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+    i=$((i + 1))
+  done
+  return 1
 }
 
 # Read the recorded herdr call log.
@@ -410,6 +450,147 @@ test_deterministic_session_lookup() {
   pass "(l) scrollback miss -> deterministic lookup from omp store recovers session id"
 }
 
+# ---------------------------------------------------------------------------
+# (m) self-reload (auto-detect = own pane) -> handed to detached worker,
+#     which quits, resumes the exact session, and logs success
+# ---------------------------------------------------------------------------
+test_self_reload_detaches() {
+  local CASE="$TMP_ROOT/case-m"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-00000000000d"
+  local out
+  out=$(FM_RELOAD_NO_GUARD='' \
+    FM_FAKE_HERDR_CURRENT="wm:p1" \
+    FM_FAKE_HERDR_AGENT="" \
+    FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE") || fail "(m) expected zero exit from the handoff caller"
+
+  printf '%s' "$out" | grep -q "handed to detached worker" \
+    || fail "(m) expected handoff message from caller"
+
+  local rlog="$CASE/state/.reload.wm-p1.log"
+  wait_worker_done "$rlog" || fail "(m) detached worker never wrote a final outcome to $rlog"
+
+  grep -q "detached self-reload of pane wm:p1 succeeded" "$rlog" \
+    || fail "(m) expected success line in $rlog"
+  herdr_log "$CASE" | grep -q "pane run wm:p1 /quit" \
+    || fail "(m) expected /quit sent by the detached worker"
+  herdr_log "$CASE" | grep -q "pane run wm:p1 omp --resume $sid" \
+    || fail "(m) expected exact-session resume by the detached worker"
+
+  pass "(m) self-reload -> detached worker quits, resumes exact session, logs success"
+}
+
+# ---------------------------------------------------------------------------
+# (n) self-reload with no session id and no --allow-fresh -> fails closed
+#     synchronously BEFORE any handoff or /quit
+# ---------------------------------------------------------------------------
+test_self_reload_fails_closed_before_handoff() {
+  local CASE="$TMP_ROOT/case-n"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  FM_RELOAD_NO_GUARD='' \
+  FM_FAKE_HERDR_CURRENT="wn:p1" \
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="" \
+    run_reload "$CASE" wn:p1 >/dev/null 2>/dev/null \
+    && fail "(n) expected non-zero exit when no session id and no --allow-fresh"
+
+  herdr_log "$CASE" | grep -q "pane run wn:p1 /quit" \
+    && fail "(n) /quit was sent despite fail-closed"
+  [ -e "$CASE/state/.reload.wn-p1.log" ] \
+    && fail "(n) a detached worker was spawned despite fail-closed"
+
+  pass "(n) self-reload with no session id -> fails closed before handoff"
+}
+
+# ---------------------------------------------------------------------------
+# (o) self-reload where omp never restarts -> worker logs FAILED (observable)
+# ---------------------------------------------------------------------------
+test_self_reload_worker_failure_observable() {
+  local CASE="$TMP_ROOT/case-o"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-00000000000e"
+  FM_RELOAD_NO_GUARD='' \
+  FM_FAKE_HERDR_CURRENT="wo:p1" \
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_FAKE_HERDR_POST_AGENT="shell" \
+    run_reload "$CASE" wo:p1 >/dev/null \
+    || fail "(o) expected zero exit from the handoff caller"
+
+  local rlog="$CASE/state/.reload.wo-p1.log"
+  wait_worker_done "$rlog" || fail "(o) detached worker never wrote a final outcome to $rlog"
+
+  grep -q "detached self-reload of pane wo:p1 FAILED" "$rlog" \
+    || fail "(o) expected FAILED line in $rlog"
+
+  pass "(o) self-reload worker failure -> FAILED recorded in progress log"
+}
+
+# ---------------------------------------------------------------------------
+# (p) target pane closes with the agent (inline reload) -> replacement pane
+#     provisioned, exact session resumed there, continuity proof passes
+# ---------------------------------------------------------------------------
+test_pane_closes_replacement_pane() {
+  local CASE="$TMP_ROOT/case-p"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-00000000000f"
+  FM_FAKE_HERDR_PANE_CLOSES=1 \
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" wp:p1 >/dev/null 2>/dev/null \
+    || fail "(p) expected zero exit when a replacement pane hosts the resume"
+
+  herdr_log "$CASE" | grep -q "pane run wp:p1 /quit" \
+    || fail "(p) expected /quit on the original pane"
+  herdr_log "$CASE" | grep -q "tab create" \
+    || fail "(p) expected a replacement tab/pane to be created"
+  herdr_log "$CASE" | grep -q "pane run wR:p1 omp --resume $sid" \
+    || fail "(p) expected exact-session resume in the replacement pane wR:p1"
+
+  pass "(p) pane closes with agent -> replacement pane created, exact resume proven"
+}
+
+# ---------------------------------------------------------------------------
+# (q) the observed live failure end to end: self-reload AND herdr closes the
+#     pane after /quit -> detached worker provisions a replacement pane and
+#     proves the exact session resumed there
+# ---------------------------------------------------------------------------
+test_self_reload_pane_closes_full_recovery() {
+  local CASE="$TMP_ROOT/case-q"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-000000000010"
+  FM_RELOAD_NO_GUARD='' \
+  FM_FAKE_HERDR_CURRENT="wq:p1" \
+  FM_FAKE_HERDR_PANE_CLOSES=1 \
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" >/dev/null \
+    || fail "(q) expected zero exit from the handoff caller"
+
+  local rlog="$CASE/state/.reload.wq-p1.log"
+  wait_worker_done "$rlog" || fail "(q) detached worker never wrote a final outcome to $rlog"
+
+  grep -q "detached self-reload of pane wq:p1 succeeded (session live in pane wR:p1)" "$rlog" \
+    || fail "(q) expected success line naming the replacement pane in $rlog"
+  herdr_log "$CASE" | grep -q "pane run wq:p1 /quit" \
+    || fail "(q) expected /quit on the original pane"
+  herdr_log "$CASE" | grep -q "pane run wR:p1 omp --resume $sid" \
+    || fail "(q) expected exact-session resume in the replacement pane"
+
+  pass "(q) self-reload + pane closed -> detached worker recovers in replacement pane"
+}
+
 # Run all tests.
 test_resume_path
 test_fail_closed_no_session
@@ -423,3 +604,8 @@ test_fm_name_target
 test_proof_timeout_fails
 test_session_id_mismatch_proof
 test_deterministic_session_lookup
+test_self_reload_detaches
+test_self_reload_fails_closed_before_handoff
+test_self_reload_worker_failure_observable
+test_pane_closes_replacement_pane
+test_self_reload_pane_closes_full_recovery
