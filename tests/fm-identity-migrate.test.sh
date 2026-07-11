@@ -277,6 +277,113 @@ test_check_empty_registry_exits_0() {
   pass "check exits 0 for an empty registry"
 }
 
+# -------------------------------------------------------------------------
+# check: nested registry is traversed (two-level tree)
+# -------------------------------------------------------------------------
+test_check_recurses_nested_registry() {
+  local home_a="$TMP_ROOT/nest-home-a"
+  local home_b="$TMP_ROOT/nest-home-b"
+  local reg="$TMP_ROOT/nest/secondmates.md"
+  mkdir -p "$(dirname "$reg")"
+  make_home "$home_a"; make_home "$home_b"
+  write_marker "$home_a" alpha
+  write_marker "$home_b" beta
+  write_identity "$home_a" "schema_version=1\nname=Alpha\nrole=Alpha role"
+  # home_b is unversioned - should surface through nested traversal
+  write_identity "$home_b" "name=Beta\nrole=Beta role"
+  make_registry "$reg" "alpha:$home_a:Alpha summary"
+  # home_a has a nested registry pointing to home_b
+  make_registry "$home_a/data/secondmates.md" "beta:$home_b:Beta summary"
+
+  local out rc=0
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) || rc=$?
+  [ "$rc" = 1 ] || fail "check did not exit 1 when nested home is unversioned"
+  printf '%s\n' "$out" | grep -F "OK" | grep -F "alpha" >/dev/null \
+    || fail "check did not emit OK for top-level alpha"
+  printf '%s\n' "$out" | grep -F "UNRESOLVED" | grep -F "beta" >/dev/null \
+    || fail "check did not emit UNRESOLVED for nested beta"
+  pass "check recurses into nested secondmate registries"
+}
+
+# -------------------------------------------------------------------------
+# check: cycle in registry tree does not hang; each home counted once
+# -------------------------------------------------------------------------
+test_check_handles_registry_cycle() {
+  local home_a="$TMP_ROOT/cycle-home-a"
+  local home_b="$TMP_ROOT/cycle-home-b"
+  local reg="$TMP_ROOT/cycle/secondmates.md"
+  mkdir -p "$(dirname "$reg")"
+  make_home "$home_a"; make_home "$home_b"
+  write_marker "$home_a" alpha
+  write_marker "$home_b" beta
+  write_identity "$home_a" "schema_version=1\nname=Alpha\nrole=Alpha"
+  write_identity "$home_b" "schema_version=1\nname=Beta\nrole=Beta"
+  make_registry "$reg" "alpha:$home_a:Alpha"
+  make_registry "$home_a/data/secondmates.md" "beta:$home_b:Beta"
+  make_registry "$home_b/data/secondmates.md" "alpha:$home_a:Alpha"  # cycle
+
+  local out
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) \
+    || fail "check exited non-zero for cycle (expected all versioned)"
+  local alpha_count
+  alpha_count=$(printf '%s\n' "$out" | awk -F'\t' '$2=="alpha"{c++} END{print c+0}')
+  [ "$alpha_count" -eq 1 ] || fail "alpha counted $alpha_count times (cycle not protected)"
+  pass "check handles registry cycles without infinite loop or duplicate output"
+}
+
+# -------------------------------------------------------------------------
+# check: home appearing in multiple registries is counted exactly once
+# -------------------------------------------------------------------------
+test_check_deduplicates_homes() {
+  local home_a="$TMP_ROOT/dup-home-a"
+  local home_b="$TMP_ROOT/dup-home-b"
+  local reg="$TMP_ROOT/dup/secondmates.md"
+  mkdir -p "$(dirname "$reg")"
+  make_home "$home_a"; make_home "$home_b"
+  write_marker "$home_a" alpha
+  write_marker "$home_b" beta
+  write_identity "$home_a" "schema_version=1\nname=Alpha\nrole=Alpha"
+  write_identity "$home_b" "schema_version=1\nname=Beta\nrole=Beta"
+  # Both alpha and beta in main registry
+  make_registry "$reg" "alpha:$home_a:Alpha" "beta:$home_b:Beta"
+  # beta's nested registry also lists alpha (duplicate)
+  make_registry "$home_b/data/secondmates.md" "alpha:$home_a:Alpha"
+
+  local out
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) \
+    || fail "check exited non-zero when all homes are versioned"
+  local alpha_count
+  alpha_count=$(printf '%s\n' "$out" | awk -F'\t' '$2=="alpha"{c++} END{print c+0}')
+  [ "$alpha_count" -eq 1 ] || fail "alpha appears $alpha_count times (expected 1, dedup failed)"
+  pass "check emits each home exactly once even when listed in multiple registries"
+}
+
+# -------------------------------------------------------------------------
+# migrate: nested home is migrated transitively
+# -------------------------------------------------------------------------
+test_migrate_recurses_nested_registry() {
+  local home_a="$TMP_ROOT/nest-mig-home-a"
+  local home_b="$TMP_ROOT/nest-mig-home-b"
+  local reg="$TMP_ROOT/nest-mig/secondmates.md"
+  mkdir -p "$(dirname "$reg")"
+  make_home "$home_a"; make_home "$home_b"
+  write_marker "$home_a" alpha
+  write_marker "$home_b" beta
+  write_identity "$home_a" "schema_version=1\nname=Alpha\nrole=Alpha"
+  printf 'name=Beta\nrole=Beta role\n' > "$home_b/config/identity"
+  make_registry "$reg" "alpha:$home_a:Alpha"
+  make_registry "$home_a/data/secondmates.md" "beta:$home_b:Beta"
+
+  local out
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" migrate) \
+    || fail "migrate exited non-zero"
+  printf '%s\n' "$out" | grep -F "MIGRATED" | grep -F "beta" >/dev/null \
+    || fail "migrate did not emit MIGRATED for nested beta"
+  grep -F 'schema_version=1' "$home_b/config/identity" >/dev/null \
+    || fail "nested home config/identity does not have schema_version=1 after migration"
+  pass "migrate recurses and migrates nested secondmate homes"
+}
+
 test_check_all_versioned_exits_0
 test_check_unversioned_exits_1
 test_check_no_identity_exits_1
@@ -287,3 +394,7 @@ test_migrate_marker_only_creates_identity
 test_migrate_already_versioned_is_idempotent
 test_migrate_refuses_marker_mismatch
 test_check_empty_registry_exits_0
+test_check_recurses_nested_registry
+test_check_handles_registry_cycle
+test_check_deduplicates_homes
+test_migrate_recurses_nested_registry

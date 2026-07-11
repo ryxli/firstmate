@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # fm-identity-migrate.sh - migrate and check versioned identities for all
-# registered secondmate homes.
+# registered secondmate homes, including nested registries.
 #
 # Usage:
 #   fm-identity-migrate.sh migrate [--dry-run]
-#       For each home registered in data/secondmates.md: add schema_version=1
+#       For each home registered in data/secondmates.md (and recursively in
+#       any data/secondmates.md found within those homes): add schema_version=1
 #       to an unversioned config/identity (preserving name/role/other fields),
 #       or create a config/identity from marker+registry facts for marker-only
 #       homes. Refuses to touch any home where the marker id disagrees with
@@ -21,8 +22,11 @@
 #       command exiting 0.
 #
 # Behavior guarantees:
-#   - Idempotent: already-versioned homes emit ALREADY_VERSIONED and are
-#     left untouched.
+#   - Recursive: each registered home's data/secondmates.md is also traversed
+#     so nested secondmates (e.g. Gauge under Atlas) are included in every run.
+#   - Cycle-safe: each registry file and each home path is visited at most once.
+#   - Idempotent: already-versioned homes emit ALREADY_VERSIONED and are left
+#     untouched.
 #   - Transactional per file: writes go through a tmp file + atomic mv so a
 #     crash mid-write never leaves a half-written identity.
 #   - Non-destructive: existing name/role/parent/other fields are preserved;
@@ -49,22 +53,25 @@ Usage:
 EOF
 }
 
-# Print "id<TAB>home" for each registered secondmate, trimming whitespace.
+# Print "id<TAB>home" for each secondmate in one specific registry file.
 # Registry line format: - <id> - <summary> (home: <path>[; ...]; ...)
-parse_registry_entries() {
-  [ -f "$REG" ] || return 0
-  sed -n 's/^- \([^ ]*\) - [^(]*(home: \([^;)]*\)[;)].*/\1\t\2/p' "$REG" | \
+parse_single_registry() {
+  local reg=$1
+  [ -f "$reg" ] || return 0
+  sed -n 's/^- \([^ ]*\) - [^(]*(home: \([^;)]*\)[;)].*/\1\t\2/p' "$reg" | \
     awk -F'\t' 'NF==2 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $1 "\t" $2 }'
 }
 
-# Print the first-clause role hint for a given id from the registry.
-# "fran - Schwarzwald domain expert; owns ..." -> "Schwarzwald domain expert"
+# Print the first-clause role hint for a given id from a specific registry file.
 registry_role_for_id() {
-  local id=$1
-  [ -f "$REG" ] || return 1
-  sed -n "s/^- ${id} - //p" "$REG" | \
+  local id=$1 reg=${2:-$REG}
+  [ -f "$reg" ] || return 1
+  local role
+  role=$(sed -n "s/^- ${id} - //p" "$reg" | \
     sed 's/(home:.*//' | sed 's/[[:space:]]*$//' | \
-    sed 's/;.*//' | head -1
+    sed 's/;.*//' | head -1)
+  [ -n "$role" ] || return 1
+  printf '%s\n' "$role"
 }
 
 # Capitalize the first character of a string: "fran" -> "Fran".
@@ -77,6 +84,38 @@ capitalize_id() {
 
 # trim trailing whitespace from a string
 trim() { printf '%s' "$1" | sed 's/[[:space:]]*$//'; }
+
+# _collect_entries_recursive <reg> <seen_regs_file> <seen_homes_file>
+# Emit "id<TAB>home<TAB>src_reg" for every secondmate in <reg> and in any
+# data/secondmates.md found recursively inside those homes. Each registry
+# file and each home path is visited at most once (cycle + dup protection).
+_collect_entries_recursive() {
+  local reg=$1 seen_regs=$2 seen_homes=$3
+  # Skip already-visited registries (cycle protection).
+  grep -qFx "$reg" "$seen_regs" 2>/dev/null && return 0
+  printf '%s\n' "$reg" >> "$seen_regs"
+  [ -f "$reg" ] || return 0
+  local id home
+  while IFS=$'\t' read -r id home; do
+    [ -n "$id" ] || continue
+    # Skip duplicate homes (dup protection across registries).
+    grep -qFx "$home" "$seen_homes" 2>/dev/null && continue
+    printf '%s\n' "$home" >> "$seen_homes"
+    printf '%s\t%s\t%s\n' "$id" "$home" "$reg"
+    # Recurse into nested registry when present.
+    local nested="$home/data/secondmates.md"
+    [ -f "$nested" ] && _collect_entries_recursive "$nested" "$seen_regs" "$seen_homes" || true
+  done < <(parse_single_registry "$reg")
+}
+
+# Collect all "id<TAB>home<TAB>src_reg" triples from the full registry tree.
+collect_all_entries() {
+  local seen_regs seen_homes
+  seen_regs=$(mktemp "${TMPDIR:-/tmp}/fm-migrate-regs.XXXXXX")
+  seen_homes=$(mktemp "${TMPDIR:-/tmp}/fm-migrate-homes.XXXXXX")
+  _collect_entries_recursive "$REG" "$seen_regs" "$seen_homes"
+  rm -f "$seen_regs" "$seen_homes"
+}
 
 # check_home <id> <home>
 # Emit one STATUS line: "OK\t<id>\t<home>" or "UNRESOLVED\t<id>\t<home>\t<reason>".
@@ -112,12 +151,12 @@ check_home() {
   fi
 }
 
-# migrate_home <id> <home> [--dry-run]
-# Emit one STATUS line. Writes to stderr for CONFLICT/ERROR; stdout for all others.
-# Returns 1 on CONFLICT or ERROR (so the caller can track overall exit status).
+# migrate_home <id> <home> <src_reg> [--dry-run]
+# Emit one STATUS line. Writes to stderr for CONFLICT/ERROR; stdout otherwise.
+# Returns 1 on CONFLICT or ERROR.
 migrate_home() {
-  local id=$1 home=$2 dry_run=0
-  [ "${3:-}" = "--dry-run" ] && dry_run=1
+  local id=$1 home=$2 src_reg=$3 dry_run=0
+  [ "${4:-}" = "--dry-run" ] && dry_run=1
   local marker_path="$home/.fm-secondmate-home"
   local identity_path="$home/config/identity"
   local marker_id
@@ -167,7 +206,7 @@ migrate_home() {
     # Marker-only home: create identity from marker + registry role hint.
     local name role
     name=$(capitalize_id "$id")
-    role=$(registry_role_for_id "$id") || role=""
+    role=$(registry_role_for_id "$id" "$src_reg") || role=""
     if [ "$dry_run" = 1 ]; then
       printf 'WOULD_CREATE\t%s\t%s\tname=%s\n' "$id" "$home" "$name"
       return 0
@@ -185,12 +224,12 @@ case "$cmd" in
   check)
     [ $# -eq 1 ] || { usage; exit 1; }
     any_unresolved=0
-    while IFS=$'\t' read -r id home; do
+    while IFS=$'\t' read -r id home _src_reg; do
       [ -n "$id" ] || continue
       result=$(check_home "$id" "$home")
       printf '%s\n' "$result"
       case "$result" in UNRESOLVED*) any_unresolved=1 ;; esac
-    done < <(parse_registry_entries)
+    done < <(collect_all_entries)
     exit "$any_unresolved"
     ;;
   migrate)
@@ -198,10 +237,10 @@ case "$cmd" in
     dry_run_flag="${2:-}"
     [ -z "$dry_run_flag" ] || [ "$dry_run_flag" = "--dry-run" ] || { usage; exit 1; }
     any_bad=0
-    while IFS=$'\t' read -r id home; do
+    while IFS=$'\t' read -r id home src_reg; do
       [ -n "$id" ] || continue
-      migrate_home "$id" "$home" "${dry_run_flag:-}" || any_bad=1
-    done < <(parse_registry_entries)
+      migrate_home "$id" "$home" "$src_reg" "${dry_run_flag:-}" || any_bad=1
+    done < <(collect_all_entries)
     exit "$any_bad"
     ;;
   -h|--help|'')
