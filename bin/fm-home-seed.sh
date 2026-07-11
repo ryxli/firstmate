@@ -378,7 +378,7 @@ validate_operational_dirs() {
 validate_seed_leaf_files() {
   local home=$1 label path abs_home abs_path
   abs_home=$(resolved_path "$home")
-  for label in "data/projects.md" "data/charter.md" "$SUB_HOME_MARKER"; do
+  for label in "data/projects.md" "data/charter.md" "$SUB_HOME_MARKER" "config/identity"; do
     path="$home/$label"
     if [ -L "$path" ]; then
       echo "error: secondmate leaf file must not be a symlink: $path" >&2
@@ -598,6 +598,7 @@ SEED_PARENT_BRIEF_DIR_CREATED=0
 SEED_SUB_REG_EXISTED=0
 SEED_CHARTER_EXISTED=0
 SEED_MARKER_EXISTED=0
+SEED_IDENTITY_EXISTED=0
 SEED_EXT_DST_EXISTED=0
 SEED_CREATED_EXT_LINKS_FILE=
 
@@ -609,6 +610,30 @@ restore_seed_file() {
   else
     rm -f "$path" 2>/dev/null || true
   fi
+}
+
+# capitalize_id <id>
+# Produce a human-readable display name from a secondmate id by uppercasing
+# the first character. "fran" -> "Fran", "riggs" -> "Riggs".
+capitalize_id() {
+  local h t
+  h=$(printf '%s' "$1" | cut -c1 | tr '[:lower:]' '[:upper:]')
+  t=$(printf '%s' "$1" | cut -c2-)
+  printf '%s%s\n' "$h" "$t"
+}
+
+# write_seed_identity <home> <id> <role>
+# Write a versioned config/identity to the secondmate home. Idempotent when
+# schema_version=1 is already present; overwrites unversioned files.
+write_seed_identity() {
+  local home=$1 id=$2 role=$3 name identity_file existing_sv
+  name=$(capitalize_id "$id")
+  identity_file="$home/config/identity"
+  if [ -f "$identity_file" ]; then
+    existing_sv=$(grep '^schema_version[[:space:]]*=' "$identity_file" 2>/dev/null | sed 's/^schema_version[[:space:]]*=[[:space:]]*//' | head -1)
+    [ "$existing_sv" = "1" ] && return 0
+  fi
+  printf 'schema_version=1\nname=%s\nrole=%s\n' "$name" "$role" > "$identity_file"
 }
 
 seed_rollback_target() {
@@ -727,6 +752,7 @@ seed_rollback() {
         restore_seed_file "$SEED_MARKER_EXISTED" "$SEED_BACKUP_DIR/marker" "$SEED_HOME/$SUB_HOME_MARKER"
         restore_seed_file "$SEED_CHARTER_EXISTED" "$SEED_BACKUP_DIR/charter.md" "$SEED_HOME/data/charter.md"
         restore_seed_file "$SEED_SUB_REG_EXISTED" "$SEED_BACKUP_DIR/sub-projects.md" "$SEED_HOME/data/projects.md"
+        restore_seed_file "$SEED_IDENTITY_EXISTED" "$SEED_BACKUP_DIR/identity" "$SEED_HOME/config/identity"
       fi
     fi
   fi
@@ -934,6 +960,10 @@ seed_home() {
     SEED_MARKER_EXISTED=1
     cp "$home/$SUB_HOME_MARKER" "$SEED_BACKUP_DIR/marker"
   fi
+  if [ -f "$home/config/identity" ]; then
+    SEED_IDENTITY_EXISTED=1
+    cp "$home/config/identity" "$SEED_BACKUP_DIR/identity"
+  fi
   SEED_HOME_BACKED_UP=1
   install_ship_extensions "$home" || return 1
 
@@ -980,6 +1010,7 @@ seed_home() {
 
   projects_csv=$(join_projects "$@")
   printf '%s\n' "$id" > "$home/$SUB_HOME_MARKER"
+  write_seed_identity "$home" "$id" "$charter_summary"
   write_registry "$id" "$home" "$projects_csv" "$SEED_PARENT_BRIEF" "${SEED_HERDR_WORKSPACE_ID:-}"
   validate_registry
   SEED_COMMITTED=1

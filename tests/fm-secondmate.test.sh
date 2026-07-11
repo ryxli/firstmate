@@ -2199,6 +2199,32 @@ test_link_ship_ext_resolves_id_from_registry() {
   pass "fm-link-ship-ext resolves secondmate id from registry to install symlinks"
 }
 
+test_home_seed_writes_versioned_identity() {
+  local home subhome subhome_abs fakebin out
+  home="$TMP_ROOT/seed-ident-home"
+  subhome="$TMP_ROOT/seed-ident-sub"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  make_git_project "$home/projects/delta"
+  add_file_origin "$home/projects/delta" "$TMP_ROOT/remotes/seed-ident-delta.git"
+  printf '%s\n' '- delta [direct-PR] - delta project (added 2026-07-10)' > "$home/data/projects.md"
+  fakebin=$(make_fake_no_mistakes "$TMP_ROOT/seed-ident-nm")
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" \
+    FM_SECONDMATE_CHARTER='design and implementation domain' \
+    FM_SECONDMATE_SCOPE='design and implementation domain' \
+    "$ROOT/bin/fm-home-seed.sh" design "$subhome" delta) \
+    || fail "seed failed"
+  subhome_abs=$(cd "$subhome" && pwd -P)
+  printf '%s\n' "$out" | grep -F "home=$subhome_abs" >/dev/null || fail "seed did not report correct home"
+  [ -f "$subhome/config/identity" ] || fail "seed did not write config/identity"
+  grep -F 'schema_version=1' "$subhome/config/identity" >/dev/null \
+    || fail "seeded identity does not have schema_version=1"
+  grep -F 'name=Design' "$subhome/config/identity" >/dev/null \
+    || fail "seeded identity does not have name=Design (capitalized id)"
+  grep -F 'role=design and implementation domain' "$subhome/config/identity" >/dev/null \
+    || fail "seeded identity does not have correct role from charter summary"
+  pass "home seeding writes versioned config/identity with schema_version=1"
+}
+
 test_fm_home_parameterization
 test_lock_status_is_per_home
 test_home_seed_registry_scope_and_overlapping_projects
@@ -2256,3 +2282,4 @@ test_home_seed_ship_extensions_linked
 test_home_seed_ship_extensions_idempotent
 test_home_seed_ship_extensions_skips_real_file
 test_link_ship_ext_resolves_id_from_registry
+test_home_seed_writes_versioned_identity

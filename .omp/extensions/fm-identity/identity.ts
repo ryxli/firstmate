@@ -12,6 +12,7 @@
 //                              herdr<->omp state reporter.
 
 export const IDENTITY_SOURCE = "user:fm-identity";
+export const CURRENT_SCHEMA_VERSION = "1";
 
 export type IdentityEnv = {
 	FM_HOME?: string;
@@ -69,6 +70,14 @@ export function parseIdentityFile(text: string): Record<string, string> {
 // `.fm-secondmate-home` marker (e.g. the main firstmate home).
 export function slug(name: string): string {
 	return name.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9._-]/g, "");
+}
+
+// Returns true when the resolved identity declares schema_version=1 — the
+// versioned identity contract. Older config/identity files that carry only
+// name/role (and optional parent) are still valid and functional; this
+// predicate lets callers gate on the migration having been applied.
+export function isVersioned(identity: ResolvedIdentity): boolean {
+	return identity.fields.schema_version === CURRENT_SCHEMA_VERSION;
 }
 
 export function resolveHome(env: IdentityEnv): string {

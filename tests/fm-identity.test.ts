@@ -5,7 +5,9 @@ import { describe, expect, it } from "bun:test";
 import {
 	buildMetadataRequest,
 	buildRenameRequest,
+	CURRENT_SCHEMA_VERSION,
 	IDENTITY_SOURCE,
+	isVersioned,
 	parseIdentityFile,
 	planPropagation,
 	resolveHome,
@@ -198,5 +200,49 @@ describe("planPropagation", () => {
 		expect(plan!.requests).toHaveLength(2);
 		expect(plan!.requests[0].method).toBe("agent.rename");
 		expect(plan!.requests[1].method).toBe("pane.report_metadata");
+	});
+});
+
+describe("isVersioned", () => {
+	it("returns true when schema_version=1", () => {
+		const r = resolveIdentity("/h", {
+			markerText: "fran",
+			identityText: "schema_version=1\nname=Fran\nrole=Schwarzwald",
+		});
+		expect(r).not.toBeNull();
+		expect(isVersioned(r!)).toBe(true);
+	});
+
+	it("returns false when schema_version is absent", () => {
+		const r = resolveIdentity("/h", {
+			markerText: "fran",
+			identityText: "name=Fran\nrole=Schwarzwald",
+		});
+		expect(r).not.toBeNull();
+		expect(isVersioned(r!)).toBe(false);
+	});
+
+	it("returns false when schema_version is wrong value", () => {
+		const r = resolveIdentity("/h", {
+			markerText: "fran",
+			identityText: "schema_version=2\nname=Fran",
+		});
+		expect(r).not.toBeNull();
+		expect(isVersioned(r!)).toBe(false);
+	});
+
+	it("CURRENT_SCHEMA_VERSION is '1'", () => {
+		expect(CURRENT_SCHEMA_VERSION).toBe("1");
+	});
+
+	it("unversioned file still resolves (backward compat)", () => {
+		const r = resolveIdentity("/h", {
+			markerText: "keel",
+			identityText: "name=Keel\nrole=Main firstmate crew supervisor",
+		});
+		expect(r).not.toBeNull();
+		expect(r!.name).toBe("Keel");
+		expect(r!.fields.schema_version).toBeUndefined();
+		expect(isVersioned(r!)).toBe(false);
 	});
 });
