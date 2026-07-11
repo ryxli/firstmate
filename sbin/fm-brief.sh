@@ -195,8 +195,8 @@ You are a crewmate: an autonomous worker agent managed by firstmate. Work on you
 {TASK}
 
 # Setup
-You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.
-1. First action: create your branch: \`git checkout -b fm/$ID\`$SETUP2
+You are in a disposable git worktree of $REPO, already on your branch \`fm/$ID\` (created off a clean default branch).
+1. First action: confirm with \`git branch --show-current\`; do not create or switch branches.$SETUP2
 
 # Rules
 $RULE1
