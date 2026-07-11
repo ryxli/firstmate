@@ -1,0 +1,7 @@
+[
+  { "t": 0, "kind": "status", "pane": "w8:p4", "task": "ship-checkout-m4", "status_line": "working: implementing checkout v2", "relevant": false },
+  { "t": 60000, "kind": "herdr", "pane": "w8:p4", "task": "ship-checkout-m4", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 61000, "kind": "status", "pane": "w8:p4", "task": "ship-checkout-m4", "status_line": "done: PR https://github.com/acme/app/pull/77 checks green", "relevant": true },
+  { "t": 300000, "kind": "herdr", "pane": "w8:p4", "task": "ship-checkout-m4", "herdr_from": "idle", "herdr_to": "idle", "relevant": false },
+  { "t": 600000, "kind": "check", "pane": "w8:p4", "task": "ship-checkout-m4", "check_out": "merged: PR #77 merged to main at a1b2c3d", "relevant": true }
+]

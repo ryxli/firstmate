@@ -1,0 +1,4 @@
+[
+  { "t": 0, "kind": "status", "pane": "w8:p3", "task": "wire-oauth-r5", "status_line": "working: wiring the oauth callback handler", "relevant": false },
+  { "t": 40000, "kind": "herdr", "pane": "w8:p3", "task": "wire-oauth-r5", "herdr_from": "working", "herdr_to": "blocked", "relevant": true }
+]

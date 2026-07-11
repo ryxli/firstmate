@@ -1,0 +1,4 @@
+[
+  { "t": 0, "kind": "status", "pane": "w9:p2", "task": "build-api-q2", "status_line": "working: scaffolding the api module", "relevant": false },
+  { "t": 300000, "kind": "herdr", "pane": "w9:p2", "task": "build-api-q2", "herdr_from": "idle", "herdr_to": "idle", "relevant": false }
+]

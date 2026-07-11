@@ -1,0 +1,11 @@
+[
+  { "t": 0, "kind": "status", "pane": "w7:p1", "task": "refactor-db-z7", "status_line": "working: extracting the repository layer", "relevant": false },
+  { "t": 30000, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "working: adding a regression test", "relevant": false },
+  { "t": 60000, "kind": "herdr", "pane": "w8:p3", "task": "fix-login-k3", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 90000, "kind": "status", "pane": "w8:p3", "task": "fix-login-k3", "status_line": "done: PR https://github.com/acme/app/pull/51 checks green", "relevant": true },
+  { "t": 120000, "kind": "status", "pane": "w9:p2", "task": "build-api-q2", "status_line": "working: wiring the rate limiter", "relevant": false },
+  { "t": 150000, "kind": "herdr", "pane": "w9:p2", "task": "build-api-q2", "herdr_from": "working", "herdr_to": "idle", "relevant": false },
+  { "t": 180000, "kind": "status", "pane": "w9:p2", "task": "build-api-q2", "status_line": "needs-decision: rate-limit by ip or by account?", "relevant": true },
+  { "t": 210000, "kind": "status", "pane": "w7:p1", "task": "refactor-db-z7", "status_line": "working: migrating the callers", "relevant": false },
+  { "t": 260000, "kind": "status", "pane": "w7:p1", "task": "refactor-db-z7", "status_line": "blocked: waiting on staging db credentials", "relevant": true }
+]
