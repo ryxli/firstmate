@@ -74,7 +74,7 @@ fm_herdr_pane_id() {
 }
 
 fm_resolve_live_pane() {
-  local target=$1 state=${2:-} meta pane live
+  local target=$1 state=${2:-} meta pane live slot
   case "$target" in
     *:*)
       printf '%s\n' "$target"
@@ -90,7 +90,9 @@ fm_resolve_live_pane() {
         echo "error: no metadata for $target in $state; pass a pane id to target a pane outside this firstmate home" >&2
         return 1
       fi
-      live=$(fm_herdr_pane_id "$target")
+      slot=$(fm_meta_value "$meta" agent_slot)
+      [ -n "$slot" ] || slot="$target"
+      live=$(fm_herdr_pane_id "$slot")
       if [ -n "$live" ]; then
         pane=$(fm_meta_value "$meta" pane)
         [ "$pane" = "$live" ] || fm_meta_set "$meta" pane "$live"
@@ -146,6 +148,93 @@ fm_pane_is_busy() {
   local status
   status=$(fm_herdr_agent_status "$1")
   [ "$status" = "working" ]
+}
+
+# fm_herdr_pane_agent_process_verdict <pane>: determine whether a pane contains
+# a live coding harness when native status is still unknown. "shell" proves an
+# agent-less restored shell; "agent" and "err" must fail closed.
+fm_herdr_pane_agent_process_verdict() {
+  local pane=$1 process_info
+  process_info=$(herdr pane process-info --pane "$pane" 2>/dev/null || true)
+  [ -n "$process_info" ] || { printf 'err'; return 0; }
+  printf '%s' "$process_info" | python3 -c '
+import json
+import re
+import sys
+
+try:
+    processes = json.load(sys.stdin)["result"]["process_info"]["foreground_processes"]
+except Exception:
+    print("err")
+    raise SystemExit
+
+if not isinstance(processes, list):
+    print("err")
+    raise SystemExit
+
+harness = re.compile(r"\b(omp|claude|codex|opencode|pi|node|bun|deno)\b")
+for process in processes:
+    text = " ".join(str(process.get(key, "")) for key in ("argv0", "name", "cmdline"))
+    if harness.search(text):
+        print("agent")
+        raise SystemExit
+print("shell")
+' 2>/dev/null || printf 'err'
+}
+
+# fm_herdr_classify_slot <slot>: decide whether a persisted agent registration
+# may be safely reused after herdr restores a session layout. Only a confirmed
+# agent-less husk is reusable. A bound or booting agent remains protected.
+fm_herdr_classify_slot() {
+  local slot=$1 info pane pane_info status
+  info=$(herdr agent get "$slot" 2>/dev/null) || { printf 'free'; return 0; }
+  case "$info" in *'"error"'*) printf 'free'; return 0 ;; esac
+  pane=$(printf '%s' "$info" | fm_json_get result agent pane_id)
+  [ -n "$pane" ] || { printf 'free'; return 0; }
+  pane_info=$(herdr pane get "$pane" 2>/dev/null || true)
+  case "$pane_info" in
+    ''|*'"error"'*) printf 'husk'; return 0 ;;
+  esac
+  status=$(printf '%s' "$pane_info" | fm_json_get result pane agent_status)
+  case "$status" in
+    working|idle|blocked|done) printf 'live'; return 0 ;;
+  esac
+  case "$(fm_herdr_pane_agent_process_verdict "$pane")" in
+    shell) printf 'husk' ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+# fm_herdr_reap_husk_slot <slot>: remove only a confirmed session-restore husk.
+# Callers must create the replacement tab before this function so closing the
+# restored tab cannot leave its workspace empty.
+fm_herdr_reap_husk_slot() {
+  local slot=$1 verdict info tab pane
+  verdict=$(fm_herdr_classify_slot "$slot")
+  case "$verdict" in
+    free) return 0 ;;
+    husk)
+      info=$(herdr agent get "$slot" 2>/dev/null || true)
+      tab=$(printf '%s' "$info" | fm_json_get result agent tab_id)
+      pane=$(printf '%s' "$info" | fm_json_get result agent pane_id)
+      if [ -n "$tab" ]; then
+        herdr tab close "$tab" >/dev/null 2>&1 || true
+      elif [ -n "$pane" ]; then
+        herdr pane close "$pane" >/dev/null 2>&1 || true
+      fi
+      sleep "${FM_HUSK_REAP_SETTLE:-0.3}"
+      printf "info: reaped husk agent slot '%s' before respawn\n" "$slot" >&2
+      return 0
+      ;;
+    live)
+      printf "error: agent slot '%s' is held by a live agent - refusing to replace\n" "$slot" >&2
+      return 1
+      ;;
+    *)
+      printf "error: agent slot '%s' is occupied and not confidently a husk - refusing to replace\n" "$slot" >&2
+      return 1
+      ;;
+  esac
 }
 
 # fm_pane_input_pending: 0 (pending) if the pane's visible last line looks

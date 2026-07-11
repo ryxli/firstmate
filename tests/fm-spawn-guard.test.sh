@@ -42,7 +42,7 @@ make_sm_home() {
   dir="$TMP_ROOT/homes/$id"
   mkdir -p "$dir/sbin" "$dir/data" "$dir/state" "$dir/config" "$dir/projects"
   printf '%s\n' "$id" > "$dir/.fm-secondmate-home"
-  printf 'v1\n' > "$dir/AGENTS.md"
+  : > "$dir/AGENTS.md"
   ( cd "$dir" && pwd -P )
 }
 

@@ -23,13 +23,20 @@
 #   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> worktree=<path>
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="${FM_CODE_ROOT_OVERRIDE:-${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 SUB_HOME_MARKER=".fm-secondmate-home"
+# shellcheck source=bin/fm-identity-lib.sh
+. "$SCRIPT_DIR/fm-identity-lib.sh"
+# shellcheck source=bin/fm-herdr-lib.sh
+. "$SCRIPT_DIR/fm-herdr-lib.sh"
+# shellcheck source=bin/fm-spawn-lib.sh
+. "$SCRIPT_DIR/fm-spawn-lib.sh"
 
 KIND=ship
 WORKSPACE=""
@@ -156,11 +163,6 @@ secondmate_registry_value() {
   printf '%s\n' "$value"
 }
 
-shell_quote() {
-  printf "'"
-  printf '%s' "$1" | sed "s/'/'\\\\''/g"
-  printf "'"
-}
 
 resolved_existing_dir() {
   local path=$1
@@ -219,11 +221,23 @@ validate_firstmate_home_for_spawn() {
   if [ "$marker_id" != "$id" ]; then
     echo "error: firstmate home $home is marked for secondmate ${marker_id:-unknown}, expected $id" >&2; return 1
   fi
-  if [ ! -f "$abs_home/AGENTS.md" ]; then
+  # Symlink-backed homes retain only operational directories. Repair their shared
+  # instruction/tool links before launch. Legacy git-backed homes keep their
+  # checked-out code and remain supported unchanged.
+  if ! git -C "$abs_home" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    "$FM_ROOT/bin/fm-home-link.sh" "$abs_home" --repair >/dev/null || {
+      echo "error: failed to repair shared-code links in secondmate home $home" >&2
+      return 1
+    }
+  fi
+  if [ ! -e "$abs_home/AGENTS.md" ]; then
     echo "error: $home is not a firstmate home (missing AGENTS.md)" >&2; return 1
   fi
   if [ ! -d "$abs_home/sbin" ] && [ ! -L "$abs_home/sbin" ]; then
     echo "error: $home is not a firstmate home (missing sbin/)" >&2; return 1
+  fi
+  if [ ! -e "$abs_home/CLAUDE.md" ]; then
+    echo "error: $home is not a firstmate home (missing CLAUDE.md)" >&2; return 1
   fi
   printf '%s\n' "$abs_home"
 }
@@ -254,8 +268,12 @@ validate_firstmate_operational_dirs() {
   done
 }
 
+SECONDMATE_RESUME=0
 if [ "$KIND" = secondmate ]; then
-  if [ -z "$FIRSTMATE_HOME" ] && [ -f "$STATE/$ID.meta" ]; then
+  if [ -f "$STATE/$ID.meta" ]; then
+    SECONDMATE_RESUME=1
+  fi
+  if [ -z "$FIRSTMATE_HOME" ] && [ "$SECONDMATE_RESUME" -eq 1 ]; then
     FIRSTMATE_HOME=$(grep '^home=' "$STATE/$ID.meta" | cut -d= -f2- || true)
   fi
   if [ -z "$FIRSTMATE_HOME" ]; then
@@ -332,46 +350,87 @@ $("$FM_ROOT/sbin/fm-project-mode.sh" "$PROJ_NAME")
 EOF
 fi
 
-# Build the launch command with placeholders filled.
-sq_brief=$(shell_quote "$BRIEF")
-LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
+# Build the launch command. A secondmate OMP respawn continues its persisted
+# session rather than injecting the charter as a new prompt.
+sq_brief=$(fm_shell_quote "$BRIEF")
+if [ "$HARNESS" = omp ] && [ "$KIND" = secondmate ] && [ "$SECONDMATE_RESUME" -eq 1 ]; then
+  LAUNCH_CMD="omp --auto-approve -c"
+else
+  LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
+fi
 if [ "$KIND" = secondmate ]; then
-  sq_home=$(shell_quote "$PROJ_ABS")
+  sq_home=$(fm_shell_quote "$PROJ_ABS")
   LAUNCH_CMD="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH_CMD"
 fi
 PANE_CMD="$LAUNCH_CMD; exec \"\${SHELL:-/bin/zsh}\" -l"
 
+# The tab and pane label are display-only. The unique task id is the durable
+# herdr registration slot, while the harness keeps its integration identity.
+if [ "$KIND" = secondmate ]; then
+  WORKER_LABEL=home
+else
+  WORKER_LABEL=$(fm_worker_label "$CONFIG" "$ID" "${FM_TASK_LABEL:-}")
+fi
+AGENT_SLOT=$ID
+AGENT_IDENTITY=$HARNESS
 
-# Launch the agent via herdr. The agent name is "fm-<id>" so it is uniquely
-# addressable by name. The worktree (or secondmate home) is the --cwd.
-# herdr agent start outputs JSON with pane_id in the result.
-AGENT_NAME="fm-$ID"
-# Placement at init (herdr agent start names the agent from the first positional -
-# never a post-hoc `herdr agent rename`, which pins agent_status to unknown). An
-# optional --workspace=/--tab= lands the pane in a chosen workspace/tab instead of
-# whatever herdr workspace is currently active.
-PLACE_ARGS=()
-if [ -n "$WORKSPACE" ]; then PLACE_ARGS+=(--workspace "$WORKSPACE"); fi
-if [ -n "$TAB" ]; then PLACE_ARGS+=(--tab "$TAB"); fi
-LAUNCH_JSON=$(herdr agent start "$AGENT_NAME" --cwd "$WT" ${PLACE_ARGS[@]+"${PLACE_ARGS[@]}"} --no-focus -- sh -c "$PANE_CMD" 2>&1) || {
-  # Clean up the worktree we just created before failing.
+cleanup_failed_spawn() {
+  if [ "${CREATED_TAB:-0}" = 1 ] && [ -n "${TAB_ID:-}" ]; then
+    herdr tab close "$TAB_ID" >/dev/null 2>&1 || true
+  fi
   if [ "$KIND" != secondmate ] && [ -d "$WT" ]; then
     git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
   fi
+}
+
+# Create a replacement tab before reaping a restored husk. A caller-supplied
+# tab is already an explicit replacement surface; otherwise this keeps a husk
+# from ever being the workspace's last tab.
+TAB_ID=$TAB
+ROOT_PANE=
+CREATED_TAB=0
+if [ -z "$TAB_ID" ]; then
+  TAB_ARGS=()
+  if [ -n "$WORKSPACE" ]; then TAB_ARGS+=(--workspace "$WORKSPACE"); fi
+  TAB_JSON=$(herdr tab create ${TAB_ARGS[@]+"${TAB_ARGS[@]}"} --label "$WORKER_LABEL" --cwd "$WT" --no-focus 2>&1) || {
+    cleanup_failed_spawn
+    echo "error: herdr tab create failed for $ID" >&2
+    echo "$TAB_JSON" >&2
+    exit 1
+  }
+  TAB_ID=$(printf '%s' "$TAB_JSON" | fm_json_get result tab tab_id)
+  ROOT_PANE=$(printf '%s' "$TAB_JSON" | fm_json_get result root_pane pane_id)
+  [ -n "$TAB_ID" ] || {
+    cleanup_failed_spawn
+    echo "error: herdr tab create did not return a tab_id for $ID" >&2
+    echo "$TAB_JSON" >&2
+    exit 1
+  }
+  CREATED_TAB=1
+fi
+
+if ! fm_herdr_reap_husk_slot "$AGENT_SLOT"; then
+  cleanup_failed_spawn
+  exit 1
+fi
+
+LAUNCH_JSON=$(herdr agent start "$AGENT_SLOT" --cwd "$WT" --tab "$TAB_ID" --no-focus -- sh -c "$PANE_CMD" 2>&1) || {
+  cleanup_failed_spawn
   echo "error: herdr agent start failed for $ID" >&2
   echo "$LAUNCH_JSON" >&2
   exit 1
 }
-
-PANE=$(printf '%s\n' "$LAUNCH_JSON" | grep -o '"pane_id":"[^"]*"' | cut -d'"' -f4 | head -1 || true)
+PANE=$(printf '%s' "$LAUNCH_JSON" | fm_json_get result agent pane_id)
 [ -n "$PANE" ] || {
-  if [ "$KIND" != secondmate ] && [ -d "$WT" ]; then
-    git -C "$PROJ_ABS" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"
-  fi
+  cleanup_failed_spawn
   echo "error: herdr agent start did not return a pane_id for $ID" >&2
   echo "$LAUNCH_JSON" >&2
   exit 1
 }
+if [ -n "$ROOT_PANE" ] && [ "$ROOT_PANE" != "$PANE" ]; then
+  herdr pane close "$ROOT_PANE" >/dev/null 2>&1 || true
+fi
+herdr pane rename "$PANE" "$WORKER_LABEL" >/dev/null 2>&1 || true
 
 mkdir -p "$STATE"
 {
@@ -382,11 +441,15 @@ mkdir -p "$STATE"
   echo "kind=$KIND"
   echo "mode=$MODE"
   echo "yolo=$YOLO"
+  echo "tab=$TAB_ID"
+  echo "worker=$WORKER_LABEL"
+  echo "supervisor=$(fm_supervisor_name "$CONFIG")"
+  echo "agent_slot=$AGENT_SLOT"
+  echo "agent_identity=$AGENT_IDENTITY"
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
     if [ -n "$WORKSPACE" ]; then echo "workspace=$WORKSPACE"; fi
-    if [ -n "$TAB" ]; then echo "tab=$TAB"; fi
   fi
 } > "$STATE/$ID.meta"
 
