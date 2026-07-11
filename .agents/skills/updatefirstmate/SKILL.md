@@ -7,7 +7,7 @@ user-invocable: true
 # updatefirstmate
 
 Self-update firstmate in place.
-Firstmate is its own repo, behind the same no-mistakes gate as any project, so new tracked material (AGENTS.md, sbin/, skills) reaches `main` and then sits there until each running firstmate pulls it.
+Firstmate is its own repo, shipped directly to `main`, so new tracked material (AGENTS.md, sbin/, skills) reaches `main` and then sits there until each running firstmate pulls it.
 This skill performs that pull for the running main firstmate and every secondmate, without disturbing any in-flight work.
 
 The update is **fast-forward only** - the same sanctioned self-write as the fleet sync firstmate already runs.
