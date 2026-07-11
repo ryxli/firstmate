@@ -18,8 +18,7 @@
 #   Set FM_SECONDMATE_SCOPE='<scope>' to write a routing scope distinct from the charter text.
 # For ship tasks, the definition of done is shaped by the project's delivery mode
 # (data/projects.md via fm-project-mode.sh; see AGENTS.md sections 6-7):
-#   no-mistakes  implement -> /no-mistakes pipeline -> PR -> captain merge (default)
-#   direct-PR    implement -> push + open PR via gh-axi (no pipeline) -> captain merge
+#   direct-PR    implement, focused review + tests, push + open PR via gh-axi -> captain merge (default)
 #   local-only   implement on branch, stop and report "ready in branch" (no push/PR);
 #                firstmate reviews, captain approves, firstmate merges to local main
 # Scout tasks ignore mode - their deliverable is a report, not a merge.
@@ -159,19 +158,6 @@ $("$FM_ROOT/bin/fm-project-mode.sh" "$REPO")
 EOF
 
 case "$MODE" in
-  direct-PR)
-    SETUP2=""
-    RULE1='1. Never push to the default branch (push only your `fm/'"$ID"'` branch). Never merge a PR.'
-    DOD=$(cat <<EOF
-# Definition of done
-This project ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
-The task is complete only when committed on your branch.
-When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
-Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
-Do NOT run /no-mistakes. The captain reviews and merges the PR; firstmate relays it.
-EOF
-)
-    ;;
   local-only)
     SETUP2=""
     RULE1="1. Never push to any remote and never open a PR. Work only on your \`fm/$ID\` branch; firstmate handles the merge into local \`main\`."
@@ -179,24 +165,24 @@ EOF
 # Definition of done
 This project ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`fm/$ID\`. Do NOT push, do NOT open a PR, do NOT merge.
+Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass; fix anything you broke.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
 When it is implemented and committed, append \`done: ready in branch fm/$ID\` to the status file and stop.
 Firstmate then reviews your branch diff, the captain approves, and firstmate merges it into local \`main\`.
 EOF
 )
     ;;
-  *)  # no-mistakes (default)
-    SETUP2="
-2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
-    RULE1='1. Never push to the default branch. Never merge a PR.'
+  *)  # direct-PR (default)
+    SETUP2=""
+    RULE1='1. Never push to the default branch (push only your `fm/'"$ID"'` branch). Never merge a PR.'
     DOD=$(cat <<EOF
 # Definition of done
+This project ships **direct-PR**: you raise the PR yourself, backed by focused review and tests. There is no separate validation pipeline to run.
 The task is complete only when committed on your branch.
-When you believe it is complete, append \`done: {summary}\` to the status file and stop.
-Firstmate will then instruct you to run /no-mistakes to validate and ship a PR.
-The PR body must follow the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with links. The publish guard enforces this.
-During validation, fix auto-fix findings yourself; escalate ask-user findings per rule 6.
-After /no-mistakes reports CI green, append \`done: PR {url} checks green\` and stop. You are finished.
+Before you push, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
+When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
+Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
+The captain reviews and merges the PR; firstmate relays it.
 EOF
 )
     ;;
