@@ -121,4 +121,25 @@ emptyjson="$("$FOCUS" --home "$TMP/empty" --json --no-color)"
 if [ "$emptyjson" = "[]" ]; then pass "empty fleet -> empty json"; else fail "empty fleet json (got: $emptyjson)"; fi
 if "$FOCUS" --home "$TMP/empty" --no-color | grep -q "nothing needs you"; then pass "empty fleet -> friendly table"; else fail "empty fleet table"; fi
 
+# --- Part 4: code root override ---------------------------------------------
+# Persistent homes keep state in FM_HOME, while the lineage helper belongs to
+# the checked-out code root. FM_CODE_ROOT_OVERRIDE must select that helper.
+CODE_ROOT="$TMP/code-root"
+LINEAGE_CALLS="$TMP/lineage-calls.txt"
+mkdir -p "$CODE_ROOT/bin"
+cat > "$CODE_ROOT/bin/fm-lineage.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$FM_FOCUS_LINEAGE_CALLS"
+printf '%s\n' '{"workspaces":[]}'
+SH
+chmod +x "$CODE_ROOT/bin/fm-lineage.sh"
+FM_FOCUS_NO_HERDR="" FM_CODE_ROOT_OVERRIDE="$CODE_ROOT" FM_FOCUS_LINEAGE_CALLS="$LINEAGE_CALLS" \
+  "$FOCUS" --home "$H" --json --no-color >"$TMP/code-root-out.json" 2>"$TMP/code-root-err" \
+  || fail "fm-focus with FM_CODE_ROOT_OVERRIDE exited nonzero ($(cat "$TMP/code-root-err"))"
+if [ -f "$LINEAGE_CALLS" ]; then
+  pass "FM_CODE_ROOT_OVERRIDE selects the code-root lineage helper"
+else
+  fail "FM_CODE_ROOT_OVERRIDE did not select the code-root lineage helper"
+fi
+
 if [ "$FAILED" = 0 ]; then printf 'PASS fm-focus\n'; exit 0; else printf 'FAIL fm-focus\n'; exit 1; fi

@@ -11,10 +11,11 @@
 # state/.focus-<id> exists for the target mate. Bypass with --steer or
 # FM_DISPATCH_OVERRIDE=1.
 #
-# Text submission uses herdr pane run (text+Enter atomically) and verifies
-# delivery. If text is still stuck in the composer after retries, fm-send writes
-# a durable sendq item and starts a background drain loop; the drain retries on a
-# timer and appends state/sendq.status if the item is still pending after
+# Text submissions first inspect the composer. A human's unsent draft is never
+# passed to `herdr pane run`: the message is durably deferred with exit 75
+# instead. If a submitted message is still stuck after retries, fm-send writes
+# a durable sendq item and starts a background drain loop; the drain retries on
+# a timer and appends state/sendq.status if the item is still pending after
 # FM_SENDQ_ALERT_SECS (default 300). Tune direct retries with FM_SEND_RETRIES
 # (default 3) and FM_SEND_SLEEP (0.4).
 set -eu
@@ -28,9 +29,21 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
 fm_sendq_enqueue() {
-  local state=$1 target=$2 pane=$3 text=$4 dir id tmp out
+  local state=$1 target=$2 pane=$3 text=$4 dir id tmp out existing
   dir="$state/sendq"
   mkdir -p "$dir"
+  for existing in "$dir"/*.json; do
+    [ -e "$existing" ] || continue
+    if SENDQ_FILE="$existing" SENDQ_TARGET="$target" SENDQ_PANE="$pane" SENDQ_TEXT="$text" \
+      python3 -c 'import json, os, sys
+with open(os.environ["SENDQ_FILE"], encoding="utf-8") as fh:
+    item = json.load(fh)
+sys.exit(0 if all(item.get(key) == os.environ[env] for key, env in (("target", "SENDQ_TARGET"), ("pane", "SENDQ_PANE"), ("text", "SENDQ_TEXT"))) else 1)'; then
+      id=${existing##*/}
+      printf '%s\n' "${id%.json}"
+      return 0
+    fi
+  done
   id="$(date +%s)-$$-$RANDOM"
   tmp="$dir/$id.tmp"
   out="$dir/$id.json"
@@ -77,6 +90,11 @@ fi
 if [ "${1:-}" = "--key" ]; then
   herdr pane send-keys "$P" "$2"
 else
+  if fm_pane_input_pending "$P"; then
+    qid=$(fm_sendq_enqueue "$STATE" "$_target" "$P" "$*")
+    echo "deferred: $P composer holds an unsent draft; queued message $qid without submitting it" >&2
+    exit 75
+  fi
   # Slash commands open a completion popup in some TUIs; give them more time.
   case "$*" in /*) settle=1.2 ;; *) settle=0.3 ;; esac
   retries=${FM_SEND_RETRIES:-3}
