@@ -273,6 +273,18 @@ path_is_ancestor_of() {
   return 1
 }
 
+home_has_shared_code_links() {
+  local home=$1
+  [ -L "$home/AGENTS.md" ] || [ -L "$home/bin" ]
+}
+
+home_needs_shared_code_repair() {
+  local home=$1
+  home_has_shared_code_links "$home" && return 0
+  { [ ! -e "$home/AGENTS.md" ] || [ ! -e "$home/bin" ]; } \
+    && [ -f "$home/config/identity" ]
+}
+
 validate_firstmate_home_for_spawn() {
   local id=$1 home=$2 abs_home abs_active_home abs_root marker_id
   abs_home=$(resolved_existing_dir "$home") || return 1
@@ -308,9 +320,10 @@ validate_firstmate_home_for_spawn() {
     echo "error: firstmate home $home is marked for secondmate ${marker_id:-unknown}, expected $id" >&2; return 1
   fi
   # Symlink-backed homes retain only operational directories. Repair their shared
-  # instruction/tool links before launch. Legacy git-backed homes keep their
-  # checked-out code and remain supported unchanged.
-  if ! git -C "$abs_home" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  # instruction/tool links before launch. A non-git legacy home with both
+  # AGENTS.md and bin/ as real paths is self-contained, not a partial link home.
+  if ! git -C "$abs_home" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    && home_needs_shared_code_repair "$abs_home"; then
     "$FM_ROOT/bin/fm-home-link.sh" "$abs_home" --repair >/dev/null || {
       echo "error: failed to repair shared-code links in secondmate home $home" >&2
       return 1
@@ -322,7 +335,7 @@ validate_firstmate_home_for_spawn() {
   if [ ! -d "$abs_home/sbin" ] && [ ! -L "$abs_home/sbin" ]; then
     echo "error: $home is not a firstmate home (missing sbin/)" >&2; return 1
   fi
-  if [ ! -e "$abs_home/CLAUDE.md" ]; then
+  if home_has_shared_code_links "$abs_home" && [ ! -e "$abs_home/CLAUDE.md" ]; then
     echo "error: $home is not a firstmate home (missing CLAUDE.md)" >&2; return 1
   fi
   printf '%s\n' "$abs_home"

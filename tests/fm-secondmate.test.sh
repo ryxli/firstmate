@@ -104,7 +104,7 @@ case "${1:-}" in
   pane)
     case "${2:-}" in
       current) printf '{"pane_id":"w0:p0"}\n'; exit 0 ;;
-      read) printf 'idle prompt\n'; exit 0 ;;
+      read) printf '>\n'; exit 0 ;;
       close|run) exit 0 ;;
       get) printf '{"pane_id":"w1:p1"}\n'; exit 0 ;;
     esac ;;
@@ -1042,6 +1042,56 @@ test_secondmate_spawn_records_home_meta() {
   grep -F 'notify=' "$log" >/dev/null && fail "secondmate codex launch should not install parent turn-end notify"
   grep -F 'turn-ended' "$log" >/dev/null && fail "secondmate launch should not reference parent turn-end marker"
   pass "kind=secondmate spawn launches in the home and records routing meta"
+}
+
+test_secondmate_spawn_repairs_shared_links() {
+  local home subhome fakebin log
+  home="$TMP_ROOT/link-repair-home"
+  subhome="$TMP_ROOT/link-repair-subhome"
+  mkdir -p "$home/data/link-sub" "$home/state" "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects"
+  printf 'link-sub\n' > "$subhome/.fm-secondmate-home"
+  ln -s "$ROOT/AGENTS.md" "$subhome/AGENTS.md"
+  ln -s "$ROOT/bin" "$subhome/bin"
+  printf 'schema_version=1\nname=Link Sub\n' > "$subhome/config/identity"
+  printf '%s\n' '- link-sub - link repair domain (home: '"$subhome"'; workspace: w-link; scope: link repair domain; projects: alpha; added 2026-07-11)' > "$home/data/secondmates.md"
+  printf 'persistent charter\n' > "$subhome/data/charter.md"
+  fakebin=$(make_fake_herdr "$TMP_ROOT/link-repair-fake")
+  log="$TMP_ROOT/link-repair-fake/herdr.log"
+
+  PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
+    "$ROOT/bin/fm-spawn.sh" link-sub "$subhome" codex --secondmate >/dev/null \
+    || fail "secondmate spawn did not repair a symlink-backed home"
+
+  [ -L "$subhome/CLAUDE.md" ] || fail "link repair did not restore CLAUDE.md link"
+  [ -L "$subhome/.tasks.toml" ] || fail "link repair did not restore .tasks.toml link"
+  grep -F -- '--workspace w-link' "$log" >/dev/null || fail "repaired home did not launch"
+  pass "secondmate spawn repairs shared code links"
+}
+
+test_secondmate_spawn_preserves_shared_link_conflicts() {
+  local home subhome fakebin log err
+  home="$TMP_ROOT/link-conflict-home"
+  subhome="$TMP_ROOT/link-conflict-subhome"
+  err="$TMP_ROOT/link-conflict.err"
+  mkdir -p "$home/data" "$home/state" "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects" "$subhome/.agents"
+  printf 'link-conflict\n' > "$subhome/.fm-secondmate-home"
+  ln -s "$ROOT/AGENTS.md" "$subhome/AGENTS.md"
+  ln -s "$ROOT/bin" "$subhome/bin"
+  printf 'keep this file\n' > "$subhome/.agents/conflict"
+  printf '%s\n' '- link-conflict - link conflict domain (home: '"$subhome"'; workspace: w-conflict; scope: link conflict domain; projects: alpha; added 2026-07-11)' > "$home/data/secondmates.md"
+  fakebin=$(make_fake_herdr "$TMP_ROOT/link-conflict-fake")
+  log="$TMP_ROOT/link-conflict-fake/herdr.log"
+
+  if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
+    "$ROOT/bin/fm-spawn.sh" link-conflict "$subhome" codex --secondmate >/dev/null 2>"$err"; then
+    fail "secondmate spawn overwrote a non-empty shared link conflict"
+  fi
+  grep -F 'failed to repair shared-code links' "$err" >/dev/null \
+    || fail "spawn did not explain shared link conflict"
+  [ "$(cat "$subhome/.agents/conflict")" = 'keep this file' ] \
+    || fail "link repair changed non-empty conflicting content"
+  grep -F 'agent start' "$log" >/dev/null && fail "conflicting home launched an agent"
+  pass "secondmate spawn preserves non-empty shared link conflicts"
 }
 
 test_secondmate_spawn_requires_seeded_matching_home() {
@@ -2266,6 +2316,8 @@ test_home_seed_refuses_project_destinations_outside_subhome
 test_home_seed_refuses_operational_dirs_outside_subhome
 test_home_seed_refuses_symlinked_leaf_files
 test_secondmate_spawn_records_home_meta
+test_secondmate_spawn_repairs_shared_links
+test_secondmate_spawn_preserves_shared_link_conflicts
 test_secondmate_spawn_requires_seeded_matching_home
 test_secondmate_spawn_refuses_operational_dirs_outside_subhome
 test_fm_send_resolves_bare_firstmate_window_from_home_meta
