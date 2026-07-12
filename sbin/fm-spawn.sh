@@ -41,7 +41,7 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 
 KIND=ship
-WORKSPACE=""
+WORKSPACE=${FM_SPAWN_WORKSPACE:-}
 TAB=""
 POS=()
 while [ "$#" -gt 0 ]; do
@@ -75,14 +75,18 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
       *=*) : ;;
       *) echo "error: batch dispatch expects every argument as id=repo; got '$pair'" >&2; rc=2; continue ;;
     esac
+    BATCH_WORKSPACE_ARGS=()
+    if [ -n "$WORKSPACE" ]; then
+      BATCH_WORKSPACE_ARGS=(--workspace "$WORKSPACE")
+    fi
     if [ "$KIND" = secondmate ]; then
       echo "error: batch dispatch does not support --secondmate; spawn each secondmate explicitly" >&2
       rc=2
       continue
     elif [ "$KIND" = scout ]; then
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" --scout; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
+      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" --scout "${BATCH_WORKSPACE_ARGS[@]+"${BATCH_WORKSPACE_ARGS[@]}"}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
     else
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
+      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" "${BATCH_WORKSPACE_ARGS[@]+"${BATCH_WORKSPACE_ARGS[@]}"}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
     fi
   done
   exit "$rc"
@@ -462,6 +466,18 @@ for p in data.get("result", {}).get("panes", []):
 fi
 
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
+
+# Ship and scout tabs must be created in the spawning firstmate's own
+# workspace, never whichever workspace happens to be focused. Explicit
+# --workspace and FM_SPAWN_WORKSPACE values are deliberate overrides.
+if [ "$KIND" != secondmate ] && [ -z "$WORKSPACE" ]; then
+  CURRENT_PANE_JSON=$(herdr pane current 2>&1) || CURRENT_PANE_JSON=
+  WORKSPACE=$(printf '%s' "$CURRENT_PANE_JSON" | fm_json_get result pane workspace_id)
+  if [ -z "$WORKSPACE" ]; then
+    echo "error: cannot resolve this firstmate's herdr workspace for $KIND spawn $ID; pass --workspace <id> or set FM_SPAWN_WORKSPACE" >&2
+    exit 1
+  fi
+fi
 
 # Preflight: validate harness binary and worktree base before creating anything.
 if [ "$KIND" != secondmate ]; then
