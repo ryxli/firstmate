@@ -30,6 +30,29 @@ emit() {
   if [ "$state" = fail ]; then status=1; fi
   if [ "$state" = warn ]; then warning=1; fi
 }
+
+check_current_home() {
+  local home=$1 canonical entry name target
+  [ -f "$home/.fm-secondmate-home" ] || return 1
+  for dir in data state config projects; do
+    [ -d "$home/$dir" ] && [ ! -L "$home/$dir" ] || return 1
+  done
+  [ -d "$home/bin" ] && [ ! -L "$home/bin" ] || return 1
+  [ -L "$home/sbin" ] || return 1
+  canonical="$FM_ROOT/sbin"
+  target=$(readlink "$home/sbin") || return 1
+  [ "$target" = "$canonical" ] || return 1
+  [ -d "$home/.omp/extensions" ] && [ ! -L "$home/.omp/extensions" ] || return 1
+  [ -d "$FM_ROOT/.omp/extensions" ] || return 1
+  for entry in "$FM_ROOT/.omp/extensions"/*; do
+    [ -e "$entry" ] || continue
+    name=$(basename "$entry")
+    if [ -e "$home/.omp/extensions/$name" ] && [ ! -L "$home/.omp/extensions/$name" ]; then continue; fi
+    [ -L "$home/.omp/extensions/$name" ] || return 1
+    target=$(readlink "$home/.omp/extensions/$name") || return 1
+    [ "$target" = "$entry" ] || return 1
+  done
+}
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-health.XXXXXX")
 trap 'rm -rf "$TMP_DIR"' EXIT
 out="$TMP_DIR/herdr"
@@ -68,8 +91,14 @@ PY
   while IFS=$'\t' read -r ident home; do
     [ -n "$ident" ] || continue
     out="$TMP_DIR/home-$ident"
-    if run_check "$out" "$HELPER_DIR/fm-home-link.sh" "$home" --check; then emit "home:$ident" ok checked
-    else detail=$(sed -n 's/^result=//p' "$out" | tail -1); emit "home:$ident" fail "${detail:-check-failed}"; fi
+    if [ -L "$home/.omp" ]; then
+      if run_check "$out" "$HELPER_DIR/fm-home-link.sh" "$home" --check; then emit "home:$ident" ok checked
+      else detail=$(sed -n 's/^result=//p' "$out" | tail -1); emit "home:$ident" fail "${detail:-check-failed}"; fi
+    elif check_current_home "$home"; then
+      emit "home:$ident" ok checked
+    else
+      emit "home:$ident" fail current-layout
+    fi
   done < "$TMP_DIR/homes"
 else emit registry fail missing; fi
 if [ "$status" -ne 0 ]; then printf 'overall\tfail\trequired check failed\n'; elif [ "$warning" -ne 0 ]; then printf 'overall\twarn\twarnings present\n'; else printf 'overall\tok\tall checks passed\n'; fi
