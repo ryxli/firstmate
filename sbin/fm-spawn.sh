@@ -496,9 +496,15 @@ fi
 
 [ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
 
+# Preflight: validate harness binary and worktree base before creating anything.
+if [ "$KIND" != secondmate ]; then
+  "$SCRIPT_DIR/fm-resolve-spawn.sh" "$PROJ_ABS" "$HARNESS" || exit $?
+fi
+
 # Ship and scout tabs must be created in the spawning firstmate's own
 # workspace, never whichever workspace happens to be focused. Explicit
-# --workspace and FM_SPAWN_WORKSPACE values are deliberate overrides.
+# --workspace and FM_SPAWN_WORKSPACE values are deliberate overrides. This
+# runs after preflight so a missing-binary abort surfaces its own error first.
 if [ "$KIND" != secondmate ] && [ -z "$WORKSPACE" ]; then
   CURRENT_PANE_JSON=$(herdr pane current 2>&1) || CURRENT_PANE_JSON=
   WORKSPACE=$(printf '%s' "$CURRENT_PANE_JSON" | fm_json_get result pane workspace_id)
@@ -506,11 +512,6 @@ if [ "$KIND" != secondmate ] && [ -z "$WORKSPACE" ]; then
     echo "error: cannot resolve this firstmate's herdr workspace for $KIND spawn $ID; pass --workspace <id> or set FM_SPAWN_WORKSPACE" >&2
     exit 1
   fi
-fi
-
-# Preflight: validate harness binary and worktree base before creating anything.
-if [ "$KIND" != secondmate ]; then
-  "$SCRIPT_DIR/fm-resolve-spawn.sh" "$PROJ_ABS" "$HARNESS" || exit $?
 fi
 
 # Create a git worktree for ship/scout tasks.

@@ -38,6 +38,9 @@ case "${1:-} ${2:-}" in
     case "$kind" in booting) process='bun /opt/omp/scripts/omp.ts' ;; *) process='-zsh' ;; esac
     printf '{"result":{"process_info":{"foreground_processes":[{"argv0":"%s","name":"%s","cmdline":"%s"}]}}}\n' "$process" "$process" "$process"
     ;;
+  "pane current")
+    printf '{"result":{"pane":{"pane_id":"w1:p-self","workspace_id":"w1"}}}\n'
+    ;;
   "tab create")
     printf '{"result":{"tab":{"tab_id":"w1:t-new"},"root_pane":{"pane_id":"w1:p-root"}}}\n'
     ;;
