@@ -24,7 +24,7 @@ import { join, dirname } from "node:path";
 
 const SCRIPT_DIR = realpathSync(dirname(new URL(import.meta.url).pathname));
 const FM_ROOT = realpathSync(process.env.FM_CODE_ROOT_OVERRIDE || process.env.FM_ROOT_OVERRIDE || join(SCRIPT_DIR, ".."));
-const LINEAGE = join(FM_ROOT, "bin/fm-lineage.sh");
+const LINEAGE = join(FM_ROOT, "sbin/fm-lineage.sh");
 // ---------------------------------------------------------------------------
 // Pure ranking core (exported, unit-tested; no I/O).
 // ---------------------------------------------------------------------------

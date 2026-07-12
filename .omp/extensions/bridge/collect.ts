@@ -32,7 +32,7 @@ import {
  * sbin/ too, but carry the .fm-secondmate-home marker).
  */
 function isMainHome(dir: string): boolean {
-	return existsSync(join(dir, "bin", "fm-spawn.sh")) && !existsSync(join(dir, ".fm-secondmate-home"));
+	return existsSync(join(dir, "sbin", "fm-spawn.sh")) && !existsSync(join(dir, ".fm-secondmate-home"));
 }
 
 /**

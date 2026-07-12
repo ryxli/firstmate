@@ -275,13 +275,13 @@ path_is_ancestor_of() {
 
 home_has_shared_code_links() {
   local home=$1
-  [ -L "$home/AGENTS.md" ] || [ -L "$home/bin" ]
+  [ -L "$home/AGENTS.md" ] || [ -L "$home/sbin" ]
 }
 
 home_needs_shared_code_repair() {
   local home=$1
   home_has_shared_code_links "$home" && return 0
-  { [ ! -e "$home/AGENTS.md" ] || [ ! -e "$home/bin" ]; } \
+  { [ ! -e "$home/AGENTS.md" ] || [ ! -e "$home/sbin" ]; } \
     && [ -f "$home/config/identity" ]
 }
 
@@ -321,7 +321,7 @@ validate_firstmate_home_for_spawn() {
   fi
   # Symlink-backed homes retain only operational directories. Repair their shared
   # instruction/tool links before launch. A non-git legacy home with both
-  # AGENTS.md and bin/ as real paths is self-contained, not a partial link home.
+  # AGENTS.md and sbin/ as real paths is self-contained, not a partial link home.
   if ! git -C "$abs_home" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
     && home_needs_shared_code_repair "$abs_home"; then
     "$FM_ROOT/sbin/fm-home-link.sh" "$abs_home" --repair >/dev/null || {
