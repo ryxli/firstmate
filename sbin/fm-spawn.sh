@@ -43,6 +43,7 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 KIND=ship
 WORKSPACE=${FM_SPAWN_WORKSPACE:-}
 TAB=""
+CREW_MODEL=${FM_CREW_MODEL:-}
 POS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -53,6 +54,12 @@ while [ "$#" -gt 0 ]; do
       shift
       [ "$#" -gt 0 ] || { echo "error: --workspace requires a value" >&2; exit 2; }
       WORKSPACE=$1
+      ;;
+    --crew-model=*) CREW_MODEL=${1#*=} ;;
+    --crew-model)
+      shift
+      [ "$#" -gt 0 ] || { echo "error: --crew-model requires a value" >&2; exit 2; }
+      CREW_MODEL=$1
       ;;
     --tab=*) TAB=${1#*=} ;;
     --tab)
@@ -79,14 +86,18 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
     if [ -n "$WORKSPACE" ]; then
       BATCH_WORKSPACE_ARGS=(--workspace "$WORKSPACE")
     fi
+    BATCH_CREW_MODEL_ARGS=()
+    if [ -n "$CREW_MODEL" ]; then
+      BATCH_CREW_MODEL_ARGS=(--crew-model "$CREW_MODEL")
+    fi
     if [ "$KIND" = secondmate ]; then
       echo "error: batch dispatch does not support --secondmate; spawn each secondmate explicitly" >&2
       rc=2
       continue
     elif [ "$KIND" = scout ]; then
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" --scout "${BATCH_WORKSPACE_ARGS[@]+"${BATCH_WORKSPACE_ARGS[@]}"}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
+      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" --scout "${BATCH_WORKSPACE_ARGS[@]+"${BATCH_WORKSPACE_ARGS[@]}"}" "${BATCH_CREW_MODEL_ARGS[@]+"${BATCH_CREW_MODEL_ARGS[@]}"}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
     else
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" "${BATCH_WORKSPACE_ARGS[@]+"${BATCH_WORKSPACE_ARGS[@]}"}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
+      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/sbin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" "${BATCH_WORKSPACE_ARGS[@]+"${BATCH_WORKSPACE_ARGS[@]}"}" "${BATCH_CREW_MODEL_ARGS[@]+"${BATCH_CREW_MODEL_ARGS[@]}"}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
     fi
   done
   exit "$rc"
@@ -123,14 +134,24 @@ fi
 # Launch templates per adapter. No turn-end hook placeholders needed since
 # herdr tracks agent status natively. __BRIEF__ is still used.
 launch_template() {
-  local harness=$1
+  local harness=$1 crew_model=${2:-} sq_model
+  if [ -n "$crew_model" ]; then
+    sq_model=$(fm_shell_quote "$crew_model")
+  else
+    sq_model=
+  fi
   # shellcheck disable=SC2016
   case "$harness" in
-    omp)    printf '%s' 'omp --auto-approve "$(cat __BRIEF__)"' ;;
-    claude) printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions "$(cat __BRIEF__)"' ;;
-    codex)  printf '%s' 'codex --dangerously-bypass-approvals-and-sandbox "$(cat __BRIEF__)"' ;;
-    opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode --prompt "$(cat __BRIEF__)"' ;;
-    pi)     printf '%s' 'pi "$(cat __BRIEF__)"' ;;
+    omp)
+      if [ -n "$sq_model" ]; then printf 'omp --model %s --auto-approve "$(cat __BRIEF__)"' "$sq_model"; else printf '%s' 'omp --auto-approve "$(cat __BRIEF__)"'; fi ;;
+    claude)
+      if [ -n "$sq_model" ]; then printf 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --model %s --dangerously-skip-permissions "$(cat __BRIEF__)"' "$sq_model"; else printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions "$(cat __BRIEF__)"'; fi ;;
+    codex)
+      if [ -n "$sq_model" ]; then printf 'codex --model %s --dangerously-bypass-approvals-and-sandbox "$(cat __BRIEF__)"' "$sq_model"; else printf '%s' 'codex --dangerously-bypass-approvals-and-sandbox "$(cat __BRIEF__)"'; fi ;;
+    opencode)
+      if [ -n "$sq_model" ]; then printf 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode --model %s --prompt "$(cat __BRIEF__)"' "$sq_model"; else printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode --prompt "$(cat __BRIEF__)"'; fi ;;
+    pi)
+      if [ -n "$sq_model" ]; then printf 'pi --model %s "$(cat __BRIEF__)"' "$sq_model"; else printf '%s' 'pi "$(cat __BRIEF__)"'; fi ;;
     *) return 1 ;;
   esac
 }
@@ -145,11 +166,19 @@ case "$ARG3" in
     ;;
   '')
     HARNESS=$("$FM_ROOT/sbin/fm-harness.sh" crew)
-    LAUNCH=$(launch_template "$HARNESS") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
+    if [ "$KIND" = secondmate ]; then
+      LAUNCH=$(launch_template "$HARNESS") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
+    else
+      LAUNCH=$(launch_template "$HARNESS" "$CREW_MODEL") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
+    fi
     ;;
   *)
     HARNESS=$ARG3
-    LAUNCH=$(launch_template "$HARNESS") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
+    if [ "$KIND" = secondmate ]; then
+      LAUNCH=$(launch_template "$HARNESS") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
+    else
+      LAUNCH=$(launch_template "$HARNESS" "$CREW_MODEL") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
+    fi
     ;;
 esac
 
@@ -609,6 +638,7 @@ mkdir -p "$STATE"
   echo "supervisor=$(fm_supervisor_name "$CONFIG")"
   echo "agent_slot=$AGENT_SLOT"
   echo "agent_identity=$AGENT_IDENTITY"
+  if [ "$KIND" != secondmate ] && [ -n "$CREW_MODEL" ]; then echo "crew_model=$CREW_MODEL"; fi
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
