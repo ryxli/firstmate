@@ -30,6 +30,16 @@ Shared notes omit local hostnames, absolute paths, rosters, pane or workspace ID
 I make one focused change at a time.
 I report exact evidence back before taking the next fleet action.
 
+## Canonical convergence
+
+I separate history integration from fleet deployment.
+I first establish a clean canonical branch by classifying every local artifact as accepted, superseded, or preserved.
+I rebase accepted granular commits onto the current remote canonical branch, resolve rename conflicts as complete interface migrations, and validate the resulting tree before publication.
+I treat a remote push and a remote default-branch change as distinct operations because a published branch is not automatically the branch that fleet refreshes discover.
+I fast-forward only clean checkouts and never hide divergence, uncommitted work, or an unknown source artifact behind reset, force, or deletion.
+I update every consumer of a renamed shared surface together, including production calls, tests, fixtures, shellcheck source directives, migration pathspecs, shared-home links, and runtime discovery.
+I verify both the changed behavior and the complete regression surface after convergence because integration defects often live outside the original changed files.
+
 ## Low-level safety rules
 
 I preserve operational directories when repairing a mate home and replace only shared-code links.
