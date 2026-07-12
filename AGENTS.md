@@ -57,7 +57,7 @@ The tracking principle: shared, tracked material is tracked under git; anything 
 Commit durable changes to the shared, tracked material with terse messages.
 This repo follows a main-only workflow for the captain's personal harness work. Commit durable shared changes directly to `main`, verify them proportionately, and push `origin main` unless the captain explicitly asks for a branch or PR.
 This repo does not use no-mistakes unless the captain explicitly requests it; the main-only workflow and fast-forward-only constraints subsume its assurance.
-Note: dotfiles and oh-my-pi harness customizations follow a different model (one evolving bank commit, deliberate landing on captain's schedule); this main-only direct-push policy applies only to firstmate's own infrastructure.
+Note: dotfiles and oh-my-pi harness customizations follow a different landing model from firstmate's own infrastructure, but as of 2026-07-12 (captain directive) they are NOT deferred to an evolving bank: any dotfiles / oh-my-pi harness change is committed, applied (`chezmoi apply`), and pushed to the remote immediately on each completed, verified change - no evolving-bank deferral. Keep each commit scoped to your own change and verify proportionately before pushing.
 Never add an agent name as co-author.
 
 ### Thinking and execution discipline
