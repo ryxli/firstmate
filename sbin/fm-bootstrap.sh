@@ -62,6 +62,22 @@ fleet_sync() {
   rm -f "$tmp"
 }
 
+self_pane_sync() {
+  [ -x "$FM_ROOT/sbin/fm-self-pane.sh" ] || return 0
+  command -v herdr >/dev/null 2>&1 || return 0
+  herdr_server_running || return 0
+
+  tmp=$(mktemp "${TMPDIR:-/tmp}/fm-self-pane.XXXXXX" 2>/dev/null) || return 0
+  if "$FM_ROOT/sbin/fm-self-pane.sh" >"$tmp" 2>&1; then
+    rm -f "$tmp"
+    return 0
+  fi
+  if IFS= read -r line < "$tmp" && [ -n "$line" ]; then
+    echo "SELF_PANE: $line"
+  fi
+  rm -f "$tmp"
+}
+
 install_cmd() {
   case "$1" in
     herdr) echo "mise install herdr  # or download from https://herdr.dev" ;;
@@ -96,6 +112,7 @@ done
 if command -v herdr >/dev/null 2>&1 && ! herdr_server_running; then
   echo "MISSING: herdr-server (start with: herdr)"
 fi
+self_pane_sync
 gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
 crew=
 [ -f "$CONFIG/crew-harness" ] && crew=$(tr -d '[:space:]' < "$CONFIG/crew-harness" || true)
