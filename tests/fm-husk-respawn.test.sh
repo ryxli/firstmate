@@ -119,7 +119,7 @@ grep -qF 'agent_identity=omp' "$spawn_home/state/label-check-k3.meta" || fail "s
 pass "spawn separates display labels from the durable herdr slot"
 
 secondmate_home="$TMP_ROOT/secondmate-home"
-mkdir -p "$secondmate_home/data" "$secondmate_home/state" "$secondmate_home/config" "$secondmate_home/projects" "$secondmate_home/bin"
+mkdir -p "$secondmate_home/data" "$secondmate_home/state" "$secondmate_home/config" "$secondmate_home/projects" "$secondmate_home/sbin"
 printf 'anchor\n' > "$secondmate_home/.fm-secondmate-home"
 : > "$secondmate_home/AGENTS.md"
 secondmate_home_real=$(cd "$secondmate_home" && pwd -P)
