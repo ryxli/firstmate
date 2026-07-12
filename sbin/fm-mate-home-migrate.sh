@@ -209,7 +209,7 @@ child_work_status() {
 shared_code_wip_status() {
   local home=$1 mode=$2 out
   [ "$mode" = worktree ] || { printf none; return 0; }
-  out=$(git -C "$home" status --porcelain -- AGENTS.md CLAUDE.md bin tests .agents .omp .tasks.toml 2>/dev/null || true)
+  out=$(git -C "$home" status --porcelain -- AGENTS.md CLAUDE.md sbin tests .agents .omp .tasks.toml 2>/dev/null || true)
   if [ -n "$out" ]; then printf saved-diff-required; else printf none; fi
 }
 
@@ -414,8 +414,8 @@ backup_preflight() {
   if [ "$mode" = worktree ]; then
     git -C "$home" rev-parse HEAD > "$backup/snapshots/git-head.txt" 2>/dev/null || true
     git -C "$home" status --porcelain > "$backup/snapshots/git-status.txt" 2>/dev/null || true
-    git -C "$home" diff -- AGENTS.md CLAUDE.md bin tests .agents .omp .tasks.toml > "$backup/shared-code.diff" 2>/dev/null || true
-    git -C "$home" status --porcelain -- AGENTS.md CLAUDE.md bin tests .agents .omp .tasks.toml > "$backup/shared-code.status" 2>/dev/null || true
+    git -C "$home" diff -- AGENTS.md CLAUDE.md sbin tests .agents .omp .tasks.toml > "$backup/shared-code.diff" 2>/dev/null || true
+    git -C "$home" status --porcelain -- AGENTS.md CLAUDE.md sbin tests .agents .omp .tasks.toml > "$backup/shared-code.status" 2>/dev/null || true
   fi
   for f in data state config projects; do
     copy_dir_contents "$home/$f" "$backup/operational/$f"
