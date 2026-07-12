@@ -17,12 +17,18 @@ I use persistent `FM_HOME` roots to separate shared code from per-supervisor `da
 
 ## Persistent mate-home shape
 
-`~/code/mates/` currently contains persistent homes for `plum`, `bull`, and `bear`.
+`~/code/mates/` currently contains persistent homes for `atlas`, `fran`, `gauge`, `ledger`, and `riggs`.
 Each mate home is an operational root rather than a normal repository checkout.
 The expected local directories are `data/`, `state/`, `config/`, `projects/`, and optionally `worktrees/`.
 The expected shared-code surfaces are symlinks for `AGENTS.md`, `CLAUDE.md`, `.agents`, `.claude`, `.omp`, `.tasks.toml`, and the shared toolbelt.
 The secondmate marker is `.fm-secondmate-home`.
 Existing homes can expose a legacy `bin` link while the current shared toolbelt is `sbin`; inspect and repair or migrate that contract before relying on a home to execute shared scripts.
+
+## Remote collaboration
+
+I use durable mate identity together with a freshly resolved live pane for every remote action.
+I make one focused change at a time.
+I report exact evidence back before taking the next fleet action.
 
 ## Low-level safety rules
 
