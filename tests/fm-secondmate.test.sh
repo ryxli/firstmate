@@ -416,8 +416,12 @@ test_home_seed_uses_herdr_worktree_create() {
   auto_home="$sm_base_abs/fm-sm-dash"
   printf '%s\n' "$out" | grep -F "home=$auto_home" >/dev/null || fail "seed did not report herdr-created home"
   grep -F 'worktree create' "$log" >/dev/null || fail "seed did not call herdr worktree create"
+  grep -F 'worktree create --cwd '"$ROOT"' --branch sm/dash --path '"$auto_home"' --label Dash' "$log" >/dev/null \
+    || fail "seed did not label the herdr workspace with the registered display name"
   grep -F 'workspace: wT' "$home/data/secondmates.md" >/dev/null || fail "registry did not record herdr workspace id"
   grep -F "home: $auto_home" "$home/data/secondmates.md" >/dev/null || fail "registry did not record home path"
+  grep -F 'name: Dash' "$home/data/secondmates.md" >/dev/null \
+    || fail "seed did not persist the display name in the registry"
   [ -f "$auto_home/.fm-secondmate-home" ] || fail "seed did not mark herdr-created home"
   [ "$(cat "$auto_home/.fm-secondmate-home")" = dash ] || fail "seed wrote wrong home marker"
   [ -d "$auto_home/projects/alpha/.git" ] || fail "seed did not clone project into herdr-created home"
@@ -1289,7 +1293,7 @@ test_recovery_respawn_replaces_missing_registered_workspace() {
   printf 'persisted child state\n' > "$subhome/state/keep"
   printf 'charter\n' > "$subhome/data/charter.md"
   printf 'omp\n' > "$home/config/crew-harness"
-  printf '%s\n' '- bull - recovery domain (home: '"$subhome"'; workspace: w-missing; scope: recovery domain; projects: gamma; added 2026-07-11)' > "$home/data/secondmates.md"
+  printf '%s\n' '- bull - recovery domain (home: '"$subhome"'; workspace: w-missing; name: Bull; scope: recovery domain; projects: gamma; added 2026-07-11)' > "$home/data/secondmates.md"
   cat > "$home/state/bull.meta" <<EOF
 pane=w-old:p-old
 worktree=$subhome
@@ -1313,8 +1317,8 @@ EOF
 
   meta="$home/state/bull.meta"
   grep -F 'workspace get w-missing' "$log" >/dev/null || fail "recovery did not verify the recorded workspace"
-  grep -F "workspace create --cwd $subhome_abs --label home --no-focus" "$log" >/dev/null \
-    || fail "recovery did not create a replacement workspace for the existing home"
+  grep -F "workspace create --cwd $subhome_abs --label Bull --no-focus" "$log" >/dev/null \
+    || fail "recovery did not create a replacement workspace with the registered display name"
   grep -F 'worktree create' "$log" >/dev/null && fail "recovery recreated the persistent home"
   grep -F -- '--workspace w-replacement' "$log" >/dev/null || fail "spawn did not use the replacement workspace"
   grep -F 'omp --auto-approve -c' "$log" >/dev/null || fail "recovery did not resume the OMP session"

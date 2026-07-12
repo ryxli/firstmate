@@ -158,6 +158,7 @@ secondmate_registry_value() {
   case "$key" in
     home) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: \([^;)]*\).*/\1/p') ;;
     workspace) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*; workspace: \([^;)]*\).*/\1/p') ;;
+    name) value=$(printf '%s\n' "$line" | sed -n 's/.*name:[[:space:]]*\([^;]*\);.*/\1/p') ;;
     projects) value=$(printf '%s\n' "$line" | sed -n 's/^[^(]*(home: [^;)]*;.*projects: \([^;)]*\); added .*/\1/p') ;;
     *) return 1 ;;
   esac
@@ -510,7 +511,8 @@ PANE_CMD="$LAUNCH_CMD; exec \"\${SHELL:-/bin/zsh}\" -l"
 # The tab and pane label are display-only. The unique task id is the durable
 # herdr registration slot, while the harness keeps its integration identity.
 if [ "$KIND" = secondmate ]; then
-  WORKER_LABEL=home
+  WORKER_LABEL=$(secondmate_registry_value "$ID" name || true)
+  [ -n "$WORKER_LABEL" ] || WORKER_LABEL=home
 else
   WORKER_LABEL=$(fm_worker_label "$CONFIG" "$ID" "${FM_TASK_LABEL:-}")
 fi

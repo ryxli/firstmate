@@ -460,14 +460,15 @@ seeded_origin_url() {
 }
 
 acquire_herdr_home() {
-  local id=$1 auto_path json workspace_id home sm_base
+  local id=$1 auto_path json workspace_id home sm_base name
   # Create a herdr-managed git worktree of the firstmate repo at a predictable
   # path alongside the repo. The herdr workspace ID is returned so the caller
   # can store it in the registry and use it for clean removal on teardown.
   # FM_HERDR_SM_BASE overrides the parent directory (useful in tests).
   sm_base="${FM_HERDR_SM_BASE:-$(dirname "$(cd "$FM_ROOT" && pwd -P)")}"
   auto_path="$sm_base/fm-sm-$id"
-  json=$(herdr worktree create --cwd "$FM_ROOT" --branch "sm/$id" --path "$auto_path" --no-focus --json 2>&1) || {
+  name=$(capitalize_id "$id")
+  json=$(herdr worktree create --cwd "$FM_ROOT" --branch "sm/$id" --path "$auto_path" --label "$name" --no-focus --json 2>&1) || {
     echo "error: herdr worktree create failed for secondmate home $auto_path" >&2
     return 1
   }
@@ -809,10 +810,11 @@ sync_project_registry() {
 
 
 write_registry() {
-  local id=$1 home=$2 projects_csv=$3 brief=$4 workspace_id=${5:-} scope summary tmp today
+  local id=$1 home=$2 projects_csv=$3 brief=$4 workspace_id=${5:-} scope summary tmp today name
   mkdir -p "$DATA"
   scope=$(registry_scope_for_brief "$brief")
   summary=$(registry_summary_for_brief "$brief")
+  name=$(capitalize_id "$id")
   today=$(date +%F)
   tmp="$REG.tmp.$$"
   if [ -f "$REG" ]; then
@@ -821,11 +823,11 @@ write_registry() {
     : > "$tmp"
   fi
   if [ -n "$workspace_id" ]; then
-    printf -- '- %s - %s (home: %s; workspace: %s; scope: %s; projects: %s; added %s)\n' \
-      "$id" "$summary" "$home" "$workspace_id" "$scope" "$projects_csv" "$today" >> "$tmp"
+    printf -- '- %s - %s (home: %s; workspace: %s; name: %s; scope: %s; projects: %s; added %s)\n' \
+      "$id" "$summary" "$home" "$workspace_id" "$name" "$scope" "$projects_csv" "$today" >> "$tmp"
   else
-    printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' \
-      "$id" "$summary" "$home" "$scope" "$projects_csv" "$today" >> "$tmp"
+    printf -- '- %s - %s (home: %s; name: %s; scope: %s; projects: %s; added %s)\n' \
+      "$id" "$summary" "$home" "$name" "$scope" "$projects_csv" "$today" >> "$tmp"
   fi
   mv "$tmp" "$REG"
 }

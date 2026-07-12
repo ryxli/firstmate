@@ -140,6 +140,7 @@ secondmate_home_real=$(cd "$secondmate_home" && pwd -P)
 printf 'charter prompt that must not be resent\n' > "$secondmate_home/data/charter.md"
 mkdir -p "$spawn_home/state"
 printf 'kind=secondmate\nhome=%s\n' "$secondmate_home" > "$spawn_home/state/anchor.meta"
+printf '%s\n' '- anchor - anchor domain (home: '"$secondmate_home"'; workspace: w-anchor; name: Plum; scope: anchor domain; projects: (none); added 2026-07-11)' > "$spawn_home/data/secondmates.md"
 resume_bin="$TMP_ROOT/resume-bin"
 make_fake_herdr "$resume_bin"
 resume_log="$TMP_ROOT/resume.log"
@@ -152,6 +153,27 @@ if grep -qF 'charter prompt that must not be resent' "$resume_log"; then
   fail "OMP respawn resent the charter instead of continuing"
 fi
 grep -qF "home=$secondmate_home_real" "$spawn_home/state/anchor.meta" || fail "recovery metadata did not preserve the durable home"
+grep -qF 'tab create --workspace w-anchor --label Plum' "$resume_log" || fail "secondmate tab did not use the registered display name"
+grep -qF 'pane rename w1:p-new Plum' "$resume_log" || fail "secondmate pane did not use the registered display name"
+grep -qF 'worker=Plum' "$spawn_home/state/anchor.meta" || fail "secondmate metadata did not record the registered display name"
 [ "$(grep -c 'label-check-k3' "$spawn_home/data/backlog.md")" -eq 1 ] \
   || fail "secondmate spawn should not add an in-flight backlog entry"
-pass "secondmate OMP respawn continues the prior session without reinjecting the charter"
+pass "secondmate respawn uses the registered display name"
+
+fallback_home="$TMP_ROOT/fallback-secondmate-home"
+mkdir -p "$fallback_home/data" "$fallback_home/state" "$fallback_home/config" "$fallback_home/projects" "$fallback_home/sbin"
+printf 'fallback\n' > "$fallback_home/.fm-secondmate-home"
+: > "$fallback_home/AGENTS.md"
+printf 'charter prompt for fallback\n' > "$fallback_home/data/charter.md"
+printf '%s\n' '- fallback - fallback domain (home: '"$fallback_home"'; name: ; scope: fallback domain; projects: (none); added 2026-07-11)' >> "$spawn_home/data/secondmates.md"
+printf 'kind=secondmate\nhome=%s\n' "$fallback_home" > "$spawn_home/state/fallback.meta"
+fallback_log="$TMP_ROOT/fallback.log"
+fallback_bin="$TMP_ROOT/fallback-bin"
+make_fake_herdr "$fallback_bin"
+fallback_out=$(PATH="$fallback_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$fallback_log" \
+  FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
+  "$ROOT/sbin/fm-spawn.sh" fallback omp --secondmate 2>&1) \
+  || fail "malformed name registry fallback should still spawn: $fallback_out"
+grep -qF 'pane rename w1:p-new home' "$fallback_log" || fail "malformed name registry entry changed the fallback display label"
+grep -qF 'worker=home' "$spawn_home/state/fallback.meta" || fail "malformed name registry entry changed fallback metadata"
+pass "secondmate malformed or name-less registry entries retain home fallback"
