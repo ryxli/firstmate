@@ -168,7 +168,7 @@ done
 
 repair_link AGENTS.md "$CODE_ROOT/AGENTS.md"; status_line link.AGENTS.md
 repair_link CLAUDE.md "$CODE_ROOT/CLAUDE.md"; status_line link.CLAUDE.md
-repair_link bin "$CODE_ROOT/bin"; status_line link.bin
+repair_link sbin "$CODE_ROOT/sbin"; status_line link.sbin
 repair_link .agents "$CODE_ROOT/.agents"; status_line link..agents
 repair_link .claude "$CODE_ROOT/.claude"; status_line link..claude
 repair_link .omp "$CODE_ROOT/.omp"; status_line link..omp

@@ -1052,7 +1052,7 @@ test_secondmate_spawn_repairs_shared_links() {
   mkdir -p "$home/data/link-sub" "$home/state" "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects"
   printf 'link-sub\n' > "$subhome/.fm-secondmate-home"
   ln -s "$ROOT/AGENTS.md" "$subhome/AGENTS.md"
-  ln -s "$ROOT/bin" "$subhome/bin"
+  ln -s "$ROOT/sbin" "$subhome/sbin"
   printf 'schema_version=1\nname=Link Sub\n' > "$subhome/config/identity"
   printf '%s\n' '- link-sub - link repair domain (home: '"$subhome"'; workspace: w-link; scope: link repair domain; projects: alpha; added 2026-07-11)' > "$home/data/secondmates.md"
   printf 'persistent charter\n' > "$subhome/data/charter.md"
@@ -1077,7 +1077,7 @@ test_secondmate_spawn_preserves_shared_link_conflicts() {
   mkdir -p "$home/data" "$home/state" "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects" "$subhome/.agents"
   printf 'link-conflict\n' > "$subhome/.fm-secondmate-home"
   ln -s "$ROOT/AGENTS.md" "$subhome/AGENTS.md"
-  ln -s "$ROOT/bin" "$subhome/bin"
+  ln -s "$ROOT/sbin" "$subhome/sbin"
   printf 'keep this file\n' > "$subhome/.agents/conflict"
   printf '%s\n' '- link-conflict - link conflict domain (home: '"$subhome"'; workspace: w-conflict; scope: link conflict domain; projects: alpha; added 2026-07-11)' > "$home/data/secondmates.md"
   fakebin=$(make_fake_herdr "$TMP_ROOT/link-conflict-fake")
