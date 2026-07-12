@@ -199,11 +199,74 @@ make_link_home() {
   FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null
 }
 
+make_current_home() {
+  local code=$1 home=$2 id=$3 entry name
+  code=$(canonical "$code")
+  make_link_home "$code" "$home" "$id"
+  rm -f "$home/.omp"
+  mkdir -p "$home/.omp/extensions"
+  for entry in "$code/.omp/extensions"/*; do
+    [ -e "$entry" ] || continue
+    name=$(basename "$entry")
+    ln -s "$entry" "$home/.omp/extensions/$name"
+  done
+}
+
 assert_link_points() {
   local link=$1 target=$2 label=$3 actual
   [ -L "$link" ] || fail "$label is not a symlink: $link"
   actual=$(readlink "$link")
   [ "$actual" = "$target" ] || fail "$label points to $actual, expected $target"
+}
+
+test_current_layout_home_link_check_passes() {
+  require_slice_scripts
+  local code="$TMP_ROOT/current-pass-code" home="$TMP_ROOT/current-pass-home" out
+  make_code_root "$code"
+  make_current_home "$code" "$home" currentpass
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check 2>&1) \
+    || fail "current-layout check failed: $out"
+  assert_contains "$out" "result=ok" "current-layout check did not report result=ok"
+  pass "current per-extension .omp layout passes home-link check"
+}
+
+test_current_layout_broken_extension_link_fails() {
+  require_slice_scripts
+  local code="$TMP_ROOT/current-broken-code" home="$TMP_ROOT/current-broken-home"
+  make_code_root "$code"
+  make_current_home "$code" "$home" currentbroken
+  rm -f "$home/.omp/extensions/test-ext.ts"
+  ln -s "$TMP_ROOT/missing-extension" "$home/.omp/extensions/test-ext.ts"
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null 2>&1; then
+    fail "current-layout check accepted a broken extension link"
+  fi
+  pass "current per-extension broken link fails home-link check"
+}
+
+test_current_layout_repairs_extension_link() {
+  require_slice_scripts
+  local code="$TMP_ROOT/current-repair-code" home="$TMP_ROOT/current-repair-home"
+  make_code_root "$code"
+  code=$(canonical "$code")
+  make_current_home "$code" "$home" currentrepair
+  rm -f "$home/.omp/extensions/test-ext.ts"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null \
+    || fail "current-layout repair failed"
+  assert_link_points "$home/.omp/extensions/test-ext.ts" "$code/.omp/extensions/test-ext.ts" \
+    "repaired extension link"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null \
+    || fail "current-layout check failed after repair"
+  pass "current per-extension broken link is repaired"
+}
+
+test_legacy_whole_omp_link_still_passes() {
+  require_slice_scripts
+  local code="$TMP_ROOT/legacy-pass-code" home="$TMP_ROOT/legacy-pass-home"
+  make_code_root "$code"
+  make_link_home "$code" "$home" legacypass
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null \
+    || fail "legacy whole-directory .omp link no longer passes"
+  pass "legacy whole-directory .omp symlink still passes home-link check"
 }
 
 # Contract: a non-git mate home can be repaired into a shared-code home while
@@ -217,7 +280,7 @@ test_home_link_repairs_shared_code_without_moving_operational_dirs() {
   conflict="$TMP_ROOT/link-conflict-home"
   make_code_root "$code"
   code=$(canonical "$code")
-  mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects" "$home/.omp"
+  mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
   printf '%s\n' linksm > "$home/.fm-secondmate-home"
   mkdir -p "$TMP_ROOT/stale-sbin"
   ln -s "$TMP_ROOT/stale-sbin" "$home/sbin"
@@ -439,6 +502,10 @@ test_migration_respawn_blocks_when_default_resume_session_is_missing() {
   pass "fm-mate-home-migrate --respawn blocks before stopping live work when no omp session can be resumed"
 }
 
+test_current_layout_home_link_check_passes
+test_current_layout_broken_extension_link_fails
+test_current_layout_repairs_extension_link
+test_legacy_whole_omp_link_still_passes
 test_home_link_repairs_shared_code_without_moving_operational_dirs
 test_symlink_home_spawn_lifecycle
 test_update_repairs_non_git_symlink_home

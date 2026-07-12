@@ -127,6 +127,61 @@ repair_link() {
   fi
   STATUS=repaired
 }
+repair_extension_link() {
+  local name=$1 source=$CODE_ROOT/.omp/extensions/$1 link=$HOME_PATH/.omp/extensions/$1
+  if [ -f "$link" ] && [ ! -L "$link" ]; then
+    STATUS=ok
+    return 0
+  fi
+  if link_points_to "$link" "$source"; then
+    STATUS=ok
+    return 0
+  fi
+  if [ "$MODE" = check ]; then
+    set_block wrong-link
+    return 0
+  fi
+  if [ -L "$link" ]; then
+    rm -f "$link"
+  elif [ ! -e "$link" ]; then
+    :
+  elif empty_regular_file "$link"; then
+    rm -f "$link"
+  elif empty_directory "$link"; then
+    rmdir "$link"
+  else
+    set_block extension-conflict
+    return 0
+  fi
+  [ -e "$source" ] || { set_block missing-target; return 0; }
+  ln -s "$source" "$link" || { set_block repair-failed; return 0; }
+  STATUS=repaired
+}
+
+check_current_omp() {
+  local ext_src entry name ext_dst
+  ext_src=$CODE_ROOT/.omp/extensions
+  ext_dst=$HOME_PATH/.omp/extensions
+  if [ ! -d "$ext_dst" ] || [ -L "$ext_dst" ]; then
+    if [ "$MODE" = repair ] && [ -d "$HOME_PATH/.omp" ] && [ ! -L "$HOME_PATH/.omp" ]; then
+      mkdir -p "$ext_dst" || { set_block repair-failed; return 0; }
+    else
+      set_block missing
+      return 0
+    fi
+  fi
+  [ -d "$ext_src" ] || { STATUS=ok; return 0; }
+  shopt -s nullglob dotglob
+  for entry in "$ext_src"/*; do
+    [ -e "$entry" ] || continue
+    name=$(basename "$entry")
+    repair_extension_link "$name"
+    status_line "link..omp.extensions.$name"
+  done
+  shopt -u nullglob dotglob
+}
+
+CURRENT_OMP=0
 
 check_operational_dir() {
   local name=$1 dir=$HOME_PATH/$1 abs_dir
@@ -151,6 +206,11 @@ CODE_ROOT=$(normalize_existing_dir "$FM_ROOT") || {
   exit 1
 }
 
+CURRENT_OMP=0
+if [ -d "$HOME_PATH/.omp" ] && [ ! -L "$HOME_PATH/.omp" ]; then
+  CURRENT_OMP=1
+fi
+
 printf 'home=%s\nmode=%s\n' "$HOME_PATH" "$MODE"
 if [ -L "$HOME_PATH/$SUB_HOME_MARKER" ]; then
   set_block symlink
@@ -171,7 +231,11 @@ repair_link CLAUDE.md "$CODE_ROOT/CLAUDE.md"; status_line link.CLAUDE.md
 repair_link sbin "$CODE_ROOT/sbin"; status_line link.sbin
 repair_link .agents "$CODE_ROOT/.agents"; status_line link..agents
 repair_link .claude "$CODE_ROOT/.claude"; status_line link..claude
-repair_link .omp "$CODE_ROOT/.omp"; status_line link..omp
+if [ "$CURRENT_OMP" -eq 1 ]; then
+  check_current_omp
+else
+  repair_link .omp "$CODE_ROOT/.omp"; status_line link..omp
+fi
 repair_link .tasks.toml "$CODE_ROOT/.tasks.toml"; status_line link..tasks.toml
 STATUS=$RESULT
 status_line result
