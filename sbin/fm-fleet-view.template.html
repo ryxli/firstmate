@@ -22,6 +22,8 @@
   .fv-dot-blocked { background: var(--color-warning); }
   .fv-dot-idle    { background: color-mix(in oklab, var(--color-base-content) 35%, transparent); }
   .fv-dot-unknown { background: var(--color-error); }
+  .fv-dot-tending { background: var(--color-info); }
+  .fv-dot-free    { background: color-mix(in oklab, var(--color-base-content) 35%, transparent); }
   .fv-mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
   .fv-truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -59,6 +61,25 @@
     idle:    { label: "idle",    dot: "fv-dot-idle",    text: "text-base-content/60" },
     unknown: { label: "unknown", dot: "fv-dot-unknown", text: "text-error" }
   };
+
+  var FLEET_STATUS_META = {
+    working: { label: "working", dot: "fv-dot-working", tone: "success" },
+    tending: { label: "tending", dot: "fv-dot-tending", tone: "info" },
+    blocked: { label: "blocked", dot: "fv-dot-blocked", tone: "warning" },
+    free:    { label: "free",    dot: "fv-dot-free",    tone: "neutral" },
+    unknown: { label: "unknown", dot: "fv-dot-unknown", tone: "error" }
+  };
+
+  function normFleetStatus(s) {
+    s = (s == null ? "" : String(s)).trim();
+    return FLEET_STATUS_META[s] ? s : "unknown";
+  }
+  function fleetStatusPill(s) {
+    var m = FLEET_STATUS_META[normFleetStatus(s)];
+    return h("span", { class: "badge badge-sm badge-soft badge-" + m.tone + " gap-1.5", title: "fleet_status" },
+      h("span", { class: "fv-dot " + m.dot, style: "box-shadow:none" }),
+      h("span", { text: "fleet " + m.label }));
+  }
 
   function normStatus(s) {
     s = (s == null ? "" : String(s)).trim();
@@ -181,6 +202,7 @@
     var parent = present(home.parent);
     var harness = present(home.harness);
     var avail = present(home.availability);
+    chips.push(fleetStatusPill(home.fleet_status));
     if (role) chips.push(ghostBadge("role", role));
     if (parent) chips.push(ghostBadge("parent", parent));
     if (harness) chips.push(badge(harness, "primary"));

@@ -41,11 +41,14 @@ log="${FM_FAKE_HERDR_LOG:?}"
 printf '%s\n' "$*" >> "$log"
 case "${1:-} ${2:-}" in
   "pane current")
-    printf '{"result":{"pane":{"pane_id":"w8:p10"}}}\n'; exit 0 ;;
+    curpane="${FM_FAKE_CURRENT_PANE:-w8:p10}"
+    printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "$curpane"; exit 0 ;;
   "pane get")
     case "${3:-}" in
       w8:p10) printf '{"result":{"pane":{"pane_id":"w8:p10","workspace_id":"w8","tab_id":"w8:t4","label":"fix-login","agent_status":"working","cwd":"/wt/fix-login-k3","foreground_cwd":"/wt/fix-login-k3"}}}\n' ;;
-      w8:p11) printf '{"result":{"pane":{"pane_id":"w8:p11","workspace_id":"w8","tab_id":"w8:t5","label":"add-cache","agent_status":"idle","cwd":"/wt/add-cache-q7","foreground_cwd":"/wt/add-cache-q7"}}}\n' ;;
+      w8:p11)
+        p11_status="${FM_FAKE_P11_STATUS:-idle}"
+        printf '{"result":{"pane":{"pane_id":"w8:p11","workspace_id":"w8","tab_id":"w8:t5","label":"add-cache","agent_status":"%s","cwd":"/wt/add-cache-q7","foreground_cwd":"/wt/add-cache-q7"}}}\n' "$p11_status" ;;
       *) printf '{"error":"pane_not_found"}\n' ;;
     esac; exit 0 ;;
   "tab get")
@@ -191,11 +194,94 @@ assert a["id"] == "w8:p10" and a["agent_identity"] == "omp" and a["agent_status"
 assert a["task"]["kind"] == "ship" and a["task"]["worker"] == "fix-login", a["task"]
 b = panes["add-cache-q7"]
 assert b["agent_status"] == "idle" and b["task"]["mode"] == "direct-PR", b
+assert d["fleet_status"] == "working", d.get("fleet_status")
+assert d["armed_check_count"] == 0, d.get("armed_check_count")
+assert d["session"]["current_pane_status"] == "working", d["session"]
 print("json-ok")
 ' >/dev/null || fail "json model assertions failed: $out"
 
   assert_read_only "$home/herdr.log"
   pass "--json emits the normalized workspace/tab/pane/task model"
+}
+
+test_json_fleet_status_blocked_is_passthrough() {
+  local home fakebin out
+  home=$(make_home fleet-blocked)
+  fakebin=$(make_fake_herdr "$home")
+  out=$(FM_FAKE_CURRENT_PANE=w8:p11 FM_FAKE_P11_STATUS=blocked run_lineage "$home" "$fakebin" --json) \
+    || fail "blocked run failed: $out"
+
+  printf '%s' "$out" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+assert d["session"]["current_pane_status"] == "blocked", d["session"]
+assert d["fleet_status"] == "blocked", d.get("fleet_status")
+' >/dev/null || fail "blocked supervisor should pass through to fleet_status: $out"
+
+  assert_read_only "$home/herdr.log"
+  pass "a blocked supervisor derives fleet_status=blocked"
+}
+
+test_json_fleet_status_tending_for_active_task() {
+  local home fakebin out
+  home=$(make_home fleet-tending-child)
+  fakebin=$(make_fake_herdr "$home")
+  out=$(FM_FAKE_CURRENT_PANE=w8:p11 run_lineage "$home" "$fakebin" --json) \
+    || fail "tending child run failed: $out"
+
+  printf '%s' "$out" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+assert d["session"]["current_pane_status"] == "idle", d["session"]
+assert d["fleet_status"] == "tending", d.get("fleet_status")
+assert d["armed_check_count"] == 0, d.get("armed_check_count")
+' >/dev/null || fail "idle home with a working child should be tending: $out"
+
+  assert_read_only "$home/herdr.log"
+  pass "an idle home with a working task derives fleet_status=tending"
+}
+
+test_json_fleet_status_tending_for_armed_check() {
+  local home fakebin out
+  home="$TMP_ROOT/fleet-tending-check"
+  mkdir -p "$home/state" "$home/config" "$home/data"
+  printf 'name=Mate\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
+  : > "$home/state/pending-a1.check.sh"
+  fakebin=$(make_fake_herdr "$home")
+  out=$(FM_FAKE_CURRENT_PANE=w8:p11 run_lineage "$home" "$fakebin" --json) \
+    || fail "tending check run failed: $out"
+
+  printf '%s' "$out" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+assert d["session"]["current_pane_status"] == "idle", d["session"]
+assert d["armed_check_count"] == 1, d.get("armed_check_count")
+assert d["fleet_status"] == "tending", d.get("fleet_status")
+' >/dev/null || fail "idle home with an armed check should be tending: $out"
+
+  assert_read_only "$home/herdr.log"
+  pass "an idle home with an armed check derives fleet_status=tending"
+}
+
+test_json_fleet_status_free_without_obligations() {
+  local home fakebin out
+  home="$TMP_ROOT/fleet-free"
+  mkdir -p "$home/state" "$home/config" "$home/data"
+  printf 'name=Mate\nrole=Main firstmate crew supervisor\nparent=captain\n' > "$home/config/identity"
+  fakebin=$(make_fake_herdr "$home")
+  out=$(FM_FAKE_CURRENT_PANE=w8:p11 run_lineage "$home" "$fakebin" --json) \
+    || fail "free run failed: $out"
+
+  printf '%s' "$out" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+assert d["session"]["current_pane_status"] == "idle", d["session"]
+assert d["armed_check_count"] == 0, d.get("armed_check_count")
+assert d["fleet_status"] == "free", d.get("fleet_status")
+' >/dev/null || fail "idle home without obligations should be free: $out"
+
+  assert_read_only "$home/herdr.log"
+  pass "an idle home without obligations derives fleet_status=free"
 }
 
 test_degraded_when_herdr_unreachable() {
@@ -319,6 +405,10 @@ test_fm_json_get_bad_json() {
 test_text_tree_live_lineage
 test_flat_one_line_per_task
 test_json_normalized_model
+test_json_fleet_status_blocked_is_passthrough
+test_json_fleet_status_tending_for_active_task
+test_json_fleet_status_tending_for_armed_check
+test_json_fleet_status_free_without_obligations
 test_degraded_when_herdr_unreachable
 test_recursive_nests_secondmate_home
 test_missing_pane_degrades_to_state_view

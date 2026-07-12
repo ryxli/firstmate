@@ -139,16 +139,25 @@ gather_home() {
     hstate="$home/state"; hconfig="$home/config"; hdata="$home/data"
   fi
 
-  local sup role par harness ident curpane ompcfg
+  local sup role par harness ident curpane curpane_status ompcfg
   sup=$(fm_supervisor_name "$hconfig")
   role=$(fm_supervisor_role "$hconfig")
   par=$(fm_supervisor_parent "$hconfig")
   curpane=
+  curpane_status=
   ompcfg=
   if [ "$home" = "$ROOT_HOME" ]; then
     harness=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || true)
     if [ "$HERDR_OK" = 1 ]; then
-      curpane=$(herdr pane current 2>/dev/null | sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p' | head -1 || true)
+      local curjson
+      curjson=$(herdr pane current 2>/dev/null || true)
+      curpane=$(printf '%s' "$curjson" | fm_json_get result pane pane_id)
+      curpane_status=$(printf '%s' "$curjson" | fm_json_get result pane agent_status)
+      if [ -z "$curpane_status" ] && [ -n "$curpane" ]; then
+        local curpane_json
+        curpane_json=$(pane_json "$curpane")
+        curpane_status=$(printf '%s' "$curpane_json" | fm_json_get result pane agent_status)
+      fi
     fi
     if command -v omp >/dev/null 2>&1; then
       ompcfg=$(omp config path 2>/dev/null | head -1 || true)
@@ -160,9 +169,9 @@ gather_home() {
   if [ "$harness" = omp ]; then ident=omp; else ident="$harness"; fi
 
   # homes columns: home parent_home parent_task supervisor role parent
-  #                harness identity current_pane omp_config_path availability
+  #                harness identity current_pane current_pane_status omp_config_path availability
   emit_row "$home" "$parent_home" "$parent_task" "$sup" "$role" "$par" \
-    "$harness" "$ident" "$curpane" "$ompcfg" "$availability" >> "$HOMES"
+    "$harness" "$ident" "$curpane" "$curpane_status" "$ompcfg" "$availability" >> "$HOMES"
 
   local f task_id pane tab_meta kind mode yolo worker domain project worktree
   local task_home projects agent_identity_meta harness_meta ws_meta
@@ -260,9 +269,8 @@ gather_home() {
         if [ -d "$task_home" ]; then
           gather_home "$task_home" "$home" "$task_id" "$childavail" "$childharness"
         elif ! grep -qxF "$task_home" "$VISITED" 2>/dev/null; then
-          printf '%s\n' "$task_home" >> "$VISITED"
           emit_row "$task_home" "$home" "$task_id" "?" "?" "?" "$childharness" \
-            "${agent_identity:-?}" "" "" unavailable >> "$HOMES"
+            "${agent_identity:-?}" "" "" "" unavailable >> "$HOMES"
         fi
       fi
     done
@@ -283,8 +291,7 @@ gather_home() {
       if [ -d "$rhome" ]; then
         gather_home "$rhome" "$home" "-" registered "$harness"
       else
-        printf '%s\n' "$rhome" >> "$VISITED"
-        emit_row "$rhome" "$home" "-" "?" "?" "?" "?" "?" "" "" unavailable >> "$HOMES"
+          emit_row "$rhome" "$home" "-" "?" "?" "?" "?" "?" "" "" "" unavailable >> "$HOMES"
       fi
     done < "$hdata/secondmates.md"
   fi
@@ -407,17 +414,17 @@ render_flat() {
 
 emit_json() {
   python3 -c '
-import sys, json
+import glob, os, sys, json
 
-records_path, homes_path, root_home = sys.argv[1], sys.argv[2], sys.argv[3]
-recurse = sys.argv[4] == "1"
+records_path, homes_path, root_home, root_state = sys.argv[1:5]
+recurse = sys.argv[5] == "1"
 SEP = "\x1f"
 
 REC_COLS = ["home","ws_id","ws_label","ws_status","tab_id","tab_label","tab_status",
             "pane_id","pane_label","pane_status","agent_identity","cwd","task_id","kind",
             "mode","yolo","worker","domain","project","worktree","task_home","projects","degraded"]
 HOME_COLS = ["home","parent_home","parent_task","supervisor","role","parent","harness",
-             "identity","current_pane","omp_config_path","availability"]
+             "identity","current_pane","current_pane_status","omp_config_path","availability"]
 
 def load(path, cols):
     rows = []
@@ -456,6 +463,16 @@ recs_by_home = {}
 for r in records:
     recs_by_home.setdefault(r["home"], []).append(r)
 
+check_counts = {}
+def armed_check_count(home_path):
+    if home_path not in check_counts:
+        state_path = root_state if home_path == root_home else os.path.join(home_path, "state")
+        check_counts[home_path] = sum(
+            os.path.isfile(path)
+            for path in glob.glob(os.path.join(state_path, "*.check.sh"))
+        )
+    return check_counts[home_path]
+
 def q(v):
     return v if v else "?"
 
@@ -466,6 +483,42 @@ def tabk(r):
 def pk(r):
     return r["pane_id"] or ("M:" + r["task_id"])
 
+def derive_fleet_status(home_path):
+    hm = homes_by_path.get(home_path, {})
+    own_status = hm.get("current_pane_status", "")
+    if not own_status and hm.get("parent_home") not in ("", "-"):
+        for record in recs_by_home.get(hm["parent_home"], []):
+            if record["task_id"] == hm.get("parent_task"):
+                own_status = record["pane_status"]
+                break
+
+    if own_status == "working":
+        return "working"
+    if own_status == "blocked":
+        return "blocked"
+
+    visited = set()
+    def has_obligation(path):
+        if path in visited:
+            return False
+        visited.add(path)
+
+        if armed_check_count(path):
+            return True
+        for record in recs_by_home.get(path, []):
+            status = record["pane_status"] or "unknown"
+            if status in ("working", "blocked") or status not in ("done", "failed"):
+                return True
+            for child in children.get((path, record["task_id"]), []):
+                if has_obligation(child):
+                    return True
+        for child in registry.get(path, []):
+            if has_obligation(child):
+                return True
+        return False
+
+    return "tending" if has_obligation(home_path) else "free"
+
 def build_home(home_path):
     hm = homes_by_path.get(home_path, {})
     node = {
@@ -475,9 +528,12 @@ def build_home(home_path):
         "parent": hm.get("parent", ""),
         "harness": hm.get("harness", ""),
         "availability": hm.get("availability", ""),
+        "fleet_status": derive_fleet_status(home_path),
+        "armed_check_count": armed_check_count(home_path),
         "session": {
             "omp_config_path": hm.get("omp_config_path", ""),
             "current_pane": hm.get("current_pane", ""),
+            "current_pane_status": hm.get("current_pane_status", ""),
         },
         "workspaces": [],
     }
@@ -523,7 +579,7 @@ def build_home(home_path):
     return node
 
 print(json.dumps(build_home(root_home), indent=2))
-' "$RECORDS" "$HOMES" "$ROOT_HOME" "$RECURSE"
+' "$RECORDS" "$HOMES" "$ROOT_HOME" "$STATE" "$RECURSE"
 }
 
 gather_home "$ROOT_HOME" "-" "-" running ""
