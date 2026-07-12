@@ -204,6 +204,7 @@ make_current_home() {
   code=$(canonical "$code")
   make_link_home "$code" "$home" "$id"
   rm -f "$home/.omp"
+  rm -f "$home/.agents" "$home/.claude" "$home/.tasks.toml"
   mkdir -p "$home/.omp/extensions"
   for entry in "$code/.omp/extensions"/*; do
     [ -e "$entry" ] || continue
