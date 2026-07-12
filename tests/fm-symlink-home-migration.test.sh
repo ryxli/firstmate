@@ -322,6 +322,42 @@ test_home_link_repairs_shared_code_without_moving_operational_dirs() {
   pass "fm-home-link repairs shared-code links, keeps operational dirs local, and refuses conflicts"
 }
 
+# Contract: repair removes only the obsolete broken legacy bin link and leaves
+# a user-owned non-empty bin file untouched.
+test_home_link_removes_broken_legacy_bin_without_clobbering_user_file() {
+  require_slice_scripts
+  local code broken_home user_home out
+  code="$TMP_ROOT/legacy-bin-code"
+  broken_home="$TMP_ROOT/broken-bin-home"
+  user_home="$TMP_ROOT/user-bin-home"
+  make_code_root "$code"
+  code=$(canonical "$code")
+
+  make_link_home "$code" "$broken_home" brokenbin
+  ln -s "$TMP_ROOT/missing-bin-target" "$broken_home/bin"
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$broken_home" --check >/dev/null 2>&1; then
+    fail "fm-home-link --check accepted an obsolete broken bin link"
+  fi
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$broken_home" --repair >/dev/null \
+    || fail "fm-home-link --repair failed to remove obsolete broken bin link"
+  [ ! -L "$broken_home/bin" ] || fail "repair left obsolete broken bin symlink"
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$broken_home" --check >/dev/null 2>&1; then
+    :
+  else
+    fail "fm-home-link --check rejected the repaired home"
+  fi
+
+  make_link_home "$code" "$user_home" userbin
+  printf 'user-owned bin content\n' > "$user_home/bin"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$user_home" --repair 2>&1) \
+    || fail "fm-home-link --repair rejected a user-owned bin file: $out"
+  [ -f "$user_home/bin" ] || fail "repair removed the user-owned bin file"
+  [ "$(cat "$user_home/bin")" = 'user-owned bin content' ] \
+    || fail "repair changed the user-owned bin file"
+  pass "fm-home-link removes broken legacy bin links without touching user files"
+}
+
+
 # Contract: current secondmate spawn repairs shared-code links in a prepared
 # non-git mate home before launch.
 test_symlink_home_spawn_lifecycle() {
@@ -508,6 +544,8 @@ test_current_layout_broken_extension_link_fails
 test_current_layout_repairs_extension_link
 test_legacy_whole_omp_link_still_passes
 test_home_link_repairs_shared_code_without_moving_operational_dirs
+test_home_link_removes_broken_legacy_bin_without_clobbering_user_file
+
 test_symlink_home_spawn_lifecycle
 test_update_repairs_non_git_symlink_home
 test_migration_respawn_resumes_existing_omp_session_by_default

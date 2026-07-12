@@ -82,6 +82,20 @@ empty_directory() {
     [ "${#entries[@]}" -eq 0 ]
   )
 }
+check_legacy_bin_link() {
+  local link=$HOME_PATH/bin
+  if [ -L "$link" ] && [ ! -e "$link" ]; then
+    if [ "$MODE" = check ]; then
+      set_block obsolete-link
+      return 0
+    fi
+    rm -f "$link" || { set_block repair-failed; return 0; }
+    STATUS=repaired
+  else
+    STATUS=ok
+  fi
+}
+
 
 RESULT=ok
 STATUS=ok
@@ -219,6 +233,9 @@ elif [ -f "$HOME_PATH/$SUB_HOME_MARKER" ]; then
 else
   set_block missing
 fi
+check_legacy_bin_link
+status_line legacy.bin
+
 status_line marker
 
 for op in data state config projects; do
