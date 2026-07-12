@@ -101,6 +101,7 @@ await Bun.sleep(50);
 writeFileSync(join(state, `${ship.task}.status`), "done: PR https://github.com/o/r/pull/1 checks green\n");
 await waitFor(() => sent.length === 1, "captain-relevant status file wake");
 if (!String(sent[0].message.content).includes("done: PR")) throw new Error("status-file wake lost the terminal status");
+if (!/^\[wake \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] /.test(String(sent[0].message.content))) throw new Error("status wake missing compact UTC timestamp prefix");
 
 emit(ship.pane, "working");
 emit(ship.pane, "blocked");
@@ -122,7 +123,7 @@ if (sent.length !== 2) throw new Error("secondmate blocked transition woke main 
 emit(secondmate.pane, "working");
 emit(secondmate.pane, "done");
 await waitFor(() => sent.length === 3, "secondmate routed completion wake");
-if (!String(sent[2].message.content).includes("secondmate idle after routed work")) throw new Error("secondmate completion wake missing safe completion wording");
+if (!/^\[wake \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] /.test(String(sent[2].message.content))) throw new Error("completion wake missing compact UTC timestamp prefix");
 if (sent[2].options.deliverAs !== "nextTurn" || sent[2].options.triggerTurn !== true) throw new Error("wake delivery options changed");
 if (osNotifications.length !== 2) throw new Error("secondmate completion sent an OS notification instead of escalating through supervision");
 await handlers.get("session_shutdown")();
