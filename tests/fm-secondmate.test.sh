@@ -218,11 +218,11 @@ test_fm_home_parameterization() {
   FM_HOME="$home_one" "$ROOT/sbin/fm-brief.sh" task-a app >/dev/null || fail "brief scaffold failed under FM_HOME"
   brief="$home_one/data/task-a/brief.md"
   [ -f "$brief" ] || fail "brief was not written under FM_HOME/data"
-  grep -F ">> '$home_one/state/task-a.status'" "$brief" >/dev/null || fail "brief did not shell-quote FM_HOME state path"
+  grep -F "'$ROOT/sbin/fm-report.sh' '$home_one/state/task-a.status'" "$brief" >/dev/null || fail "brief did not use the reporting helper with shell-quoted FM_HOME state path"
 
   FM_HOME="$home_one" "$ROOT/sbin/fm-brief.sh" task-b app --scout >/dev/null || fail "scout brief scaffold failed under FM_HOME"
   brief="$home_one/data/task-b/brief.md"
-  grep -F ">> '$home_one/state/task-b.status'" "$brief" >/dev/null || fail "scout brief did not shell-quote FM_HOME state path"
+  grep -F "'$ROOT/sbin/fm-report.sh' '$home_one/state/task-b.status'" "$brief" >/dev/null || fail "scout brief did not use the reporting helper with shell-quoted FM_HOME state path"
 
   FM_HOME="$home_one" FM_SECONDMATE_CHARTER='ops domain' "$ROOT/sbin/fm-brief.sh" task-c --secondmate app >/dev/null \
     || fail "secondmate brief scaffold failed under FM_HOME"
@@ -2288,6 +2288,17 @@ test_home_seed_writes_versioned_identity() {
   pass "home seeding writes versioned config/identity with schema_version=1"
 }
 
+test_shared_templates_do_not_embed_supervisor_name() {
+  local path
+  for path in "$ROOT/AGENTS.md" "$ROOT/sbin/fm-brief.sh" "$ROOT/sbin/fm-capture-demo.sh"; do
+    if grep -Eqi 'keel' "$path"; then
+      fail "shared template embeds the local supervisor name: $path"
+    fi
+  done
+  pass "shared templates stay portable across supervisors"
+}
+
+test_shared_templates_do_not_embed_supervisor_name
 test_fm_home_parameterization
 test_lock_status_is_per_home
 test_home_seed_registry_scope_and_overlapping_projects

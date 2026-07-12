@@ -15,7 +15,7 @@ EVENTS="${CAPTURE_EVENTS_PATH:-${HOME}/.omp/agent/capture/events.jsonl}"
 N="${1:-10}"
 
 if [ ! -f "$EVENTS" ]; then
-  echo "No events yet. Correct Keel in chat or run: fm-send.sh <pane> --steer <text>"
+  echo "No events yet. Correct the supervisor in chat or run: fm-send.sh <pane> --steer <text>"
   exit 0
 fi
 

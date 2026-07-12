@@ -101,7 +101,7 @@ These rules govern when and whether to send work to a mate. They apply before ev
   Do not send new work to a mate the captain has already focused on a task.
   Queue it or hold it until that mate's task is done or the captain explicitly re-routes.
 - **Read-only check before touching the bus.**
-  Before sending anything to a mate, ask: is this a read-only information request Keel can answer directly?
+  Before sending anything to a mate, ask: is this a read-only information request the firstmate can answer directly?
   If yes, answer it here; do not dispatch.
 - **Error recovery = correction + fix, nothing more.**
   On an error, send one line correcting course and then the fix.

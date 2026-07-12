@@ -116,6 +116,20 @@ grep -qF 'pane rename w1:p-new label-check' "$spawn_log" || fail "worker label w
 grep -qF 'agent_slot=label-check-k3' "$spawn_home/state/label-check-k3.meta" || fail "spawn metadata omitted agent slot"
 grep -qF 'worker=label-check' "$spawn_home/state/label-check-k3.meta" || fail "spawn metadata omitted worker label"
 grep -qF 'agent_identity=omp' "$spawn_home/state/label-check-k3.meta" || fail "spawn metadata omitted harness identity"
+grep -qF -- '- [ ] label-check-k3 - ship task (repo: demo, since ' "$spawn_home/data/backlog.md" \
+  || fail "ship spawn did not record its in-flight backlog entry"
+if [ "$(grep -c 'label-check-k3' "$spawn_home/data/backlog.md")" -ne 1 ]; then
+  fail "ship spawn recorded its backlog entry more than once"
+fi
+
+mkdir -p "$spawn_home/data/scout-check-k4"
+printf 'brief\n' > "$spawn_home/data/scout-check-k4/brief.md"
+scout_out=$(PATH="$spawn_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$spawn_log" \
+  FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
+  "$ROOT/sbin/fm-spawn.sh" scout-check-k4 projects/demo omp --scout 2>&1) \
+  || fail "scout spawn should create a labeled replacement tab: $scout_out"
+grep -qF -- '- [ ] scout-check-k4 - scout task (repo: demo, since ' "$spawn_home/data/backlog.md" \
+  || fail "scout spawn did not record its in-flight backlog entry"
 pass "spawn separates display labels from the durable herdr slot"
 
 secondmate_home="$TMP_ROOT/secondmate-home"
@@ -138,4 +152,6 @@ if grep -qF 'charter prompt that must not be resent' "$resume_log"; then
   fail "OMP respawn resent the charter instead of continuing"
 fi
 grep -qF "home=$secondmate_home_real" "$spawn_home/state/anchor.meta" || fail "recovery metadata did not preserve the durable home"
+[ "$(grep -c 'label-check-k3' "$spawn_home/data/backlog.md")" -eq 1 ] \
+  || fail "secondmate spawn should not add an in-flight backlog entry"
 pass "secondmate OMP respawn continues the prior session without reinjecting the charter"

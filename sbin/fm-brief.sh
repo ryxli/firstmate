@@ -54,6 +54,7 @@ shell_quote() {
 }
 
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
+REPORT_HELPER=$(shell_quote "$FM_ROOT/sbin/fm-report.sh")
 
 if [ "$KIND" = secondmate ]; then
 SECONDMATE_PROJECTS=""
@@ -91,7 +92,7 @@ Never start a survey, audit, or "find improvements" sweep on your own initiative
 # Escalation to main firstmate
 Handle routine work yourself.
 Escalate only true captain-relevant outcomes through the fleet peer bus, not the retired report helper and not raw status-file redirects.
-Use the agent tool \`peer_send\` when available, or \`/peer send keel "{state}: {one short line}"\` from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
+Use the agent tool peer_send when available, or type /peer send Main "{state}: {one short line}" from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
 States: working, needs-decision, blocked, done, failed.
 Use this only for material phase changes, a captain decision, a real blocker, a failure, or work ready for review.
 Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
@@ -101,7 +102,7 @@ You are persistent by default. Do not exit just because your queue is empty.
 On startup and restart, run normal firstmate bootstrap and recovery for your own home, but only to RECONCILE work that is already yours: in-flight crewmates, tracked backlog items, and durable watches recorded in this home.
 When you have no assigned or in-flight work after that reconciliation, go idle and wait silently for the main firstmate to route you a task.
 An empty queue is a healthy resting state, not a cue to invent work: never spawn a survey, audit, or any self-directed "find work" task on your own initiative.
-If this charter cannot be carried out, send \`blocked: {why}\` or \`failed: {why}\` to Keel through the fleet peer bus and stop.
+If this charter cannot be carried out, send blocked: {why} or failed: {why} to the main firstmate through the fleet peer bus and stop.
 EOF
 if [ "$SECONDMATE_CHARTER" = "{TASK}" ]; then
   echo "scaffolded: $BRIEF (secondmate charter; replace {TASK})"
@@ -132,19 +133,19 @@ The report is the only thing that survives, so anything worth keeping must be in
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
    Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
-5. Report status by appending one line:
-   \`echo "{state}: {one short line}" >> $STATUS_FILE\`
+5. Report status by running:
+   $REPORT_HELPER $STATUS_FILE "{state}: {one short line}"
    States: working, needs-decision, blocked, done, failed.
-   Each append wakes firstmate, so report sparingly: only phase changes a supervisor
+   Each report wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on and the needs-decision/blocked/done/failed states. No step-by-step
    FYI progress lines; firstmate reads your pane for that.
-6. If you hit the same obstacle twice, append \`blocked: {why}\` and stop; firstmate will help.
+6. If you hit the same obstacle twice, report blocked: {why} and stop; firstmate will help.
 7. If a decision belongs to a human (product choices, destructive actions),
-   append \`needs-decision: {summary of options}\` and stop. Firstmate will reply with the decision.
+   report needs-decision: {summary of options} and stop. Firstmate will reply with the decision.
 # Definition of done
-Write your findings to \`$DATA/$ID/report.md\`.
+Write your findings to $DATA/$ID/report.md.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
-When the report is complete, append \`done: {one-line conclusion}\` to the status file and stop.
+When the report is complete, report done: {one-line conclusion} and stop.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
 echo "scaffolded: $BRIEF (scout; replace {TASK})"
@@ -204,16 +205,16 @@ $RULE1
 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
 4. When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
    Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
-5. Report status by appending one line:
-   \`echo "{state}: {one short line}" >> $STATUS_FILE\`
+5. Report status by running:
+   $REPORT_HELPER $STATUS_FILE "{state}: {one short line}"
    States: working, needs-decision, blocked, done, failed.
-   Each append wakes firstmate, so report sparingly: only phase changes a supervisor
+   Each report wakes firstmate, so report sparingly: only phase changes a supervisor
    would act on (setup done, bug reproduced, fix implemented, validation passed) and the
    needs-decision/blocked/done/failed states. No step-by-step FYI progress lines;
    firstmate reads your pane for that.
-6. If you hit the same obstacle twice, append \`blocked: {why}\` and stop; firstmate will help.
+6. If you hit the same obstacle twice, report blocked: {why} and stop; firstmate will help.
 7. If a decision belongs to a human (product choices, destructive actions, ask-user findings),
-   append \`needs-decision: {summary of options}\` and stop. Firstmate will reply with the decision.
+   report needs-decision: {summary of options} and stop. Firstmate will reply with the decision.
 
 # Project memory
 If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/sbin/fm-ensure-agents-md.sh .\` in the worktree.

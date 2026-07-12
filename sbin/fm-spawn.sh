@@ -37,6 +37,8 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 # shellcheck source=sbin/fm-spawn-lib.sh
 . "$SCRIPT_DIR/fm-spawn-lib.sh"
+# shellcheck source=sbin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 
 KIND=ship
 WORKSPACE=""
@@ -181,6 +183,7 @@ replace_registered_secondmate_workspace() {
       $0 = substr($0, 1, position - 1) replacement substr($0, position + length(needle))
     }
     { print }
+
     END {
       if (!updated) exit 4
     }
@@ -190,6 +193,47 @@ replace_registered_secondmate_workspace() {
     return 1
   fi
   mv "$tmp" "$reg"
+}
+
+# append_backlog_inflight <id> <repo> <kind>
+#
+# Record a dispatched ship/scout task before returning success. A task that
+# survives a process restart must not depend on the operator remembering a
+# separate backlog mutation. Prefer tasks-axi when the active home is
+# configured for it; retain the documented Markdown fallback otherwise.
+# Backlog bookkeeping is intentionally best-effort because a live pane and its
+# metadata are more important than a local status record that can be repaired.
+append_backlog_inflight() {
+  local id=$1 repo=$2 kind=$3 backlog today line tmp
+  backlog="$DATA/backlog.md"
+  today=$(date +%Y-%m-%d)
+
+  mkdir -p "$DATA" 2>/dev/null || return 0
+  if [ ! -f "$backlog" ]; then
+    printf '## In flight\n\n## Queued\n\n## Done\n' > "$backlog" || return 0
+  fi
+
+  # Idempotent across a retry after pane launch or a repaired status record.
+  grep -Eq -- "^- (\\[ \\] |\\*\\*)$id( |\\*|-|$)" "$backlog" && return 0
+
+  if [ -f "$FM_HOME/.tasks.toml" ] && fm_tasks_axi_compatible 2>/dev/null; then
+    (cd "$FM_HOME" && tasks-axi add "$id" "$kind task" --kind "$kind" --repo "$repo" --start >/dev/null 2>&1) && return 0
+  fi
+
+  line="- [ ] $id - $kind task (repo: $repo, since $today)"
+  if grep -q '^## In flight$' "$backlog"; then
+    tmp=$(mktemp "$DATA/.backlog.XXXXXX") || return 0
+    if awk -v line="$line" '
+      { print }
+      /^## In flight$/ && !inserted { print line; inserted=1 }
+    ' "$backlog" > "$tmp"; then
+      mv "$tmp" "$backlog" || rm -f "$tmp"
+    else
+      rm -f "$tmp"
+    fi
+  else
+    printf '## In flight\n%s\n' "$line" >> "$backlog" || true
+  fi
 }
 
 replace_secondmate_meta_workspace() {
@@ -553,5 +597,9 @@ mkdir -p "$STATE"
     if [ -n "$WORKSPACE" ]; then echo "workspace=$WORKSPACE"; fi
   fi
 } > "$STATE/$ID.meta"
+
+if [ "$KIND" != secondmate ]; then
+  append_backlog_inflight "$ID" "$(basename "$PROJ_ABS")" "$KIND" || true
+fi
 
 echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO pane=$PANE worktree=$WT"
