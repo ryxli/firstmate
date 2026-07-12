@@ -12,13 +12,16 @@ const home = mkdtempSync(join(tmpdir(), "fm-supervisor-secondmate-"));
 const state = join(home, "state");
 const socketPath = join(home, "herdr.sock");
 const ship = { task: "ship", recordedPane: "w1:p-old", pane: "w1:p-live" };
+const crew = { task: "crew", pane: "w3:p1" };
 const secondmate = { task: "secondmate", pane: "w2:p1" };
 
 mkdirSync(state, { recursive: true });
 writeFileSync(join(state, `${ship.task}.meta`), `pane=${ship.recordedPane}\nkind=ship\n`);
 writeFileSync(join(state, `${secondmate.task}.meta`), `pane=${secondmate.pane}\nkind=secondmate\n`);
+writeFileSync(join(state, `${crew.task}.meta`), `pane=${crew.pane}\nkind=ship\n`);
 writeFileSync(join(state, `${ship.task}.status`), "");
 writeFileSync(join(state, `${secondmate.task}.status`), "");
+writeFileSync(join(state, `${crew.task}.status`), "");
 
 process.env.FM_HOME = home;
 process.env.FM_STATE_OVERRIDE = state;
@@ -77,7 +80,7 @@ const pi = {
     if (command !== "herdr") return response();
     if (args[0] === "agent" && args[1] === "get") {
       const target = args[2];
-      const pane = target === ship.task ? ship.pane : target === secondmate.task ? secondmate.pane : target;
+      const pane = target === ship.task ? ship.pane : target === secondmate.task ? secondmate.pane : target === crew.task ? crew.pane : target;
       return response(JSON.stringify({ pane_id: pane, agent_status: "idle" }));
     }
     if (args[0] === "pane" && args[1] === "get") return response(JSON.stringify({ pane_id: args[2] }));
@@ -144,6 +147,25 @@ emit(secondmate.pane, "idle");
 await waitFor(() => observedStatusEvents >= beforeReplayCount + 2, "replayed idle events");
 await Bun.sleep(20);
 if (sent.length !== 3) throw new Error("replayed idle after completion produced a duplicate wake");
+
+// An ordinary crewmate with no terminal status must wake its supervisor once
+// after a real working-to-idle edge. A repeated idle replay is not an edge.
+emit(crew.pane, "working");
+emit(crew.pane, "idle");
+await waitFor(() => sent.length === 4, "ordinary crewmate completion wake");
+if (!String(sent[3].message.content).includes("crew") || !/crewmate idle after task, no status/i.test(sent[3].message.content)) {
+  throw new Error("ordinary crewmate completion wake lost task or action");
+}
+emit(crew.pane, "idle");
+await Bun.sleep(20);
+if (sent.length !== 4) throw new Error("ordinary crewmate idle replay produced a duplicate completion wake");
+
+// A terminal status remains the primary path. The completion backstop must not
+// double-wake when the crewmate already emitted one.
+emit(ship.pane, "working");
+emit(ship.pane, "idle");
+await Bun.sleep(20);
+if (sent.length !== 4) throw new Error("captain-relevant crewmate status produced a duplicate completion wake");
 await handlers.get("session_shutdown")();
 client?.destroy();
 const closed = Promise.withResolvers();

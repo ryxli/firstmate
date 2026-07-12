@@ -77,9 +77,11 @@
  *     wake (trimmed to the last STATUS_INTERNAL_LOG_MAX lines like bash).
  *   - periodic stale wakes are skipped for kind=secondmate panes and for ship
  *     tasks parked on a green PR (pr= set AND last status line is a terminal
- *     done-PR / PR-ready line). A secondmate working-to-idle/done transition
- *     instead arms a short completion backstop, so idle-by-default supervision
- *     remains quiet while completion of routed work is still observable.
+ *     done-PR / PR-ready line). A real working-to-idle transition arms a short
+ *     completion backstop. For secondmates it makes routed-work completion
+ *     observable without disturbing their healthy idle state; for ordinary
+ *     crewmates it prevents a missing terminal status from leaving their
+ *     supervisor idle and unaware.
  *
  *   - a live pane is refreshed from its durable herdr task identity before
  *     subscribing, and an idle backstop confirms that the pane still exists and
@@ -281,7 +283,7 @@ interface Tunables {
 	flushGraceMs: number; // FM_SIGNAL_GRACE: non-afk coalescing window (default 30s)
 	flushAfkMs: number; // FM_ESCALATE_BATCH_SECS: afk batch window (default 90s)
 	staleMs: number; // FM_STALE_ESCALATE_SECS: idle-without-status backstop (default 240s)
-	secondmateIdleMs: number; // FM_SECONDMATE_IDLE_SECS: secondmate working->idle completion backstop (default 20s)
+	secondmateIdleMs: number; // FM_SECONDMATE_IDLE_SECS: shared working->idle completion backstop (default 20s)
 	blockedDebounceMs: number; // FM_BLOCKED_DEBOUNCE_SECS: per-pane ship/scout blocked-wake debounce (default 120s)
 	checkIntervalMs: number; // FM_CHECK_INTERVAL: *.check.sh cadence (default 300s)
 	checkTimeoutMs: number; // FM_CHECK_TIMEOUT: per-check timeout (default 30s)
@@ -660,11 +662,14 @@ function handleHerdrPush(sup: Supervisor, push: HerdrPush): void {
 		});
 		return;
 	}
-	// Only a secondmate's working-to-idle/done/unknown transition can signal
-	// completion of routed work. An already idle secondmate is healthy.
-	if (crew.kind === "secondmate") {
-		if (prev === "working") armCompletionTimer(sup, crew);
-		else clearStaleTimer(sup, push.pane);
+	// A real working-to-idle edge can mean routed-work completion for a
+	// secondmate, or a crewmate that stopped without reporting a terminal status.
+	// Startup and reconnect idle observations have no working predecessor because
+	// seedStatuses establishes the baseline before subscribing.
+	if (prev === "working" && (crew.kind === "secondmate" || push.status === "idle")) {
+		armCompletionTimer(sup, crew);
+	} else if (crew.kind === "secondmate") {
+		clearStaleTimer(sup, push.pane);
 	} else {
 		armStaleTimer(sup, crew);
 	}
@@ -784,7 +789,7 @@ async function isAwaitingMerge(sup: Supervisor, crew: Crewmate): Promise<boolean
 	return /^done:.*\bPR\b/i.test(last) || /PR ready/i.test(last);
 }
 
-// ---------------------- secondmate completion backstop ----------------------
+// ------------------------- completion backstop -------------------------
 
 function armCompletionTimer(sup: Supervisor, crew: Crewmate): void {
 	clearStaleTimer(sup, crew.pane);
@@ -810,9 +815,11 @@ async function fireCompletion(sup: Supervisor, crew: Crewmate): Promise<void> {
 	const last = await lastStatusLine(sup, crew.task);
 	if (last && captainRelevantStatusLine(last)) return;
 	const lineage = crew.worker ? ` ${crew.worker}` : "";
+	const idleState =
+		crew.kind === "secondmate" ? "secondmate idle after routed work" : "crewmate idle after task";
 	enqueueStale(
 		sup,
-		`[wake] ${crew.task}${lineage} ${crew.pane} - secondmate idle after routed work, no status \u00b7 action: review + close out`,
+		`[wake] ${crew.task}${lineage} ${crew.pane} - ${idleState}, no status \u00b7 action: review + close out`,
 		Date.now(),
 	);
 }

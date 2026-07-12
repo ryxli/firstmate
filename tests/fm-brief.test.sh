@@ -16,6 +16,7 @@ mkdir -p "$TMP/home/data"
 cat > "$TMP/home/data/projects.md" <<'EOF'
 - app - default direct-PR project (added 2026-06-25)
 - legacy [no-mistakes] - pipeline-era project (added 2026-06-25)
+- local [local-only] - local delivery project (added 2026-06-25)
 EOF
 
 scaffold() {
@@ -34,14 +35,32 @@ check_ship_setup() {
 }
 
 brief=$(scaffold task-a1 app)
+grep -qF 'use `peer_send` to send `done: PR {url}` to that supervisor, then stop.' "$brief" \
+  || fail "direct-PR ship brief did not instruct supervisor peer completion"
 check_ship_setup "$brief" task-a1
 pass "direct-PR ship brief uses the precreated fm/<id> branch"
+pass "direct-PR ship brief sends completion to its recorded supervisor"
 
 brief=$(scaffold task-b2 legacy)
 check_ship_setup "$brief" task-b2
 grep -qF 'This project ships **direct-PR**' "$brief" \
   || fail "no-mistakes registry entry did not produce a direct-PR ship brief"
 pass "legacy no-mistakes project scaffolds a direct-PR ship brief"
+
+brief=$(scaffold task-local local)
+grep -qF 'use `peer_send` to send `done: ready in branch fm/task-local` to that supervisor, then stop.' "$brief" \
+  || fail "local-only ship brief did not instruct supervisor peer completion"
+pass "local-only ship brief sends completion to its recorded supervisor"
+
+scout="$TMP/home/data/scout-d4/brief.md"
+FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' FM_STATE_OVERRIDE='' \
+  "$BRIEF" scout-d4 app --scout >/dev/null 2>&1 \
+  || fail "fm-brief.sh failed for scout-d4/app"
+grep -qF 'read `supervisor=` from' "$scout" \
+  || fail "scout brief did not read its recorded supervisor"
+grep -qF 'use `peer_send` to send `done: {one-line conclusion}` to that supervisor, then stop.' "$scout" \
+  || fail "scout brief did not instruct supervisor peer completion"
+pass "scout brief sends completion to its recorded supervisor"
 
 secondmate="$TMP/home/data/secondmate-c3/brief.md"
 FM_HOME="$TMP/home" FM_SECONDMATE_CHARTER='operations supervision' \

@@ -55,6 +55,7 @@ shell_quote() {
 
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
 REPORT_HELPER=$(shell_quote "$FM_ROOT/sbin/fm-report.sh")
+SUPERVISOR_META=$(shell_quote "$STATE/$ID.meta")
 
 if [ "$KIND" = secondmate ]; then
 SECONDMATE_PROJECTS=""
@@ -146,7 +147,7 @@ The report is the only thing that survives, so anything worth keeping must be in
 # Definition of done
 Write your findings to $DATA/$ID/report.md.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
-When the report is complete, report done: {one-line conclusion} and stop.
+When the report is complete, append \`done: {one-line conclusion}\` to the status file, then read \`supervisor=\` from $SUPERVISOR_META and use \`peer_send\` to send \`done: {one-line conclusion}\` to that supervisor, then stop.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
 echo "scaffolded: $BRIEF (scout; replace {TASK})"
@@ -169,7 +170,7 @@ This project ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`fm/$ID\`. Do NOT push, do NOT open a PR, do NOT merge.
 Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass; fix anything you broke.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
-When it is implemented and committed, append \`done: ready in branch fm/$ID\` to the status file and stop.
+When it is implemented and committed, append \`done: ready in branch fm/$ID\` to the status file, then read \`supervisor=\` from $SUPERVISOR_META and use \`peer_send\` to send \`done: ready in branch fm/$ID\` to that supervisor, then stop.
 Firstmate then reviews your branch diff, the captain approves, and firstmate merges it into local \`main\`.
 EOF
 )
@@ -182,7 +183,7 @@ EOF
 This project ships **direct-PR**: you raise the PR yourself, backed by focused review and tests. There is no separate validation pipeline to run.
 The task is complete only when committed on your branch.
 Before you push, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
-When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
+When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file, then read \`supervisor=\` from $SUPERVISOR_META and use \`peer_send\` to send \`done: PR {url}\` to that supervisor, then stop.
 Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
 The captain reviews and merges the PR; firstmate relays it.
 EOF
