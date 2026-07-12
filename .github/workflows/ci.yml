@@ -15,13 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: shellcheck sbin/*.sh tests/*.sh
+      - run: shellcheck -x --severity=error sbin/*.sh tests/*.sh
 
   tests:
     name: Behavior tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
       - run: |
           set -eu
           for test_script in tests/*.test.sh; do
