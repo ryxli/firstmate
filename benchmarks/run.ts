@@ -1,4 +1,4 @@
-import { classifyAndDigest } from "../.omp/extensions/fm-supervisor.ts";
+import { classifyAndDigest, formatWakeTimestamp } from "../.omp/extensions/fm-supervisor.ts";
 import { modelNew } from "./new.ts";
 import { modelOld } from "./old.ts";
 import { SCENARIOS } from "./scenarios.ts";
@@ -43,12 +43,15 @@ function assertSupervisorExportContract(): void {
 		relevant: true,
 	};
 	const single = classifyAndDigest([timestampedDone]);
-	if (single.wakes !== 1 || single.detected !== 1 || single.digests[0] !== "[wake] export-sentinel w1:p1 - 2026-07-11T00:00:00Z done: PR https://example.test/1 checks green \u00b7 action: review + merge PR") {
+	if (single.wakes !== 1 || single.detected !== 1 || single.digests[0] !== "[wake 1970-01-01T00:00:00Z] export-sentinel w1:p1 - 2026-07-11T00:00:00Z done: PR https://example.test/1 checks green \u00b7 action: review + merge PR") {
 		throw new Error("fm-supervisor.ts classifyAndDigest export did not produce the expected direct digest");
 	}
 	const afk = classifyAndDigest([timestampedDone, blocked], { afk: true });
-	if (afk.wakes !== 1 || afk.detected !== 2 || afk.digests[0] !== "[wake x2] afk batch - 2 relevant event(s):\n  - export-sentinel w1:p1 - 2026-07-11T00:00:00Z done: PR https://example.test/1 checks green \u00b7 review + merge PR\n  - export-sentinel-blocked w2:p1 - herdr working->blocked \u00b7 unblock") {
+	if (afk.wakes !== 1 || afk.detected !== 2 || afk.digests[0] !== "[wake x2 1970-01-01T00:00:00Z] afk batch - 2 relevant event(s):\n  - export-sentinel w1:p1 - 2026-07-11T00:00:00Z done: PR https://example.test/1 checks green \u00b7 review + merge PR\n  - export-sentinel-blocked w2:p1 - herdr working->blocked \u00b7 unblock") {
 		throw new Error("fm-supervisor.ts AFK batch contract did not match the live export");
+	}
+	if (formatWakeTimestamp(1_999) !== "1970-01-01T00:00:01Z") {
+		throw new Error("fm-supervisor.ts timestamp formatter did not truncate milliseconds mechanically");
 	}
 }
 

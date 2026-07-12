@@ -185,17 +185,24 @@ function stateOf(e: FleetEvent): string {
 	}
 }
 
+// Compact UTC timestamp for wake prefixes. Milliseconds are intentionally
+// truncated so every digest uses the same second-resolution wire format.
+export function formatWakeTimestamp(epochMs: number): string {
+	return new Date(Math.trunc(epochMs / 1000) * 1000).toISOString().replace(".000Z", "Z");
+}
+
 // One dense, self-contained wake line: task, pane, state, recommended action.
 // The middle dot (U+00B7) is an intentional separator (NOT an em-dash).
 function buildDigest(e: FleetEvent): string {
 	const state = stateOf(e);
 	const lineage = e.worker ? ` ${e.worker}` : "";
-	return `[wake] ${e.task}${lineage} ${e.pane} - ${state} \u00b7 action: ${actionFor(state)}`;
+	return `[wake ${formatWakeTimestamp(e.t)}] ${e.task}${lineage} ${e.pane} - ${state} \u00b7 action: ${actionFor(state)}`;
 }
 
 // AFK: ONE combined digest covering every relevant event (still self-contained).
 function buildBatchDigest(relevant: FleetEvent[]): string {
-	const head = `[wake x${relevant.length}] afk batch - ${relevant.length} relevant event(s):`;
+	const stamp = formatWakeTimestamp(relevant[0]?.t ?? Date.now());
+	const head = `[wake x${relevant.length} ${stamp}] afk batch - ${relevant.length} relevant event(s):`;
 	const lines = relevant.map((e) => {
 		const state = stateOf(e);
 		const lineage = e.worker ? ` ${e.worker}` : "";
@@ -760,6 +767,7 @@ async function fireStale(sup: Supervisor, crew: Crewmate, idleStart: number): Pr
 	enqueueStale(
 		sup,
 		`[wake] ${crew.task}${lineage} ${crew.pane} - STALE ${mins}m idle, no status \u00b7 action: peek pane`,
+		Date.now(),
 	);
 }
 
@@ -801,6 +809,7 @@ async function fireCompletion(sup: Supervisor, crew: Crewmate): Promise<void> {
 	enqueueStale(
 		sup,
 		`[wake] ${crew.task}${lineage} ${crew.pane} - secondmate idle after routed work, no status \u00b7 action: review + close out`,
+		Date.now(),
 	);
 }
 
@@ -1006,8 +1015,9 @@ function enqueueEvent(sup: Supervisor, e: FleetEvent): void {
 	scheduleFlush(sup);
 }
 
-function enqueueStale(sup: Supervisor, digest: string): void {
-	sup.pendingStale.push(digest);
+function enqueueStale(sup: Supervisor, digest: string, enqueueMs: number): void {
+	const content = digest.replace(/^\[wake\]/, `[wake ${formatWakeTimestamp(enqueueMs)}]`);
+	sup.pendingStale.push(content);
 	scheduleFlush(sup);
 }
 
