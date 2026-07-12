@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Record a PR-ready task: appends pr=<url> to state/<id>.meta and arms the
-# watcher's merge poll by writing state/<id>.check.sh, which prints one line iff
-# the PR is merged (the watcher's check contract: output = wake firstmate,
-# silence = keep sleeping).
+# Record a PR-ready task: appends pr=<url> to state/<id>.meta and registers its
+# merged-PR check with automatic in-process supervision. The generated check
+# prints one line iff the PR is merged (the check contract: output = wake
+# firstmate, silence = keep sleeping).
 # Usage: fm-pr-check.sh <task-id> <pr-url>
 set -eu
 
@@ -18,8 +18,19 @@ if [ -f "$META" ] && ! grep -qxF "pr=$URL" "$META"; then
   echo "pr=$URL" >> "$META"
 fi
 
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+CHECK_URL=$(shell_quote "$URL")
 cat > "$STATE/$ID.check.sh" <<EOF
-state=\$(gh pr view "$URL" --json state -q .state 2>/dev/null)
+URL=$CHECK_URL
+PR_REF=\${URL#https://github.com/}
+PR_REPO=\${PR_REF%%/pull/*}
+PR_NUMBER=\${PR_REF##*/pull/}
+state=\$(gh-axi pr view "\$PR_NUMBER" --repo "\$PR_REPO" 2>/dev/null | awk -F': *' '/^[[:space:]]*state:/{print toupper(\$2); exit}')
 [ "\$state" = "MERGED" ] && echo "merged"
 EOF
 echo "armed: state/$ID.check.sh polls $URL"

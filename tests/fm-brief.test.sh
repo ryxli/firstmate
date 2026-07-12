@@ -42,3 +42,21 @@ check_ship_setup "$brief" task-b2
 grep -qF 'This project ships **direct-PR**' "$brief" \
   || fail "no-mistakes registry entry did not produce a direct-PR ship brief"
 pass "legacy no-mistakes project scaffolds a direct-PR ship brief"
+
+secondmate="$TMP/home/data/secondmate-c3/brief.md"
+FM_HOME="$TMP/home" FM_SECONDMATE_CHARTER='operations supervision' \
+  "$BRIEF" secondmate-c3 --secondmate app >/dev/null 2>&1 \
+  || fail "secondmate charter scaffold failed"
+grep -qF 'Supervision is automatic and in-process; there is no watcher, wake-queue, beacon' "$secondmate" \
+  || fail "secondmate charter did not describe automatic in-process supervision"
+grep -qF 'direct crewmate status-file reporting' "$secondmate" \
+  || fail "secondmate charter dropped direct status-file reporting"
+grep -qF 'fm-send.sh' "$secondmate" \
+  || fail "secondmate charter dropped fm-send.sh pane steering"
+grep -qF 'Escalate only captain-actionable transition states' "$secondmate" \
+  || fail "secondmate charter did not restrict escalation states"
+grep -qF 'through the fleet peer bus' "$secondmate" \
+  || fail "secondmate charter dropped peer-bus escalation"
+grep -qF 'States: needs-decision, blocked, done, failed.' "$secondmate" \
+  || fail "secondmate charter listed non-actionable escalation states"
+pass "secondmate charter uses automatic supervision and captain-actionable peer-bus escalation"
