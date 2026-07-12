@@ -3,7 +3,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BROWSER="$ROOT/bin/fm-browser.sh"
+BROWSER="$ROOT/sbin/fm-browser.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-browser.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 

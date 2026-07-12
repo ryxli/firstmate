@@ -31,11 +31,11 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 SUB_HOME_MARKER=".fm-secondmate-home"
-# shellcheck source=bin/fm-identity-lib.sh
+# shellcheck source=sbin/fm-identity-lib.sh
 . "$SCRIPT_DIR/fm-identity-lib.sh"
-# shellcheck source=bin/fm-herdr-lib.sh
+# shellcheck source=sbin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
-# shellcheck source=bin/fm-spawn-lib.sh
+# shellcheck source=sbin/fm-spawn-lib.sh
 . "$SCRIPT_DIR/fm-spawn-lib.sh"
 
 KIND=ship
@@ -324,7 +324,7 @@ validate_firstmate_home_for_spawn() {
   # AGENTS.md and bin/ as real paths is self-contained, not a partial link home.
   if ! git -C "$abs_home" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
     && home_needs_shared_code_repair "$abs_home"; then
-    "$FM_ROOT/bin/fm-home-link.sh" "$abs_home" --repair >/dev/null || {
+    "$FM_ROOT/sbin/fm-home-link.sh" "$abs_home" --repair >/dev/null || {
       echo "error: failed to repair shared-code links in secondmate home $home" >&2
       return 1
     }

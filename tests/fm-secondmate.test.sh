@@ -1060,7 +1060,7 @@ test_secondmate_spawn_repairs_shared_links() {
   log="$TMP_ROOT/link-repair-fake/herdr.log"
 
   PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
-    "$ROOT/bin/fm-spawn.sh" link-sub "$subhome" codex --secondmate >/dev/null \
+    "$ROOT/sbin/fm-spawn.sh" link-sub "$subhome" codex --secondmate >/dev/null \
     || fail "secondmate spawn did not repair a symlink-backed home"
 
   [ -L "$subhome/CLAUDE.md" ] || fail "link repair did not restore CLAUDE.md link"
@@ -1084,7 +1084,7 @@ test_secondmate_spawn_preserves_shared_link_conflicts() {
   log="$TMP_ROOT/link-conflict-fake/herdr.log"
 
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
-    "$ROOT/bin/fm-spawn.sh" link-conflict "$subhome" codex --secondmate >/dev/null 2>"$err"; then
+    "$ROOT/sbin/fm-spawn.sh" link-conflict "$subhome" codex --secondmate >/dev/null 2>"$err"; then
     fail "secondmate spawn overwrote a non-empty shared link conflict"
   fi
   grep -F 'failed to repair shared-code links' "$err" >/dev/null \
@@ -1308,7 +1308,7 @@ EOF
 
   PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
     FM_FAKE_HERDR_MISSING_WORKSPACE=w-missing FM_FAKE_HERDR_REPLACEMENT_WORKSPACE_ID=w-replacement \
-    "$ROOT/bin/fm-spawn.sh" bull --secondmate >/dev/null \
+    "$ROOT/sbin/fm-spawn.sh" bull --secondmate >/dev/null \
     || fail "secondmate recovery did not replace a missing registered workspace"
 
   meta="$home/state/bull.meta"

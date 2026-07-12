@@ -27,7 +27,7 @@ assert_contains() {
   esac
 }
 
-RUN="$ROOT/bin/fm-action-bench.sh"
+RUN="$ROOT/sbin/fm-action-bench.sh"
 
 if ! command -v bun >/dev/null 2>&1; then
   printf 'ok - SKIP fm-action-bench (bun not found; CI installs it via setup-bun)\n'

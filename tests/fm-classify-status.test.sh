@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLASSIFY="$ROOT/bin/fm-classify-status.sh"
+CLASSIFY="$ROOT/sbin/fm-classify-status.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-classify-status.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 

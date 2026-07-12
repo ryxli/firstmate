@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODE="$ROOT/bin/fm-project-mode.sh"
+MODE="$ROOT/sbin/fm-project-mode.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-project-mode.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 

@@ -40,7 +40,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-RUN="$ROOT/bin/fm-think-bench.sh"
+RUN="$ROOT/sbin/fm-think-bench.sh"
 
 if ! command -v bun >/dev/null 2>&1; then
   printf 'ok - SKIP fm-think-bench (bun not found; CI installs it via setup-bun)\n'

@@ -359,10 +359,10 @@ process_secondmate() {
 
   # Symlink-backed homes do not have their own git checkout. Verify their shared
   # code links on every update, and repair only when explicitly requested.
-  if [ -d "$home" ] && [ -x "$FM_ROOT/bin/fm-home-link.sh" ] && ! git -C "$home" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [ -d "$home" ] && [ -x "$FM_ROOT/sbin/fm-home-link.sh" ] && ! git -C "$home" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     link_mode=--check
     [ "$REPAIR_LINKS" -eq 0 ] || link_mode=--repair
-    if ! link_out=$("$FM_ROOT/bin/fm-home-link.sh" "$home" "$link_mode" 2>&1); then
+    if ! link_out=$("$FM_ROOT/sbin/fm-home-link.sh" "$home" "$link_mode" 2>&1); then
       echo "secondmate $id: skipped: link check failed: $link_out"
       return 0
     fi

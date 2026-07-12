@@ -126,13 +126,13 @@ if "$FOCUS" --home "$TMP/empty" --no-color | grep -q "nothing needs you"; then p
 # the checked-out code root. FM_CODE_ROOT_OVERRIDE must select that helper.
 CODE_ROOT="$TMP/code-root"
 LINEAGE_CALLS="$TMP/lineage-calls.txt"
-mkdir -p "$CODE_ROOT/bin"
-cat > "$CODE_ROOT/bin/fm-lineage.sh" <<'SH'
+mkdir -p "$CODE_ROOT/sbin"
+cat > "$CODE_ROOT/sbin/fm-lineage.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$FM_FOCUS_LINEAGE_CALLS"
 printf '%s\n' '{"workspaces":[]}'
 SH
-chmod +x "$CODE_ROOT/bin/fm-lineage.sh"
+chmod +x "$CODE_ROOT/sbin/fm-lineage.sh"
 FM_FOCUS_NO_HERDR="" FM_CODE_ROOT_OVERRIDE="$CODE_ROOT" FM_FOCUS_LINEAGE_CALLS="$LINEAGE_CALLS" \
   "$FOCUS" --home "$H" --json --no-color >"$TMP/code-root-out.json" 2>"$TMP/code-root-err" \
   || fail "fm-focus with FM_CODE_ROOT_OVERRIDE exited nonzero ($(cat "$TMP/code-root-err"))"

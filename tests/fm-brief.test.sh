@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BRIEF="$ROOT/bin/fm-brief.sh"
+BRIEF="$ROOT/sbin/fm-brief.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-brief.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 

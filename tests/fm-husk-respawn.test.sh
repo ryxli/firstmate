@@ -3,7 +3,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LIB="$ROOT/bin/fm-herdr-lib.sh"
+LIB="$ROOT/sbin/fm-herdr-lib.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-husk-respawn.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -108,7 +108,7 @@ chmod +x "$spawn_bin/omp"
 spawn_log="$TMP_ROOT/spawn.log"
 spawn_out=$(PATH="$spawn_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$spawn_log" \
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
-  "$ROOT/bin/fm-spawn.sh" label-check-k3 projects/demo omp 2>&1) \
+  "$ROOT/sbin/fm-spawn.sh" label-check-k3 projects/demo omp 2>&1) \
   || fail "spawn should create a labeled replacement tab: $spawn_out"
 case "$spawn_out" in *'spawned label-check-k3'*) : ;; *) fail "spawn did not report success: $spawn_out" ;; esac
 grep -qF 'agent start label-check-k3' "$spawn_log" || fail "task id was not used as the herdr slot"
@@ -131,7 +131,7 @@ make_fake_herdr "$resume_bin"
 resume_log="$TMP_ROOT/resume.log"
 resume_out=$(PATH="$resume_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$resume_log" \
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
-  "$ROOT/bin/fm-spawn.sh" anchor omp --secondmate 2>&1) \
+  "$ROOT/sbin/fm-spawn.sh" anchor omp --secondmate 2>&1) \
   || fail "secondmate OMP recovery spawn should succeed: $resume_out"
 grep -qF 'omp --auto-approve -c' "$resume_log" || fail "OMP respawn did not continue the saved session"
 if grep -qF 'charter prompt that must not be resent' "$resume_log"; then

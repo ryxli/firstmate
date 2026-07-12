@@ -94,7 +94,7 @@ test_send_defers_human_draft_without_clobbering_or_duplicating() {
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ captain draft │" \
     FM_SEND_RETRIES=1 FM_SENDQ_NO_BACKGROUND=1 \
-    "$ROOT/bin/fm-send.sh" fm-task "deferred steer" >"$dir/send.out" 2>"$err" \
+    "$ROOT/sbin/fm-send.sh" fm-task "deferred steer" >"$dir/send.out" 2>"$err" \
     || rc=$?
   [ "$rc" = "75" ] || fail "expected deferred send to exit 75, got $rc"
   grep -F 'herdr pane run ' "$dir/herdr.log" >/dev/null \
@@ -108,7 +108,7 @@ test_send_defers_human_draft_without_clobbering_or_duplicating() {
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ captain draft │" \
     FM_SEND_RETRIES=1 FM_SENDQ_NO_BACKGROUND=1 \
-    "$ROOT/bin/fm-send.sh" fm-task "deferred steer" >/dev/null 2>/dev/null \
+    "$ROOT/sbin/fm-send.sh" fm-task "deferred steer" >/dev/null 2>/dev/null \
     || rc=$?
   [ "$rc" = "75" ] || fail "repeat deferred send should exit 75, got $rc"
   qcount=$(find "$home/state/sendq" -name '*.json' | wc -l | tr -d ' ')
@@ -126,7 +126,7 @@ test_key_bypasses_composer_defer() {
 
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ captain draft │" \
-    "$ROOT/bin/fm-send.sh" fm-task --key Escape \
+    "$ROOT/sbin/fm-send.sh" fm-task --key Escape \
     || fail "control key unexpectedly deferred"
   grep -F 'herdr pane send-keys w1:p1 Escape' "$dir/herdr.log" >/dev/null \
     || fail "control key was not sent through"
