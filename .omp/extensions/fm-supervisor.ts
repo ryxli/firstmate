@@ -413,8 +413,10 @@ function logWarn(sup: Supervisor, msg: string): void {
 
 async function startSupervision(sup: Supervisor): Promise<void> {
 	await refreshFleet(sup);
-	openSocket(sup);
+	// Establish the startup baseline before subscribing. Otherwise a replayed
+	// idle observation can race the seed and be mistaken for a completion edge.
 	await seedStatuses(sup);
+	openSocket(sup);
 	await diagnoseOmpUnknown(sup);
 	startWatch(sup);
 	startCheckTimer(sup);
@@ -469,8 +471,10 @@ async function refreshFleet(sup: Supervisor): Promise<void> {
 
 	sup.crewByPane = next;
 	if (changed && sup.socket && !sup.socket.destroyed) {
-		subscribeAll(sup);
+		// Seed newly discovered panes before replacing the subscription set so
+		// reconnects and fleet refreshes cannot turn idle replays into edges.
 		await seedStatuses(sup);
+		subscribeAll(sup);
 	}
 }
 

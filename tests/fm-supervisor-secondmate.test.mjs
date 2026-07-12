@@ -30,6 +30,7 @@ process.env.FM_CHECK_INTERVAL = "3600";
 process.env.FM_BUSY_REGEX = "(?!)";
 
 const subscribed = Promise.withResolvers();
+let observedStatusEvents = 0;
 let client;
 const server = net.createServer((connection) => {
   client = connection;
@@ -42,7 +43,16 @@ const server = net.createServer((connection) => {
       if (newline < 0) return;
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
-      if (JSON.parse(line).method === "events.subscribe") subscribed.resolve();
+      if (JSON.parse(line).method === "events.subscribe") {
+        subscribed.resolve();
+        // Replay the already-idle startup observation as soon as subscribed.
+        // The startup baseline must already be established, so this is quiet.
+        observedStatusEvents++;
+        client?.write(`${JSON.stringify({
+          event: "pane.agent_status_changed",
+          data: { pane_id: secondmate.pane, agent_status: "idle" },
+        })}\n`);
+      }
     }
   });
 });
@@ -81,8 +91,10 @@ const module = await import(pathToFileURL(ext).href);
 module.default(pi);
 await handlers.get("session_start")({}, { cwd: home });
 await subscribed.promise;
-
+await waitFor(() => observedStatusEvents >= 1, "startup idle replay");
+if (sent.length !== 0) throw new Error("already-idle startup replay produced a completion wake");
 function emit(pane, agent_status) {
+  observedStatusEvents++;
   client.write(`${JSON.stringify({ event: "pane.agent_status_changed", data: { pane_id: pane, agent_status } })}\n`);
 }
 
@@ -126,6 +138,12 @@ await waitFor(() => sent.length === 3, "secondmate routed completion wake");
 if (!/^\[wake \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] /.test(String(sent[2].message.content))) throw new Error("completion wake missing compact UTC timestamp prefix");
 if (sent[2].options.deliverAs !== "nextTurn" || sent[2].options.triggerTurn !== true) throw new Error("wake delivery options changed");
 if (osNotifications.length !== 2) throw new Error("secondmate completion sent an OS notification instead of escalating through supervision");
+const beforeReplayCount = observedStatusEvents;
+emit(secondmate.pane, "idle");
+emit(secondmate.pane, "idle");
+await waitFor(() => observedStatusEvents >= beforeReplayCount + 2, "replayed idle events");
+await Bun.sleep(20);
+if (sent.length !== 3) throw new Error("replayed idle after completion produced a duplicate wake");
 await handlers.get("session_shutdown")();
 client?.destroy();
 const closed = Promise.withResolvers();
