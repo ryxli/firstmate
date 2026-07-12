@@ -64,6 +64,7 @@ make_code_root() {
 make_main_home() {
   local home=$1
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
+  printf 'omp\n' > "$home/config/crew-harness"
   printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-07-08)' > "$home/data/projects.md"
 }
 
@@ -426,7 +427,6 @@ make_legacy_mate() {
   printf '# Legacy mate\n' > "$home/AGENTS.md"
   printf '%s\n' "$id" > "$home/.fm-secondmate-home"
   printf 'charter for %s\n' "$id" > "$home/data/charter.md"
-  printf 'omp\n' > "$home/config/crew-harness"
   git -C "$home" init -q
   git -C "$home" add AGENTS.md .fm-secondmate-home data/charter.md
   git -C "$home" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
