@@ -1,56 +1,99 @@
 ---
 name: updatefirstmate
-description: Self-update a running firstmate and its secondmates to the latest from origin. Use when the captain invokes /updatefirstmate (e.g. "/updatefirstmate", "update firstmate", "pull the latest firstmate"). Fast-forwards this firstmate repo's default branch and every secondmate home from origin (fast-forward only, never forced, never disruptive), then re-reads AGENTS.md and nudges each updated secondmate to do the same, so the whole tree runs the latest sbin/ and instructions.
+description: Synchronize the firstmate fleet and explicitly requested personal infrastructure repositories through an observed-state, fast-forward-only workflow. Use when the captain asks to update, pull, rebase, or sync firstmate, dotfiles, oh-my-pi, lavish, linear-axi, or related personal tooling.
 user-invocable: true
 ---
 
 # updatefirstmate
 
-Self-update firstmate in place.
-Firstmate is its own repo, shipped directly to `main`, so new tracked material (AGENTS.md, sbin/, skills) reaches `main` and then sits there until each running firstmate pulls it.
-This skill performs that pull for the running main firstmate and every secondmate, without disturbing any in-flight work.
+Use this skill as a deterministic synchronization procedure, not as a prose-only suggestion.
+Never decide that a repository is current from a status captured before fetching its remote.
+Never batch independent repositories into one opaque command.
 
-The update is **fast-forward only** - the same sanctioned self-write as the fleet sync firstmate already runs.
-It never forces, never creates a merge commit, never stashes, and advances a target only on a clean fast-forward; anything dirty, diverged, offline, or on the wrong branch is skipped and reported.
-A tracked-files fast-forward leaves the gitignored operational dirs (data/, state/, config/, and projects/) untouched, so a secondmate's in-flight work is never disrupted.
-This touches only the firstmate repo and its own worktrees, never anything under `projects/`.
+## Sync set
 
-## What it does
+When the captain asks to sync the personal infrastructure set, inspect these known checkouts one at a time:
 
-1. **Run the updater:**
-   ```sh
-   sbin/fm-update.sh
-   ```
-   It fast-forwards this firstmate repo's default branch from origin, then fast-forwards every registered secondmate home (each a herdr-managed git worktree of this repo, or a plain-clone secondmate home) the same way.
-   It prints one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
-   - `reread-firstmate: yes|no`
-   - `nudge-secondmates: <window-targets...>|none`
+```text
+/Users/ryan/code/firstmate
+/Users/ryan/.local/share/chezmoi
+/Users/ryan/code/harness/oh-my-pi
+/Users/ryan/code/harness/lavish-axi
+/Users/ryan/code/harness/linear-axi
+```
 
-2. **Re-read AGENTS.md if your own instructions changed.**
-   When the updater printed `reread-firstmate: yes`, the tracked instruction surface (AGENTS.md, sbin/, or skills) just advanced under you.
-   **Read `AGENTS.md` now** (CLAUDE.md is a symlink to it) to refresh your operating instructions before doing anything else, so you are acting on the new instructions rather than the stale ones you were started with.
-   When it printed `reread-firstmate: no`, nothing changed for you - skip the re-read.
+Also inspect explicitly named related checkouts.
+Do not infer that an unrelated directory is part of the set.
+Never touch anything under `firstmate/projects/`.
 
-3. **Nudge each updated live secondmate.**
-   For every target listed on the `nudge-secondmates:` line (do nothing when it says `none`), send a one-line re-read nudge so that secondmate picks up its new instructions too:
-   ```sh
-   sbin/fm-send.sh <window-target> 'firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'
-   ```
-   This is a gentle steer, not an interruption: the secondmate already got a safe tracked-files fast-forward, and the nudge never forces, tears down, or discards its work.
-   A secondmate that was skipped, already current, or has no live metadata is not on the list and needs no nudge.
+## Mechanical state machine
 
-4. **Report to the captain in plain outcomes.**
-   Summarize what landed without firstmate's internal vocabulary: which parts of the fleet are now on the latest, and which were left as-is and why.
-   For example: "Captain, firstmate and both domain supervisors are now on the latest."
-   Surface any skipped target whose reason needs the captain's attention - for instance a home with its own un-landed changes (diverged) or local edits (dirty), which were left untouched on purpose.
+For every repository, complete and observe each state before taking the next action:
+
+1. **Observe before fetch.**
+   Capture `git status --short --branch`, the current branch, configured remotes, and whether the worktree is clean.
+2. **Fetch one remote.**
+   Run `git fetch <remote> --prune` for the selected authoritative remote.
+   Do not pass multiple remote names as one command.
+3. **Observe after fetch.**
+   Re-read branch status and compare the local tip with the selected remote tip.
+   The pre-fetch observation is now stale and must not drive a decision.
+4. **Choose one safe action.**
+   - Clean default branch behind `origin/main`: fast-forward with `git merge --ff-only origin/main`.
+   - Clean default branch already at `origin/main`: leave it unchanged.
+   - Dirty, diverged, non-default branch, missing remote, or no commits: leave it untouched and report the reason.
+   - A fork with a separate upstream and a local patch: do not reset, force-push, or silently rebase it. Compare `origin` and `upstream`, then apply that repository's explicit fork policy or report the decision needed.
+5. **Observe after action.**
+   Re-read branch status and worktree cleanliness immediately after every fast-forward or rebase.
+   Do not proceed to the next repository until the current result is recorded.
+
+## Firstmate fleet
+
+Run:
+
+```sh
+sbin/fm-update.sh
+```
+
+This fast-forwards firstmate and registered secondmate homes only.
+It must remain fast-forward-only, never stash, force, create merge commits, or touch project worktrees.
+Observe and report every target line.
+If it prints `reread-firstmate: yes`, re-read `AGENTS.md` before further work.
+If it prints updated secondmate targets, send each one a short re-read nudge and observe its resulting pane state.
+
+## Personal infrastructure
+
+For clean default branches in dotfiles, lavish-axi, or linear-axi, synchronize against `origin/main` using the state machine above.
+After dotfiles advances, run `chezmoi apply` and then `chezmoi verify`; observe both results.
+
+For oh-my-pi or any fork with both `origin` and `upstream`, treat the fork patch as protected work.
+Fetch and compare both remotes first.
+Do not reset to `origin/main`, rebase onto `upstream/main`, or force-push until the repository's explicit fork policy and the observed ancestry justify that action.
+A diverged or ambiguous fork is a report, not an automatic repair.
+
+Feature branches, scratch checkouts, local-only scaffolds, and dirty worktrees are not synced by this skill unless the captain names them and approves the branch-specific action.
+
+## Reporting contract
+
+Report one line per repository:
+
+```text
+<repo>: observed <state> -> action <action> -> observed <final state>
+```
+
+Separate:
+
+- synchronized and verified
+- already current
+- skipped safely with an exact reason
+- requires a captain decision
+
+Never report “already current” until after the remote fetch and post-fetch observation.
 
 ## Safety
 
-- **Fast-forward only.**
-  A target that has diverged, is dirty, is offline, or is on a non-default branch is skipped and reported, never forced or stashed.
-  Nothing with unlanded work is ever discarded - this is prime directive #3.
-- **Only the firstmate repo and its worktrees** are touched, never `projects/`.
-  It is the same sanctioned self-write as the fleet sync.
-- **Secondmates are never disrupted.**
-  A secondmate gets a tracked-files fast-forward (safe while it is mid-task, since its work lives in gitignored operational dirs and separate project worktrees) plus a gentle re-read nudge.
-  It is never torn down, interrupted, or forced.
+- Never force-push, reset, stash, create a merge commit, or discard unlanded work.
+- Never operate on more than one repository in a single opaque command.
+- Never treat a stale pre-fetch status as current truth.
+- Personal dotfiles changes must be applied and verified after source synchronization.
+- Firstmate and secondmate operational state remains local and untouched by tracked-file updates.
