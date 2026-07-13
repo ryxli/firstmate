@@ -2,6 +2,7 @@
 # Verifies generated ship briefs match spawn mechanics: fm-spawn creates the
 # worktree already on fm/<id>, so the brief must say so and must not instruct
 # the crewmate to run `git checkout -b`.
+# shellcheck disable=SC2016  # grep -qF assertions match literal backticks (`peer_send`, `supervisor=`) in generated brief text; single quotes are intentional
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
