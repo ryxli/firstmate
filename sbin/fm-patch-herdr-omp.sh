@@ -2,21 +2,25 @@
 # fm-patch-herdr-omp.sh - patch the herdr-managed omp status integration to
 # self-heal a stuck agent_status.
 #
-# Why: ~/.omp/agent/extensions/herdr-omp-agent-state.ts reports working/idle to
-# herdr over a socket. A failed send resolves as success (sendRequestNow treats
-# socket "error" as done) and publishState commits lastState BEFORE the send, so
-# a single dropped report poisons the dedup: the integration believes it already
-# told herdr "working" and never resends, while herdr is stuck at "idle" for the
-# whole turn. Result: a live mate reads idle, tripping false completion/stale
-# wakes and making the fleet look done when it is working.
+# ROOT CAUSE: the reporter enables ALL status reporting only after
+# activateRootSession() sees ctx.hasUI === true (it sets rootSession=true; every
+# working/idle publish and the turn/tool hooks are gated on rootSession). A
+# long-lived omp session auto-compacts and reloads constantly (measured: one mate
+# had 477 compact + 380 reload events in a single session). A reload REPLACES this
+# extension runtime, and the re-fired session_start/session_switch does not
+# reliably carry hasUI, so activateRootSession() returns early, rootSession stays
+# false, and the fresh runtime NEVER reports again. herdr then falls back to idle
+# (agent explain: default_known_agent_idle_fallback) for the rest of the session
+# while the agent is actively working. A fresh pane works only because it has not
+# compacted yet - which is why the bug never reproduces on short test panes.
 #
 # herdr owns this file ("reinstalling or updating overwrites this file"), so we
-# cannot fix it upstream and cannot expect edits to survive an update. Instead we
-# inject a small, self-contained RESYNC HEARTBEAT: while the root session is
-# active, re-publish the true desired state on an interval with force=true
-# (bypassing the poisoned dedup), so herdr converges to reality within one
-# interval even when individual reports drop. The insertion is isolated and
-# version-agnostic; run this after any herdr update to re-apply it.
+# cannot fix it upstream and cannot expect edits to survive an update. Fix: on an
+# interval, if reporting is enabled() (HERDR_ENV + pane id + socket all present -
+# the same fact hasUI proxied for) but rootSession was lost across a reload,
+# re-establish rootSession, re-report the session ref so herdr rebinds the source,
+# and force-publish the true state. Self-contained, needs no ctx, version-agnostic;
+# run after any herdr update to re-apply it.
 #
 # Idempotent: a second run detects the marker and no-ops. Safe at bootstrap.
 #
@@ -86,17 +90,32 @@ insert_at = end + len("});")
 
 block = (
     "\n\n"
-    f"  // {marker}: injected by sbin/fm-patch-herdr-omp.sh. The socket status\n"
-    "  // report can drop silently and poison publishState's dedup, leaving\n"
-    "  // herdr stuck at a stale agent_status for the whole turn. Re-publish the\n"
-    "  // true desired state on an interval with force=true so herdr converges to\n"
-    "  // reality even when individual reports are lost.\n"
+    f"  // {marker}: injected by sbin/fm-patch-herdr-omp.sh.\n"
+    "  // ROOT CAUSE this fixes: the reporter enables state reporting only after\n"
+    "  // activateRootSession() sees ctx.hasUI === true. A long-lived omp session\n"
+    "  // auto-compacts / reloads many times (observed hundreds of times per mate),\n"
+    "  // and a reload replaces this extension runtime; the re-fired session event\n"
+    "  // does not reliably carry hasUI, so rootSession stays false and the reporter\n"
+    "  // goes permanently silent - herdr then falls back to idle for the rest of\n"
+    "  // the session even while the agent is actively working. A fresh session\n"
+    "  // works only because it has not compacted yet.\n"
+    "  // Fix: enabled() already proves this is a real herdr-managed pane (HERDR_ENV\n"
+    "  // + pane id + socket are all present), which is the same fact hasUI was a\n"
+    "  // proxy for. So on an interval, if reporting is enabled but rootSession was\n"
+    "  // lost across a reload, re-establish it and force-publish the true state.\n"
     "  try {\n"
     f"    const __fmResyncMs = {int(resync_ms)};\n"
     "    const __fmResync = setInterval(() => {\n"
-    "      if (rootSession) {\n"
-    "        try { publishState(true); } catch (_e) {}\n"
-    "      }\n"
+    "      try {\n"
+    "        if (!enabled()) return;\n"
+    "        if (!rootSession) {\n"
+    "          // Reload dropped activation; re-establish it. Report the session\n"
+    "          // ref so herdr rebinds this source, then resume publishing.\n"
+    "          rootSession = true;\n"
+    "          void reportSession(\"fm-reload-resync\");\n"
+    "        }\n"
+    "        publishState(true);\n"
+    "      } catch (_e) {}\n"
     "    }, __fmResyncMs);\n"
     "    __fmResync.unref?.();\n"
     "  } catch (_e) {}\n"
