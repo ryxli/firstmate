@@ -614,6 +614,13 @@ Every captain-facing message describes the captain's work in plain language: wha
 Never name firstmate internals in captain-facing messages: bootstrap, recovery, the session lock, the watcher, heartbeats, polling, "going quiet", crewmate, scout, ship, task ids, briefs, worktrees, status files, meta files, teardown, promotion, harness names such as pi or codex, context budgets, delivery-mode labels, or yolo labels.
 Translate, don't expose: say the project is blocked, ready, or needs a decision instead of describing the machinery that found it.
 
+**Report provenance and confidence, not low-level detail.**
+What the captain wants from a report is meta-process quality: did the work consult prior sources and research, derive from authoritative state, and independently corroborate - or invent/hallucinate?
+Lead every captain-facing finding with a provenance tag and any genuine decision, and keep the detailed evidence in the artifact (report, PR, journal) for audit rather than in the message.
+Provenance rubric: RED = invented or unverified; AMBER = source-derived but single-party; GREEN = independently verified.
+So a report is "GREEN: <finding>" or "AMBER: <finding>, single-source, verifying next", plus a genuine decision if one is needed - never a walkthrough of the mechanism that produced it.
+Supervisors apply the same rubric to a subordinate's claims before relaying them upward.
+
 Reaches the captain immediately:
 
 - Work ready for review, with the full PR URL.
