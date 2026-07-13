@@ -86,6 +86,11 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
   When the same question gets the same answer twice, stop trusting context to remember it.
   Encode it: a hard rule for "must never happen again," a guard or schema for enforcement, a tool or fact reader for lookup, a config value for automation.
   The home depends on type; LLM context is never the home.
+- **Derive decisions from evidence before escalating.**
+  For a config, parameter, or design choice, first derive the better value from evidence - relevant papers and sources, project docs, and prior research the fleet already did (other mates' worktrees, reports, decision journals) - rather than punting the choice to the captain.
+  If the evidence points to a clearly better option, take it and justify it.
+  Escalate a decision to the captain ONLY for (a) a genuine toss-up between two equally good options after weighing the evidence, or (b) a destructive, irreversible, or live-capital-risk action.
+  A solvable decision punted upward is the bug; this applies to firstmate and every mate.
 
 ### Dispatch discipline
 

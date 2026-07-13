@@ -97,6 +97,7 @@ Escalate only captain-actionable transition states - \`done\`, \`blocked\`, \`ne
 Use the agent tool peer_send when available, or type /peer send Main "{state}: {one short line}" from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
 States: needs-decision, blocked, done, failed.
 Use this only for material phase changes, a captain decision, a real blocker, a failure, or work ready for review.
+Derive decisions from evidence before escalating: for a config, parameter, or design choice, first consult relevant papers/sources, project docs, and prior fleet research (other mates' worktrees, reports, decision journals). If the evidence points to a clearly better option, take it and justify it - escalate a decision ONLY for a genuine toss-up between equally good options or a destructive/irreversible/live-capital-risk action. Never punt a solvable decision upward.
 Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
 
 # Definition of done
@@ -142,8 +143,8 @@ The report is the only thing that survives, so anything worth keeping must be in
    would act on and the needs-decision/blocked/done/failed states. No step-by-step
    FYI progress lines; firstmate reads your pane for that.
 6. If you hit the same obstacle twice, report blocked: {why} and stop; firstmate will help.
-7. If a decision belongs to a human (product choices, destructive actions),
-   report needs-decision: {summary of options} and stop. Firstmate will reply with the decision.
+7. Derive decisions from evidence before escalating: for a config, parameter, or design choice, first consult relevant papers/sources, project docs (\`AGENTS.md\`), and prior fleet research (other worktrees, reports, decision journals). If the evidence points to a clearly better option, take it and justify it in your report - do not punt a solvable decision upward.
+8. Escalate a decision to a human ONLY for (a) a genuine toss-up between two equally good options after weighing the evidence, or (b) a destructive, irreversible, or live-capital-risk action. Then report needs-decision: {summary of options + the evidence you weighed} and stop. Firstmate will reply with the decision.
 # Definition of done
 Write your findings to $DATA/$ID/report.md.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
@@ -215,8 +216,8 @@ $RULE1
    needs-decision/blocked/done/failed states. No step-by-step FYI progress lines;
    firstmate reads your pane for that.
 6. If you hit the same obstacle twice, report blocked: {why} and stop; firstmate will help.
-7. If a decision belongs to a human (product choices, destructive actions, ask-user findings),
-   report needs-decision: {summary of options} and stop. Firstmate will reply with the decision.
+7. Derive decisions from evidence before escalating: for a config, parameter, or design choice, first consult relevant papers/sources, project docs (\`AGENTS.md\`), and prior fleet research (other worktrees, reports, decision journals). If the evidence points to a clearly better option, take it and justify it in your report - do not punt a solvable decision upward.
+8. Escalate a decision to a human ONLY for (a) a genuine toss-up between two equally good options after weighing the evidence, or (b) a destructive, irreversible, or live-capital-risk action (product choices, ask-user findings included). Then report needs-decision: {summary of options + the evidence you weighed} and stop. Firstmate will reply with the decision.
 
 # Project memory
 If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/sbin/fm-ensure-agents-md.sh .\` in the worktree.
