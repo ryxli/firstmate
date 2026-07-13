@@ -197,7 +197,7 @@ test_bootstrap_unresolved_warning() {
   fakebin=$(make_bootstrap_toolchain "$case_dir")
   bad_json='{"result":{"pane":{"workspace_id":"w9","tab_id":"w9:t9","agent_status":"idle"}}}'
 
-  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$bad_json" \
+  out=$(PATH="$fakebin:$BASE_PATH" HOME="$case_dir/user-home" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$bad_json" \
     "$ROOT/sbin/fm-bootstrap.sh") || fail "bootstrap failed on unresolved self-pane"
   [ "$out" = 'SELF_PANE: error: herdr pane current did not resolve pane_id/workspace_id/tab_id/agent_status' ] \
     || fail "unexpected bootstrap unresolved warning: $out"

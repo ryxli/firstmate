@@ -104,6 +104,132 @@ except Exception:
     pass
 ' "$_store_path" 2>/dev/null || true
 }
+
+pane_snapshot() {
+  _pane="$1"
+  herdr pane get "$_pane" 2>/dev/null \
+    | python3 -c '
+import json,sys
+try:
+    p=json.load(sys.stdin).get("result",{}).get("pane")
+except Exception:
+    p=None
+if not isinstance(p,dict):
+    print("absent\t\tunknown")
+else:
+    print("present\t%s\t%s" % (p.get("agent",""), p.get("agent_status","unknown")))
+' 2>/dev/null || printf 'absent\t\tunknown\n'
+}
+
+pane_details() {
+  _pane="$1"
+  herdr pane get "$_pane" 2>/dev/null \
+    | python3 -c '
+import json,sys
+try:
+    p=json.load(sys.stdin).get("result",{}).get("pane")
+except Exception:
+    p=None
+if not isinstance(p,dict):
+    print("\t".join(["N"] * 7))
+else:
+    path=p.get("agent_session_path")
+    sid=p.get("agent_session_id")
+    path_present="agent_session_path" in p and path is not None
+    sid_present="agent_session_id" in p and sid is not None
+    legacy=p.get("agent_session")
+    if isinstance(legacy,dict):
+        value=legacy.get("value")
+        kind=legacy.get("kind")
+        if isinstance(value,str) and value:
+            if kind in ("id","session_id") and not sid_present:
+                sid=value
+                sid_present=True
+            elif kind in ("path","session_path","file") and not path_present:
+                path=value
+                path_present=True
+            elif not kind and value.startswith("/") and not path_present:
+                path=value
+                path_present=True
+    import base64
+    def field(value, present):
+        raw="" if value is None else str(value)
+        return ("Y" if present else "N") + base64.b64encode(raw.encode()).decode()
+    print("\t".join([
+        field(p.get(k), k in p and p.get(k) is not None)
+        for k in ("agent","agent_status","workspace_id","cwd","label")
+    ] + [field(path,path_present), field(sid,sid_present)]))
+' 2>/dev/null || printf '%s\n' 'N	N	N	N	N	N	N'
+}
+
+detail_decode() {
+  case "$1" in
+    N) DETAIL_PRESENT=0; DETAIL_VALUE="" ;;
+    Y*) DETAIL_PRESENT=1; DETAIL_VALUE="$(python3 -c 'import base64,sys; print(base64.b64decode(sys.argv[1][1:]).decode(),end="")' "$1")" ;;
+    *) return 1 ;;
+  esac
+}
+
+revalidate_target() {
+  _pane="$1"
+  IFS=$'\t' read -r _agent _status _ws _cwd _label _session_path _session_id <<EOF
+$(pane_details "$_pane")
+EOF
+detail_decode "$_agent" || return 1; _agent="$DETAIL_VALUE"; _agent_present="$DETAIL_PRESENT"
+detail_decode "$_status" || return 1; _status="$DETAIL_VALUE"; _status_present="$DETAIL_PRESENT"
+detail_decode "$_ws" || return 1; _ws="$DETAIL_VALUE"; _ws_present="$DETAIL_PRESENT"
+detail_decode "$_cwd" || return 1; _cwd="$DETAIL_VALUE"; _cwd_present="$DETAIL_PRESENT"
+detail_decode "$_label" || return 1; _label="$DETAIL_VALUE"; _label_present="$DETAIL_PRESENT"
+detail_decode "$_session_path" || return 1; _session_path="$DETAIL_VALUE"; _session_path_present="$DETAIL_PRESENT"
+detail_decode "$_session_id" || return 1; _session_id="$DETAIL_VALUE"; _session_id_present="$DETAIL_PRESENT"
+  [ "$_agent" = "omp" ] || return 1
+  { [ "$_status" = "idle" ] || [ "$_status" = "done" ]; } || return 1
+  [ "$_ws_present" = "$PANE_WS_PRESENT" ] && [ "$_cwd_present" = "$PANE_CWD_PRESENT" ] && [ "$_label_present" = "$PANE_LABEL_PRESENT" ] || return 1
+  [ "$_ws" = "$PANE_WS" ] && [ "$_cwd" = "$PANE_CWD" ] && [ "$_label" = "$PANE_LABEL" ] || return 1
+  [ -n "$PIN_AGENT_SESSION_PATH" ] || [ -n "$PIN_AGENT_SESSION_ID" ] || return 1
+  [ "$_session_path_present" = "$PIN_AGENT_SESSION_PATH_PRESENT" ] && [ "$_session_id_present" = "$PIN_AGENT_SESSION_ID_PRESENT" ] || return 1
+  [ "$_session_path" = "$PIN_AGENT_SESSION_PATH" ] && [ "$_session_id" = "$PIN_AGENT_SESSION_ID" ] || return 1
+  if [ -n "$SESSION_ID" ]; then
+    _current_sid="$(herdr pane read "$_pane" --source recent --lines 120 2>/dev/null \
+      | python3 -c 'import re,sys; m=re.findall(r"omp --resume ([0-9a-fA-F-]+)",sys.stdin.read()); print(m[-1] if m else "")' \
+      2>/dev/null || true)"
+    if [ -z "$_current_sid" ]; then
+      _current_sid="$(session_id_from_store "$PANE_CWD")"
+    fi
+    [ -n "$_current_sid" ] || return 1
+    [ "$_current_sid" = "$SESSION_ID" ] || return 1
+  fi
+  return 0
+}
+
+screen_state() {
+  herdr pane read "$1" --source visible --lines 120 2>/dev/null \
+    | python3 -c 'import re,sys; t=sys.stdin.read(); print("working" if re.search(r"working|blocked", t, re.I) else ("idle" if re.search(r"idle composer|composer", t, re.I) else "unknown"))' \
+    2>/dev/null || printf 'unknown\n'
+}
+
+
+wait_for_confirmed_idle() {
+  _pane="$1"
+  _timeout="$2"
+  _deadline=$((SECONDS + _timeout))
+  while [ "$SECONDS" -lt "$_deadline" ]; do
+    IFS=$'\t' read -r _exists _agent _status <<EOF
+$(pane_snapshot "$_pane")
+EOF
+    if [ "$_exists" = "absent" ]; then
+      echo "fm-reload.sh: pane $_pane is absent; refusing /quit" >&2
+      return 1
+    fi
+    _screen="$(screen_state "$_pane")"
+    if [ "$_agent" = "omp" ] && { [ "$_status" = "idle" ] || [ "$_status" = "done" ]; } && [ "$_screen" = "idle" ]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "fm-reload.sh: pane $_pane never reached confirmed idle; refusing /quit (agent=${_agent:-unknown} status=${_status:-unknown})" >&2
+  return 1
+}
 _usage() {
   echo "usage: fm-reload.sh [target] [--cmd '<template>'] [--allow-fresh] [--timeout <sec>] [--proof-timeout <sec>]" >&2
 }
@@ -250,18 +376,70 @@ if [ -z "$SESSION_ID" ] && [ -z "$RESUME_CMD" ] && [ -z "$ALLOW_FRESH" ]; then
   exit 1
 fi
 
+# Capture the target identity before a detached self-reload forks. The worker
+# receives these values and must revalidate against them rather than adopting a
+# replacement pane/session as its new baseline.
+PANE_WS="${FM_RELOAD_PIN_WS-}"
+PANE_CWD="${FM_RELOAD_PIN_CWD-}"
+PANE_LABEL="${FM_RELOAD_PIN_LABEL-}"
+PIN_AGENT_SESSION_PATH="${FM_RELOAD_PIN_AGENT_SESSION_PATH-}"
+PIN_AGENT_SESSION_ID="${FM_RELOAD_PIN_AGENT_SESSION_ID-}"
+PANE_WS_SET="${FM_RELOAD_PIN_WS_SET:-}"
+PANE_CWD_SET="${FM_RELOAD_PIN_CWD_SET:-}"
+PANE_LABEL_SET="${FM_RELOAD_PIN_LABEL_SET:-}"
+PIN_AGENT_SESSION_PATH_SET="${FM_RELOAD_PIN_AGENT_SESSION_PATH_SET:-}"
+PIN_AGENT_SESSION_ID_SET="${FM_RELOAD_PIN_AGENT_SESSION_ID_SET:-}"
+PANE_WS_PRESENT="${FM_RELOAD_PIN_WS_PRESENT:-}"
+PANE_CWD_PRESENT="${FM_RELOAD_PIN_CWD_PRESENT:-}"
+PANE_LABEL_PRESENT="${FM_RELOAD_PIN_LABEL_PRESENT:-}"
+PIN_AGENT_SESSION_PATH_PRESENT="${FM_RELOAD_PIN_AGENT_SESSION_PATH_PRESENT:-}"
+PIN_AGENT_SESSION_ID_PRESENT="${FM_RELOAD_PIN_AGENT_SESSION_ID_PRESENT:-}"
+IFS=$'\t' read -r _PIN_AGENT _PIN_STATUS _CAP_WS _CAP_CWD _CAP_LABEL _CAP_SESSION_PATH _CAP_SESSION_ID <<EOF
+$(pane_details "$PANE")
+EOF
+detail_decode "$_PIN_AGENT" || exit 1; _PIN_AGENT="$DETAIL_VALUE"; _PIN_AGENT_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_PIN_STATUS" || exit 1; _PIN_STATUS="$DETAIL_VALUE"; _PIN_STATUS_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CAP_WS" || exit 1; _CAP_WS="$DETAIL_VALUE"; _CAP_WS_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CAP_CWD" || exit 1; _CAP_CWD="$DETAIL_VALUE"; _CAP_CWD_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CAP_LABEL" || exit 1; _CAP_LABEL="$DETAIL_VALUE"; _CAP_LABEL_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CAP_SESSION_PATH" || exit 1; _CAP_SESSION_PATH="$DETAIL_VALUE"; _CAP_SESSION_PATH_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CAP_SESSION_ID" || exit 1; _CAP_SESSION_ID="$DETAIL_VALUE"; _CAP_SESSION_ID_PRESENT="$DETAIL_PRESENT"
+if [ -z "$PANE_WS_SET" ]; then PANE_WS="$_CAP_WS"; PANE_WS_SET=1; PANE_WS_PRESENT="$_CAP_WS_PRESENT"; fi
+if [ -z "$PANE_CWD_SET" ]; then PANE_CWD="$_CAP_CWD"; PANE_CWD_SET=1; PANE_CWD_PRESENT="$_CAP_CWD_PRESENT"; fi
+if [ -z "$PANE_LABEL_SET" ]; then PANE_LABEL="$_CAP_LABEL"; PANE_LABEL_SET=1; PANE_LABEL_PRESENT="$_CAP_LABEL_PRESENT"; fi
+if [ -z "$PIN_AGENT_SESSION_PATH_SET" ]; then PIN_AGENT_SESSION_PATH="$_CAP_SESSION_PATH"; PIN_AGENT_SESSION_PATH_SET=1; PIN_AGENT_SESSION_PATH_PRESENT="$_CAP_SESSION_PATH_PRESENT"; fi
+if [ -z "$PIN_AGENT_SESSION_ID_SET" ]; then PIN_AGENT_SESSION_ID="$_CAP_SESSION_ID"; PIN_AGENT_SESSION_ID_SET=1; PIN_AGENT_SESSION_ID_PRESENT="$_CAP_SESSION_ID_PRESENT"; fi
+if [ -z "$PIN_AGENT_SESSION_PATH" ] && [ -z "$PIN_AGENT_SESSION_ID" ]; then
+  echo "fm-reload.sh: target pane $PANE has no Herdr agent_session identity; refusing /quit" >&2
+  exit 1
+fi
+[ "$PANE_WS_PRESENT" = "$_CAP_WS_PRESENT" ] && [ "$PANE_CWD_PRESENT" = "$_CAP_CWD_PRESENT" ] && [ "$PANE_LABEL_PRESENT" = "$_CAP_LABEL_PRESENT" ] && [ "$PANE_WS" = "$_CAP_WS" ] && [ "$PANE_CWD" = "$_CAP_CWD" ] && [ "$PANE_LABEL" = "$_CAP_LABEL" ] || {
+  echo "fm-reload.sh: target pane changed before identity capture; refusing /quit" >&2
+  exit 1
+}
+[ "$PIN_AGENT_SESSION_PATH_PRESENT" = "$_CAP_SESSION_PATH_PRESENT" ] && [ "$PIN_AGENT_SESSION_ID_PRESENT" = "$_CAP_SESSION_ID_PRESENT" ] && [ "$PIN_AGENT_SESSION_PATH" = "$_CAP_SESSION_PATH" ] && [ "$PIN_AGENT_SESSION_ID" = "$_CAP_SESSION_ID" ] || {
+  echo "fm-reload.sh: target pane $PANE agent_session identity changed before identity capture; refusing /quit" >&2
+  exit 1
+}
+
 # ---------------------------------------------------------------------------
 # Self-reload guard: this script running inside the pane it targets dies with
 # the agent when /quit lands, before the relaunch step (observed live: pane
+# targets (a child of that pane's agent), sending /quit would kill the agent
+# and this script with it before the relaunch step (observed live: pane
 # left at a bare shell, session apparently aborted). All fail-closed checks
 # above already passed synchronously, so hand the quit/relaunch/proof
 # sequence to a detached worker (own session, log-backed stdio) that
 # survives the agent's exit, and return immediately.
+
 # ---------------------------------------------------------------------------
-if [ -z "${FM_RELOAD_DETACHED:-}" ] && [ -z "${FM_RELOAD_NO_GUARD:-}" ]; then
+SELF_PANE=""
+if [ -z "${FM_RELOAD_NO_GUARD:-}" ]; then
   SELF_PANE="$(herdr pane current 2>/dev/null \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])' \
     2>/dev/null || true)"
+fi
+if [ -z "${FM_RELOAD_DETACHED:-}" ] && [ -z "${FM_RELOAD_NO_GUARD:-}" ]; then
   if [ -n "$SELF_PANE" ] && [ "$SELF_PANE" = "$PANE" ]; then
     mkdir -p "$STATE"
     RELOAD_LOG="$STATE/.reload.$(printf '%s' "$PANE" | tr ':' '-').log"
@@ -274,7 +452,7 @@ if [ -z "${FM_RELOAD_DETACHED:-}" ] && [ -z "${FM_RELOAD_NO_GUARD:-}" ]; then
     WORKER_ARGS=("$PANE" --timeout "$SELF_TIMEOUT" --proof-timeout "$PROOF_TIMEOUT")
     if [ -n "$RESUME_CMD" ]; then WORKER_ARGS+=(--cmd "$RESUME_CMD"); fi
     if [ -n "$ALLOW_FRESH" ]; then WORKER_ARGS+=(--allow-fresh); fi
-    WORKER_PID="$(FM_RELOAD_DETACHED=1 FM_RELOAD_SESSION_ID="$SESSION_ID" FM_RELOAD_META="$META_FILE" python3 -c '
+    WORKER_PID="$(FM_RELOAD_DETACHED=1 FM_RELOAD_SESSION_ID="$SESSION_ID" FM_RELOAD_META="$META_FILE" FM_STATE_OVERRIDE="$STATE" FM_ROOT_OVERRIDE="$FM_ROOT" FM_RELOAD_PIN_WS="$PANE_WS" FM_RELOAD_PIN_CWD="$PANE_CWD" FM_RELOAD_PIN_LABEL="$PANE_LABEL" FM_RELOAD_PIN_AGENT_SESSION_PATH="$PIN_AGENT_SESSION_PATH" FM_RELOAD_PIN_AGENT_SESSION_ID="$PIN_AGENT_SESSION_ID" FM_RELOAD_PIN_WS_SET=1 FM_RELOAD_PIN_CWD_SET=1 FM_RELOAD_PIN_LABEL_SET=1 FM_RELOAD_PIN_AGENT_SESSION_PATH_SET=1 FM_RELOAD_PIN_AGENT_SESSION_ID_SET=1 FM_RELOAD_PIN_WS_PRESENT="$PANE_WS_PRESENT" FM_RELOAD_PIN_CWD_PRESENT="$PANE_CWD_PRESENT" FM_RELOAD_PIN_LABEL_PRESENT="$PANE_LABEL_PRESENT" FM_RELOAD_PIN_AGENT_SESSION_PATH_PRESENT="$PIN_AGENT_SESSION_PATH_PRESENT" FM_RELOAD_PIN_AGENT_SESSION_ID_PRESENT="$PIN_AGENT_SESSION_ID_PRESENT" python3 -c '
 import os, sys
 script, log = sys.argv[1], sys.argv[2]
 args = sys.argv[3:]
@@ -299,19 +477,55 @@ os.execv(script, [script] + args)
   fi
 fi
 
-# ---------------------------------------------------------------------------
-# Capture relaunch context BEFORE /quit: herdr closes a pane whose root
-# process is the agent itself, so the relaunch may need a replacement pane
-# in the same workspace and cwd.
-# ---------------------------------------------------------------------------
-IFS=$'\t' read -r PANE_WS PANE_CWD PANE_LABEL <<EOF
-$(herdr pane get "$PANE" 2>/dev/null \
-  | python3 -c 'import json,sys; p=json.load(sys.stdin).get("result",{}).get("pane",{}); print("\t".join([p.get("workspace_id",""),p.get("cwd",""),p.get("label","")]))' \
-  2>/dev/null || true)
+# Best-effort bounded safety gate: Herdr's pane run has no conditional-send
+# primitive, so this check is fail-closed on every observed busy/unknown/
+# mismatch state but cannot eliminate a final check-to-/quit TOCTOU race.
+# A detached self-reload worker reaches this gate after the current turn.
+# Pin the target identity before waiting: pane ids can be compacted/reused.
+IFS=$'\t' read -r _CUR_AGENT _CUR_STATUS _CUR_WS _CUR_CWD _CUR_LABEL _CUR_SESSION_PATH _CUR_SESSION_ID <<EOF
+$(pane_details "$PANE")
 EOF
+detail_decode "$_CUR_AGENT" || exit 1; _CUR_AGENT="$DETAIL_VALUE"; _CUR_AGENT_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CUR_STATUS" || exit 1; _CUR_STATUS="$DETAIL_VALUE"; _CUR_STATUS_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CUR_WS" || exit 1; _CUR_WS="$DETAIL_VALUE"; _CUR_WS_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CUR_CWD" || exit 1; _CUR_CWD="$DETAIL_VALUE"; _CUR_CWD_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CUR_LABEL" || exit 1; _CUR_LABEL="$DETAIL_VALUE"; _CUR_LABEL_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CUR_SESSION_PATH" || exit 1; _CUR_SESSION_PATH="$DETAIL_VALUE"; _CUR_SESSION_PATH_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CUR_SESSION_ID" || exit 1; _CUR_SESSION_ID="$DETAIL_VALUE"; _CUR_SESSION_ID_PRESENT="$DETAIL_PRESENT"
+if [ "$_CUR_AGENT" != "omp" ] || [ "$_CUR_WS_PRESENT" != "$PANE_WS_PRESENT" ] || [ "$_CUR_CWD_PRESENT" != "$PANE_CWD_PRESENT" ] || [ "$_CUR_LABEL_PRESENT" != "$PANE_LABEL_PRESENT" ] || [ "$_CUR_WS" != "$PANE_WS" ] || [ "$_CUR_CWD" != "$PANE_CWD" ] || [ "$_CUR_LABEL" != "$PANE_LABEL" ]; then
+  echo "fm-reload.sh: target pane changed before idle wait; refusing /quit" >&2
+  exit 1
+fi
+if [ -z "$PIN_AGENT_SESSION_PATH" ] && [ -z "$PIN_AGENT_SESSION_ID" ]; then
+  echo "fm-reload.sh: target pane $PANE has no Herdr agent_session identity; refusing /quit" >&2
+  exit 1
+fi
+if [ "$_CUR_SESSION_PATH_PRESENT" != "$PIN_AGENT_SESSION_PATH_PRESENT" ] || [ "$_CUR_SESSION_ID_PRESENT" != "$PIN_AGENT_SESSION_ID_PRESENT" ] || [ "$_CUR_SESSION_PATH" != "$PIN_AGENT_SESSION_PATH" ] || [ "$_CUR_SESSION_ID" != "$PIN_AGENT_SESSION_ID" ]; then
+  echo "fm-reload.sh: target pane $PANE agent_session identity changed; refusing /quit" >&2
+  exit 1
+fi
+if ! wait_for_confirmed_idle "$PANE" "$TIMEOUT"; then
+  exit 1
+fi
 
+
+REAL_STATE="unknown"
+RECONCILE_SCRIPT="$SCRIPT_DIR/fm-reconcile-status.sh"
+if [ -x "$RECONCILE_SCRIPT" ]; then
+  REAL_STATE="$(bash "$RECONCILE_SCRIPT" "$PANE" 2>/dev/null || true)"
+fi
+if [ "$REAL_STATE" != "idle" ]; then
+  echo "fm-reload.sh: pane $PANE screen is ${REAL_STATE:-unknown}; refusing /quit" >&2
+  exit 1
+fi
+if ! revalidate_target "$PANE"; then
+  echo "fm-reload.sh: target pane $PANE changed or session identity could not be revalidated; refusing /quit" >&2
+  exit 1
+fi
 # ---------------------------------------------------------------------------
 # Quit and wait for omp to exit.
+# Residual limitation: the separate `pane run` can race a pane transition after
+# revalidation; without Herdr conditional send, this is bounded mitigation only.
 # ---------------------------------------------------------------------------
 herdr pane run "$PANE" "/quit" || exit 1
 sleep "$QUIT_GRACE"

@@ -17,6 +17,7 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PATCHER="$ROOT/sbin/fm-patch-herdr-omp.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-patch-herdr-omp.XXXXXX")
+export HOME="$TMP_ROOT/home"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }

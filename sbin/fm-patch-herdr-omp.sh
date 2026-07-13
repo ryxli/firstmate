@@ -36,11 +36,19 @@
 # lifecycle state and never re-derives it from ctx.
 #
 # Idempotent: a second run validates the full patch and no-ops. Safe at bootstrap.
-#
 # Usage:
 #   fm-patch-herdr-omp.sh           apply if absent (default)
 #   fm-patch-herdr-omp.sh --check   exit 0 if applied, 1 if not (no write)
+#
+#   fm-patch-herdr-omp.sh --restart-required
+#       apply despite a loaded OMP marker, then restart every affected OMP pane
+#       before relying on the new reporter source.
 #   fm-patch-herdr-omp.sh --file <path>   patch a specific integration file
+#
+# Applying a source patch cannot change an already-loaded OMP extension. The
+# default therefore refuses when the capture extension's live marker proves an
+# OMP process is running; --restart-required is the explicit, operator-visible
+# fallback.
 set -u
 
 MARKER="fm-resync-heartbeat"
@@ -49,9 +57,11 @@ RESYNC_MS="${FM_HERDR_RESYNC_MS:-15000}"
 
 TARGET="$HOME/.omp/agent/extensions/herdr-omp-agent-state.ts"
 MODE=apply
+RESTART_REQUIRED=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check) MODE=check ;;
+    --restart-required) RESTART_REQUIRED=1 ;;
     --file) shift; TARGET="${1:-}" ;;
     --file=*) TARGET="${1#*=}" ;;
     -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
@@ -59,6 +69,22 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$MODE" = apply ] && [ "$RESTART_REQUIRED" -eq 0 ]; then
+  LOADED_MARKER="${FM_OMP_LOADED_MARKER:-${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/capture/loaded.json}"
+  if [ -f "$LOADED_MARKER" ] && marker_pid=$(python3 - "$LOADED_MARKER" <<'PY'
+import json, sys
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8")).get("pid")
+    print(value if value else "")
+except Exception:
+    print("")
+PY
+  ) && [ -n "$marker_pid" ] && kill -0 "$marker_pid" 2>/dev/null; then
+    echo "REFUSED: OMP is already loaded (marker pid=$marker_pid); restart OMP panes before applying, or pass --restart-required" >&2
+    exit 4
+  fi
+fi
 
 [ -n "$TARGET" ] || { echo "error: no integration file" >&2; exit 2; }
 if [ ! -f "$TARGET" ]; then

@@ -2265,6 +2265,24 @@ test_link_ship_ext_resolves_id_from_registry() {
   done
   pass "fm-link-ship-ext resolves secondmate id from registry to install symlinks"
 }
+test_link_ship_ext_symlink_invocation_uses_canonical_root() {
+  local main_home sm_home invoker ext_src entry name target
+  main_home="$TMP_ROOT/ext-symlink-main"
+  sm_home="$TMP_ROOT/ext-symlink-sm"
+  mkdir -p "$main_home/data" "$sm_home"
+  ln -s "$ROOT/sbin" "$main_home/sbin"
+  ext_src="$ROOT/.omp/extensions"
+  [ -d "$ext_src" ] || { pass "no extensions dir; vacuous pass"; return; }
+  invoker="$main_home/sbin/fm-link-ship-ext.sh"
+  "$invoker" "$sm_home" >/dev/null || fail "symlink invocation failed"
+  for entry in "$ext_src"/*; do
+    [ -e "$entry" ] || continue
+    name=$(basename "$entry")
+    target=$(readlink "$sm_home/.omp/extensions/$name")
+    [ "$target" = "$entry" ] || fail "symlink invocation linked $name to $target, expected $entry"
+  done
+  pass "fm-link-ship-ext symlink invocation uses canonical firstmate root"
+}
 
 test_home_seed_writes_versioned_identity() {
   local home subhome subhome_abs fakebin out
@@ -2343,6 +2361,7 @@ test_secondmate_teardown_retires_empty_home
 test_secondmate_teardown_refuses_failed_herdr_workspace_remove
 test_secondmate_teardown_removes_plain_clone_home_without_herdr
 test_secondmate_force_teardown_discards_child_work
+test_link_ship_ext_symlink_invocation_uses_canonical_root
 test_secondmate_force_teardown_allows_operational_dir_symlinks_inside_home
 test_secondmate_force_teardown_refuses_operational_dir_symlink_outside_home
 test_secondmate_teardown_requires_seed_marker

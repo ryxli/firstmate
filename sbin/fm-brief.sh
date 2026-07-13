@@ -28,9 +28,11 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/fm-identity-lib.sh"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
+CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 KIND=ship
 POS=()
@@ -55,7 +57,7 @@ shell_quote() {
 
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
 REPORT_HELPER=$(shell_quote "$FM_ROOT/sbin/fm-report.sh")
-SUPERVISOR_META=$(shell_quote "$STATE/$ID.meta")
+SUPERVISOR_ID=$(fm_supervisor_slug "$CONFIG")
 
 if [ "$KIND" = secondmate ]; then
 SECONDMATE_PROJECTS=""
@@ -94,7 +96,7 @@ Supervision is automatic and in-process; there is no watcher, wake-queue, beacon
 # Escalation to main firstmate
 Handle routine work yourself.
 Escalate only captain-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
-Use the agent tool peer_send when available, or type /peer send Main "{state}: {one short line}" from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
+Use the agent tool peer_send when available, or type /peer send $SUPERVISOR_ID "{state}: {one short line}" from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
 States: needs-decision, blocked, done, failed.
 Use this only for material phase changes, a captain decision, a real blocker, a failure, or work ready for review.
 Derive decisions from evidence before escalating: for a config, parameter, or design choice, first consult relevant papers/sources, project docs, and prior fleet research (other mates' worktrees, reports, decision journals). If the evidence points to a clearly better option, take it and justify it - escalate a decision ONLY for a genuine toss-up between equally good options or a destructive/irreversible/live-capital-risk action. Never punt a solvable decision upward.
@@ -148,7 +150,7 @@ The report is the only thing that survives, so anything worth keeping must be in
 # Definition of done
 Write your findings to $DATA/$ID/report.md.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
-When the report is complete, append \`done: {one-line conclusion}\` to the status file, then read \`supervisor=\` from $SUPERVISOR_META and use \`peer_send\` to send \`done: {one-line conclusion}\` to that supervisor, then stop.
+When the report is complete, append \`done: {one-line conclusion}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable scout.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
 echo "scaffolded: $BRIEF (scout; replace {TASK})"
@@ -171,7 +173,7 @@ This project ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`fm/$ID\`. Do NOT push, do NOT open a PR, do NOT merge.
 Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass; fix anything you broke.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
-When it is implemented and committed, append \`done: ready in branch fm/$ID\` to the status file, then read \`supervisor=\` from $SUPERVISOR_META and use \`peer_send\` to send \`done: ready in branch fm/$ID\` to that supervisor, then stop.
+When it is implemented and committed, append \`done: ready in branch fm/$ID\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 Firstmate then reviews your branch diff, the captain approves, and firstmate merges it into local \`main\`.
 EOF
 )
@@ -184,7 +186,7 @@ EOF
 This project ships **direct-PR**: you raise the PR yourself, backed by focused review and tests. There is no separate validation pipeline to run.
 The task is complete only when committed on your branch.
 Before you push, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
-When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file, then read \`supervisor=\` from $SUPERVISOR_META and use \`peer_send\` to send \`done: PR {url}\` to that supervisor, then stop.
+When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
 The captain reviews and merges the PR; firstmate relays it.
 EOF

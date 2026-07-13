@@ -110,10 +110,13 @@ async function waitFor(predicate, label) {
   }
 }
 
-// fs.watch registration reaches the kernel asynchronously. This platform-level
-// integration probe waits once for that registration before changing the file.
 await Bun.sleep(50);
+// A wake discovered during an active firstmate turn is deferred until turn end.
+handlers.get("agent_start")?.({}, {});
 writeFileSync(join(state, `${ship.task}.status`), "done: PR https://github.com/o/r/pull/1 checks green\n");
+await Bun.sleep(80);
+if (sent.length !== 0) throw new Error("status wake injected into an active firstmate turn");
+handlers.get("agent_end")?.({}, {});
 await waitFor(() => sent.length === 1, "captain-relevant status file wake");
 if (!String(sent[0].message.content).includes("done: PR")) throw new Error("status-file wake lost the terminal status");
 if (!/^\[wake \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] /.test(String(sent[0].message.content))) throw new Error("status wake missing compact UTC timestamp prefix");

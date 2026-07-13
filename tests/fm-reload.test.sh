@@ -62,12 +62,27 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-reload-tests.XXXXXX")
 # Env vars:
 #   FM_FAKE_HERDR_LOG          - path where every herdr call is appended
 #   FM_FAKE_HERDR_STATE_DIR    - directory for the "resumed" marker file
-#   FM_FAKE_HERDR_AGENT        - pane get .agent BEFORE resume (default "")
+#   FM_FAKE_HERDR_AGENT        - pane get .agent BEFORE resume (default "omp")
 #   FM_FAKE_HERDR_POST_AGENT   - pane get .agent AFTER resume (default "omp")
+#   FM_FAKE_HERDR_STATUS       - pane get agent_status BEFORE resume (default "idle")
+#   FM_FAKE_HERDR_POST_STATUS  - pane get agent_status AFTER resume (default "idle")
+#   FM_FAKE_HERDR_SCREEN       - visible screen state BEFORE resume (default: STATUS)
+#   FM_FAKE_HERDR_POST_SCREEN  - visible screen state AFTER resume (default: POST_STATUS)
+#   FM_FAKE_HERDR_SCREEN_AFTER - visible state after SCREEN_AFTER_READS reads
+#   FM_FAKE_HERDR_SCREEN_AFTER_READS - read count at which SCREEN_AFTER applies
+#   FM_FAKE_HERDR_AGENT_SESSION_ID - Herdr agent_session_id BEFORE resume
+#   FM_FAKE_HERDR_POST_AGENT_SESSION_ID - agent_session_id AFTER resume
+#   FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID - identity after GET threshold
+#   FM_FAKE_HERDR_REPLACE_AFTER_GET - get count at which replacement identity appears
 #   FM_FAKE_HERDR_SESSION      - session id in pane read BEFORE resume (default "")
 #   FM_FAKE_HERDR_POST_SESSION - session id in pane read AFTER resume (default: FM_FAKE_HERDR_SESSION)
 #   FM_FAKE_HERDR_CURRENT      - pane_id returned by pane current (empty = failure)
 #   FM_FAKE_HERDR_CWD          - cwd in pane get response (default "")
+#   FM_FAKE_HERDR_REPLACEMENT_CWD - cwd after replacement GET threshold
+#   FM_FAKE_HERDR_SESSION_PATH_PRESENT - include agent_session_path key (0/1)
+#   FM_FAKE_HERDR_SESSION_PATH - agent_session_path BEFORE replacement
+#   FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH_PRESENT - path-key presence after replacement
+#   FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH - agent_session_path AFTER replacement
 #   FM_FAKE_HERDR_PANE_CLOSES  - set to 1 to simulate herdr closing the target
 #                                pane once /quit was sent: pane get for any
 #                                pane except the replacement (wR:p1) errors
@@ -82,10 +97,10 @@ make_fake_herdr() {
   log="$dir/herdr.log"
   mkdir -p "$fakebin"
   cat > "$fakebin/herdr" <<'SH'
-#!/usr/bin/env bash
-set -u
 STATE_DIR="${FM_FAKE_HERDR_STATE_DIR:-/tmp}"
 RESUMED_FILE="$STATE_DIR/resumed"
+GET_COUNT_FILE="$STATE_DIR/get-count"
+READ_COUNT_FILE="$STATE_DIR/read-count"
 LOG="${FM_FAKE_HERDR_LOG:-/dev/null}"
 printf 'herdr %s\n' "$*" >> "$LOG"
 case "${1:-}" in
@@ -102,12 +117,37 @@ case "${1:-}" in
           printf '{"error":{"code":"pane_not_found","message":"pane %s not found"},"id":"cli:pane:get"}\n' "$pane"
           exit 0
         fi
+        get_count=0
+        [ -f "$GET_COUNT_FILE" ] && get_count=$(cat "$GET_COUNT_FILE")
+        get_count=$((get_count + 1))
+        printf '%s\n' "$get_count" > "$GET_COUNT_FILE"
+        cwd="${FM_FAKE_HERDR_CWD:-}"
+        session_path_present="${FM_FAKE_HERDR_SESSION_PATH_PRESENT:-0}"
+        session_path="${FM_FAKE_HERDR_SESSION_PATH-}"
         if [ -f "$RESUMED_FILE" ]; then
-          agent="${FM_FAKE_HERDR_POST_AGENT-omp}"
+          agent="${FM_FAKE_HERDR_POST_AGENT:-omp}"
+          status="${FM_FAKE_HERDR_POST_STATUS:-idle}"
+          session_id="${FM_FAKE_HERDR_POST_AGENT_SESSION_ID-${FM_FAKE_HERDR_AGENT_SESSION_ID:-fake-agent-session}}"
+        elif [ -f "$STATE_DIR/quit" ]; then
+          agent=""
+          status="unknown"
+          session_id="${FM_FAKE_HERDR_AGENT_SESSION_ID:-fake-agent-session}"
         else
-          agent="${FM_FAKE_HERDR_AGENT:-}"
+          agent="${FM_FAKE_HERDR_AGENT:-omp}"
+          status="${FM_FAKE_HERDR_STATUS:-idle}"
+          session_id="${FM_FAKE_HERDR_AGENT_SESSION_ID:-fake-agent-session}"
         fi
-        printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate"}}}\n' "$agent" "${FM_FAKE_HERDR_CWD:-}"
+        if [ -n "${FM_FAKE_HERDR_REPLACE_AFTER_GET:-}" ] && [ "$get_count" -ge "$FM_FAKE_HERDR_REPLACE_AFTER_GET" ]; then
+          session_id="${FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID:-replacement-agent-session}"
+          cwd="${FM_FAKE_HERDR_REPLACEMENT_CWD-$cwd}"
+          session_path_present="${FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH_PRESENT-${session_path_present}}"
+          session_path="${FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH-${session_path}}"
+        fi
+        if [ "$session_path_present" = "1" ]; then
+          printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session_id":"%s","agent_session_path":"%s"}}}\n' "$agent" "$status" "$cwd" "$session_id" "$session_path"
+        else
+          printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session_id":"%s"}}}\n' "$agent" "$status" "$cwd" "$session_id"
+        fi
         exit 0 ;;
       process-info)
         if [ -f "$STATE_DIR/quit" ] && [ ! -f "$RESUMED_FILE" ]; then
@@ -118,6 +158,26 @@ case "${1:-}" in
         printf '{"result":{"process_info":{"foreground_processes":[{"argv0":"%s","name":"%s","cmdline":"%s"}]}}}\n' "$process" "$process" "$process"
         exit 0 ;;
       read)
+        if [ "${4:-}" = "--source" ] && [ "${5:-}" = "visible" ]; then
+          read_count=0
+          [ -f "$READ_COUNT_FILE" ] && read_count=$(cat "$READ_COUNT_FILE")
+          read_count=$((read_count + 1))
+          printf '%s\n' "$read_count" > "$READ_COUNT_FILE"
+          if [ -f "$RESUMED_FILE" ]; then
+            screen_status="${FM_FAKE_HERDR_POST_SCREEN-${FM_FAKE_HERDR_POST_STATUS:-idle}}"
+          else
+            screen_status="${FM_FAKE_HERDR_SCREEN-${FM_FAKE_HERDR_STATUS:-idle}}"
+            if [ -n "${FM_FAKE_HERDR_SCREEN_AFTER_READS:-}" ] && [ "$read_count" -ge "$FM_FAKE_HERDR_SCREEN_AFTER_READS" ]; then
+              screen_status="${FM_FAKE_HERDR_SCREEN_AFTER-${screen_status}}"
+            fi
+          fi
+          case "$screen_status" in
+            working|blocked) printf '⠁ Working\n' ;;
+            idle|done) printf 'idle composer\n' ;;
+            *) printf '' ;;
+          esac
+          exit 0
+        fi
         if [ -f "$RESUMED_FILE" ]; then
           sid="${FM_FAKE_HERDR_POST_SESSION-${FM_FAKE_HERDR_SESSION:-}}"
         else
@@ -708,7 +768,7 @@ test_self_reload_durable_target_meta_rebound() {
 #     exit promptly instead of trusting stale pane identity until timeout.
 # ---------------------------------------------------------------------------
 test_stale_agent_shell_detection() {
-  local CASE="$TMP_ROOT/case-u"
+  local CASE="$TMP_ROOT/case-stale-agent-shell"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
 
@@ -730,7 +790,7 @@ test_stale_agent_shell_detection() {
 #     timeout with no relaunch, even if metadata alone could be stale.
 # ---------------------------------------------------------------------------
 test_live_omp_process_times_out() {
-  local CASE="$TMP_ROOT/case-v"
+  local CASE="$TMP_ROOT/case-live-omp-process"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
 
@@ -751,7 +811,7 @@ test_live_omp_process_times_out() {
 # (w) Shell detection must resume the exact session captured before /quit.
 # ---------------------------------------------------------------------------
 test_shell_detection_resumes_exact_session() {
-  local CASE="$TMP_ROOT/case-w"
+  local CASE="$TMP_ROOT/case-shell-resume"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
 
@@ -773,7 +833,7 @@ test_shell_detection_resumes_exact_session() {
 #     A standalone -- would be forwarded to the target shell as the command.
 # ---------------------------------------------------------------------------
 test_resume_command_is_single_argument() {
-  local CASE="$TMP_ROOT/case-x"
+  local CASE="$TMP_ROOT/case-resume-command-argument"
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
 
@@ -788,6 +848,203 @@ test_resume_command_is_single_argument() {
     || fail "(x) relaunch was not passed as the single fourth herdr argument"
 
   pass "(x) relaunch -> one command-string argument with no standalone --"
+}
+# A stale Herdr idle must not override a visibly working OMP screen. The worker
+# waits for the screen to become idle, then proceeds without a false failure.
+test_stale_idle_screen_waits_then_reloads() {
+  local CASE="$TMP_ROOT/case-stale-idle"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-000000000017"
+  FM_RELOAD_NO_GUARD='' \
+  FM_FAKE_HERDR_CURRENT="w1:p1" \
+  FM_FAKE_HERDR_AGENT=omp \
+  FM_FAKE_HERDR_STATUS=idle \
+  FM_FAKE_HERDR_SCREEN=working \
+  FM_FAKE_HERDR_SCREEN_AFTER=idle \
+  FM_FAKE_HERDR_SCREEN_AFTER_READS=2 \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" >/dev/null \
+    || fail "(x) stale Herdr idle with working screen handoff failed"
+  local rlog="$CASE/state/.reload.w1-p1.log"
+  wait_worker_done "$rlog" || fail "(x) detached worker never recorded stale-idle completion"
+  grep -q "detached self-reload of pane w1:p1 succeeded" "$rlog" \
+    || fail "(x) stale-idle detached worker did not complete successfully"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    || fail "(x) expected /quit after visible screen became idle"
+  pass "(x) detached worker waits for stale-idle screen, then reloads"
+}
+
+# A replacement OMP process can keep the same pane, cwd, label, and lifecycle
+# status while changing Herdr's agent_session identity. Refuse /quit in both
+# fresh-session and literal-command modes when that identity changes.
+test_replacement_session_refuses_quit() {
+  local mode CASE
+  for mode in allow-fresh literal-cmd; do
+    CASE="$TMP_ROOT/case-replacement-$mode"
+    mkdir -p "$CASE"
+    make_fake_herdr "$CASE" >/dev/null
+    if [ "$mode" = "allow-fresh" ]; then
+      FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original \
+      FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID=agent-session-replacement \
+      FM_FAKE_HERDR_REPLACE_AFTER_GET=4 \
+      FM_FAKE_HERDR_AGENT=omp \
+      FM_FAKE_HERDR_SESSION="" \
+        run_reload "$CASE" w1:p1 --allow-fresh >/dev/null 2>/dev/null \
+        && fail "(y/$mode) replacement session unexpectedly reloaded"
+    else
+      FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original \
+      FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID=agent-session-replacement \
+      FM_FAKE_HERDR_REPLACE_AFTER_GET=3 \
+      FM_FAKE_HERDR_AGENT=omp \
+      FM_FAKE_HERDR_SESSION="" \
+        run_reload "$CASE" w1:p1 --cmd "omp --fresh-start" >/dev/null 2>/dev/null \
+        && fail "(y/$mode) replacement session unexpectedly reloaded"
+    fi
+    herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+      && fail "(y/$mode) replacement session received /quit"
+  done
+  pass "(y) replacement agent_session refuses /quit for --allow-fresh and literal --cmd"
+}
+
+# The self-reload caller must pin identity before forking. If the process is
+# replaced before the detached worker's first read, the worker refuses /quit.
+test_self_reload_replacement_before_worker_pin() {
+  local CASE="$TMP_ROOT/case-self-replacement"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-000000000019"
+  FM_RELOAD_NO_GUARD='' \
+  FM_FAKE_HERDR_CURRENT="w1:p1" \
+  FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original \
+  FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID=agent-session-replacement \
+  FM_FAKE_HERDR_REPLACE_AFTER_GET=2 \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" >/dev/null \
+    || fail "(z) self-reload handoff unexpectedly failed synchronously"
+  local rlog="$CASE/state/.reload.w1-p1.log"
+  wait_worker_done "$rlog" || fail "(z) detached worker never recorded replacement refusal"
+
+  grep -q "detached self-reload of pane w1:p1 FAILED" "$rlog" \
+    || fail "(z) detached worker did not record replacement refusal"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    && fail "(z) replacement session received /quit during detached handoff"
+  pass "(z) detached handoff pins identity before worker revalidation"
+}
+
+# Normal-mode reloads must reject a replacement agent_session even when the
+# resume id itself is unchanged.
+test_resume_id_replacement_refuses_quit() {
+  local CASE="$TMP_ROOT/case-resume-replacement"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-00000000001a"
+  FM_RELOAD_NO_GUARD=1 \
+  FM_FAKE_HERDR_AGENT=omp \
+  FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original \
+  FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID=agent-session-replacement \
+  FM_FAKE_HERDR_REPLACE_AFTER_GET=2 \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    && fail "(aa) replacement agent_session unexpectedly reloaded"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    && fail "(aa) replacement agent_session received /quit"
+  pass "(aa) unchanged resume id with replacement agent_session refuses /quit"
+}
+
+test_empty_field_replacement_refuses_quit() {
+  local CASE="$TMP_ROOT/case-empty-field-replacement"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-00000000001b"
+  FM_RELOAD_NO_GUARD=1 \
+  FM_FAKE_HERDR_AGENT=omp \
+  FM_FAKE_HERDR_CWD="" \
+  FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original \
+  FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID=agent-session-original \
+  FM_FAKE_HERDR_REPLACEMENT_CWD=/replacement \
+  FM_FAKE_HERDR_REPLACE_AFTER_GET=2 \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    && fail "(ab) empty cwd replacement unexpectedly reloaded"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    && fail "(ab) empty cwd replacement received /quit"
+  pass "(ab) empty pinned cwd rejects replacement"
+}
+
+test_detached_path_presence_replacements_refuse_quit() {
+  local mode CASE sid rlog
+  for mode in absent empty dash; do
+    CASE="$TMP_ROOT/case-detached-path-$mode"
+    mkdir -p "$CASE"
+    make_fake_herdr "$CASE" >/dev/null
+    sid="abcd1234-0000-0000-0000-00000000001c"
+    if [ "$mode" = "absent" ]; then
+      FM_FAKE_HERDR_SESSION_PATH_PRESENT=0 \
+      FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH_PRESENT=1 \
+      FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH=/replacement \
+      FM_RELOAD_NO_GUARD='' FM_FAKE_HERDR_CURRENT=w1:p1 \
+      FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original FM_FAKE_HERDR_REPLACE_AFTER_GET=2 FM_FAKE_HERDR_SESSION="$sid" \
+        run_reload "$CASE" >/dev/null || fail "(ac/$mode) handoff failed synchronously"
+    elif [ "$mode" = "empty" ]; then
+      FM_FAKE_HERDR_SESSION_PATH_PRESENT=1 FM_FAKE_HERDR_SESSION_PATH="" \
+      FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH_PRESENT=1 FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH=/replacement \
+      FM_RELOAD_NO_GUARD='' FM_FAKE_HERDR_CURRENT=w1:p1 \
+      FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original FM_FAKE_HERDR_REPLACE_AFTER_GET=2 FM_FAKE_HERDR_SESSION="$sid" \
+        run_reload "$CASE" >/dev/null || fail "(ac/$mode) handoff failed synchronously"
+    else
+      FM_FAKE_HERDR_SESSION_PATH_PRESENT=1 FM_FAKE_HERDR_SESSION_PATH=- \
+      FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH_PRESENT=1 FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH=/replacement \
+      FM_RELOAD_NO_GUARD='' FM_FAKE_HERDR_CURRENT=w1:p1 \
+      FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original FM_FAKE_HERDR_REPLACE_AFTER_GET=2 FM_FAKE_HERDR_SESSION="$sid" \
+        run_reload "$CASE" >/dev/null || fail "(ac/$mode) handoff failed synchronously"
+    fi
+    rlog="$CASE/state/.reload.w1-p1.log"
+    wait_worker_done "$rlog" || fail "(ac/$mode) worker did not record path replacement refusal"
+    grep -q "detached self-reload of pane w1:p1 FAILED" "$rlog" \
+      || fail "(ac/$mode) worker did not refuse changed path presence/value"
+    herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+      && fail "(ac/$mode) changed path received /quit"
+  done
+  pass "(ac) detached absent, empty, and dash agent_session_path replacements refuse /quit"
+}
+
+test_busy_refuses_quit() {
+  local CASE="$TMP_ROOT/case-u"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-000000000014"
+  FM_FAKE_HERDR_AGENT=omp FM_FAKE_HERDR_STATUS=working FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    && fail "(u) working pane unexpectedly reloaded"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    && fail "(u) working pane received /quit"
+  pass "(u) working pane waits then refuses /quit"
+}
+
+test_unknown_refuses_quit() {
+  local CASE="$TMP_ROOT/case-v"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-000000000015"
+  FM_FAKE_HERDR_AGENT=omp FM_FAKE_HERDR_STATUS=unknown FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    && fail "(v) unknown pane unexpectedly reloaded"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    && fail "(v) unknown pane received /quit"
+  pass "(v) unknown pane waits then refuses /quit"
+}
+test_done_allows_quit() {
+  local CASE="$TMP_ROOT/case-w"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-000000000016"
+  FM_FAKE_HERDR_AGENT=omp FM_FAKE_HERDR_STATUS=done FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    || fail "(w) done pane was not permitted to reload"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    || fail "(w) done pane did not receive /quit"
+  pass "(w) done pane is treated as quiescent and reloads"
 }
 
 # Run all tests.
@@ -808,7 +1065,16 @@ test_self_reload_fails_closed_before_handoff
 test_self_reload_worker_failure_observable
 test_pane_closes_replacement_pane
 test_self_reload_pane_closes_full_recovery
+test_stale_idle_screen_waits_then_reloads
+test_replacement_session_refuses_quit
+test_self_reload_replacement_before_worker_pin
+test_resume_id_replacement_refuses_quit
+test_empty_field_replacement_refuses_quit
+test_detached_path_presence_replacements_refuse_quit
+test_done_allows_quit
 test_durable_target_meta_rebound
+test_busy_refuses_quit
+test_unknown_refuses_quit
 test_durable_target_meta_untouched_when_pane_survives
 test_self_reload_durable_target_meta_rebound
 test_stale_agent_shell_detection

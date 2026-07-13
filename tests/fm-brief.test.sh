@@ -36,11 +36,12 @@ check_ship_setup() {
 }
 
 brief=$(scaffold task-a1 app)
-grep -qF 'use `peer_send` to send `done: PR {url}` to that supervisor, then stop.' "$brief" \
-  || fail "direct-PR ship brief did not instruct supervisor peer completion"
+grep -qF 'append `done: PR {url}` to the status file, then stop.' "$brief" \
+  || fail "direct-PR ship brief did not use status-file completion"
+! grep -qF 'use `peer_send` to send' "$brief" \
+  || fail "ordinary ship brief required unavailable peer bus"
 check_ship_setup "$brief" task-a1
-pass "direct-PR ship brief uses the precreated fm/<id> branch"
-pass "direct-PR ship brief sends completion to its recorded supervisor"
+pass "direct-PR ship brief uses the precreated fm/<id> branch and status completion"
 
 brief=$(scaffold task-b2 legacy)
 check_ship_setup "$brief" task-b2
@@ -49,19 +50,21 @@ grep -qF 'This project ships **direct-PR**' "$brief" \
 pass "legacy no-mistakes project scaffolds a direct-PR ship brief"
 
 brief=$(scaffold task-local local)
-grep -qF 'use `peer_send` to send `done: ready in branch fm/task-local` to that supervisor, then stop.' "$brief" \
-  || fail "local-only ship brief did not instruct supervisor peer completion"
-pass "local-only ship brief sends completion to its recorded supervisor"
+grep -qF 'append `done: ready in branch fm/task-local` to the status file, then stop.' "$brief" \
+  || fail "local-only brief did not use status-file completion"
+! grep -qF 'use `peer_send` to send' "$brief" \
+  || fail "local-only brief required unavailable peer bus"
+pass "local-only ship brief uses status-file completion"
 
 scout="$TMP/home/data/scout-d4/brief.md"
 FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' FM_STATE_OVERRIDE='' \
   "$BRIEF" scout-d4 app --scout >/dev/null 2>&1 \
   || fail "fm-brief.sh failed for scout-d4/app"
-grep -qF 'read `supervisor=` from' "$scout" \
-  || fail "scout brief did not read its recorded supervisor"
-grep -qF 'use `peer_send` to send `done: {one-line conclusion}` to that supervisor, then stop.' "$scout" \
-  || fail "scout brief did not instruct supervisor peer completion"
-pass "scout brief sends completion to its recorded supervisor"
+grep -qF 'append `done: {one-line conclusion}` to the status file, then stop.' "$scout" \
+  || fail "scout brief did not use status-file completion"
+! grep -qF 'use `peer_send` to send' "$scout" \
+  || fail "scout brief required unavailable peer bus"
+pass "scout brief uses status-file completion"
 
 secondmate="$TMP/home/data/secondmate-c3/brief.md"
 FM_HOME="$TMP/home" FM_SECONDMATE_CHARTER='operations supervision' \
@@ -77,6 +80,6 @@ grep -qF 'Escalate only captain-actionable transition states' "$secondmate" \
   || fail "secondmate charter did not restrict escalation states"
 grep -qF 'through the fleet peer bus' "$secondmate" \
   || fail "secondmate charter dropped peer-bus escalation"
-grep -qF 'States: needs-decision, blocked, done, failed.' "$secondmate" \
-  || fail "secondmate charter listed non-actionable escalation states"
-pass "secondmate charter uses automatic supervision and captain-actionable peer-bus escalation"
+grep -qF 'type /peer send fm "{state}: {one short line}"' "$secondmate" \
+  || fail "secondmate charter did not use canonical lowercase routing id"
+pass "secondmate charter uses automatic supervision and canonical peer-bus escalation"

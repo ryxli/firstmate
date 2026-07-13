@@ -87,6 +87,13 @@ herdr_omp_patch_sync() {
   "$FM_ROOT/sbin/fm-patch-herdr-omp.sh" --check >/dev/null 2>&1 && return 0
   if "$FM_ROOT/sbin/fm-patch-herdr-omp.sh" >/dev/null 2>&1; then
     echo "HERDR_OMP_PATCH: re-applied status self-heal after integration update"
+  else
+    rc=$?
+    if [ "$rc" -eq 4 ]; then
+      echo "HERDR_OMP_PATCH: restart OMP panes before applying the status self-heal patch"
+    else
+      echo "HERDR_OMP_PATCH: failed to apply status self-heal patch (exit $rc)"
+    fi
   fi
 }
 

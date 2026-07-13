@@ -54,8 +54,18 @@ emit() {
 # bin/ is intentionally NOT checked here: homes may carry a stale bin symlink to
 # the retired path, and bin is never required.
 check_current_home() {
-  local home=$1 entry name target
+  local expected_id=$1 home=$2 entry name target marker identity_name
   [ -f "$home/.fm-secondmate-home" ] || return 1
+  marker=$(cat "$home/.fm-secondmate-home" 2>/dev/null || true)
+  identity_name=
+  if [ -f "$home/config/identity" ]; then
+    identity_name=$(sed -n 's/^name=//p' "$home/config/identity" | head -1)
+  fi
+  [ -n "$marker" ] || return 1
+  marker=$(printf '%s' "$marker" | tr '[:upper:]' '[:lower:]')
+  expected_id=$(printf '%s' "$expected_id" | tr '[:upper:]' '[:lower:]')
+  identity_name=$(printf '%s' "$identity_name" | tr '[:upper:]' '[:lower:]')
+  if [ "$marker" != "$expected_id" ] && { [ -z "$identity_name" ] || [ "$marker" != "$identity_name" ]; }; then return 1; fi
   for dir in data state config projects; do
     [ -d "$home/$dir" ] && [ ! -L "$home/$dir" ] || return 1
   done
@@ -131,7 +141,7 @@ PY
       # Legacy plain-clone home (whole .omp symlinked): delegate to fm-home-link.
       if run_check "$out" "$HELPER_DIR/fm-home-link.sh" "$home" --check; then emit "home:$ident" ok checked
       else detail=$(sed -n 's/^result=//p' "$out" | tail -1); emit "home:$ident" fail "${detail:-check-failed}"; fi
-    elif check_current_home "$home"; then
+    elif check_current_home "$ident" "$home"; then
       emit "home:$ident" ok checked
     else
       emit "home:$ident" fail current-layout
@@ -140,16 +150,22 @@ PY
     if [ -L "$home/bin" ] && [ ! -e "$home/bin" ]; then
       emit "bin:$ident" warn "stale-link -> $(readlink "$home/bin")"
     fi
-    # identity: config/identity name= vs the registry name:
+    # Identity is part of the named-home contract: versioned schema plus the
+    # registry display name are required for reliable routing.
     if [ -f "$home/config/identity" ]; then
+      schema=$(sed -n 's/^schema_version=//p' "$home/config/identity" | head -1)
       idname=$(sed -n 's/^name=//p' "$home/config/identity" | head -1)
-      if [ -n "$nm" ] && [ -n "$idname" ] && [ "$idname" != "$nm" ]; then
-        emit "identity:$ident" warn "name registry=$nm config=$idname"
+      if [ "$schema" != 1 ]; then
+        emit "identity:$ident" fail "schema_version=${schema:-missing}"
+      elif [ -z "$idname" ]; then
+        emit "identity:$ident" fail name-missing
+      elif [ -n "$nm" ] && [ "$idname" != "$nm" ]; then
+        emit "identity:$ident" fail "name registry=$nm config=$idname"
       else
-        emit "identity:$ident" ok "name=${idname:-$nm}"
+        emit "identity:$ident" ok "name=$idname"
       fi
     else
-      emit "identity:$ident" warn identity-missing
+      emit "identity:$ident" fail identity-missing
     fi
   done < "$TMP_DIR/homes"
 else emit registry fail missing; fi

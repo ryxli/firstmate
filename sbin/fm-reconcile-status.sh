@@ -15,8 +15,7 @@
 # composer box. The supervisor uses THIS instead of trusting agent_status.
 #
 # Usage:
-#   fm-reconcile-status.sh <pane_id>          print: working|idle  (exit 0)
-#   fm-reconcile-status.sh --all              one line per live agent pane:
+#   fm-reconcile-status.sh <pane_id>          print: working|idle|unknown (exit 0)
 #                                             <pane> <name> herdr=<s> real=<s> [DRIFT]
 #   fm-reconcile-status.sh --drift            print only drifting panes; exit 1
 #                                             if any pane drifts, else 0
@@ -24,7 +23,7 @@
 set -u
 
 herdr_read() {
-  # visible screen of a pane; empty on any failure (fail-open to idle).
+  # visible screen of a pane; empty on failure (unknown, never idle).
   herdr pane read "$1" --source visible --lines 12 2>/dev/null || true
 }
 
@@ -35,11 +34,10 @@ herdr_read() {
 # brackets while a turn is in flight.
 classify_screen() {
   local screen=$1
-  # Any non-blank braille cell is an omp spinner frame (a turn in flight); the
-  # interrupt hint renders while a turn is in flight for other harnesses too.
+  [ -n "$screen" ] || { printf 'unknown\n'; return; }
   case "$screen" in
     *[⠁-⣿]*) printf 'working\n'; return ;;
-    *'esc⟩'*|*'⟨esc'*|*Working*|*Thinking*) printf 'working\n'; return ;;
+    *'esc⟩'*|*'⟨esc'*|*'Working*|*'Thinking*) printf 'working\n'; return ;;
   esac
   printf 'idle\n'
 }

@@ -205,6 +205,12 @@ Otherwise it prints one line per problem or capability fact; handle each:
 
 Bootstrap's fleet refresh is bounded by `FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT` seconds, default 20; a timeout is reported as a `FLEET_SYNC` skip and does not block startup.
 
+After bootstrap, run `sbin/fm-identity-migrate.sh check` and resolve any `UNRESOLVED` named-home identity before routing work.
+Run `sbin/fm-home-link.sh <home> --check` for every registered home, including nested secondmate registries; use `--repair` only for an observed link drift.
+Run `sbin/fm-fleet-updated.sh`; a stale, unknown, or unobservable result is not success.
+When a load-once source changed, restart affected OMP sessions before trusting the new extension or instructions.
+If bootstrap reports that the Herdr reporter patch needs a restart, restart OMP panes first, then rerun bootstrap to verify activation.
+
 Then read `data/projects.md`, the fleet registry, to load what each project is.
 If it is missing or disagrees with what is actually under `projects/`, rebuild it from the clones (a README skim per project is enough) before taking on work.
 Then read `data/secondmates.md` if present so intake can route work by registered secondmate scope (section 7).

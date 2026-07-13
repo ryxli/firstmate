@@ -14,6 +14,9 @@
  *   registration is valid; runtime action methods (sendMessage/exec) throw
  *   until ExtensionRunner.initialize() runs, so all live work starts from the
  *   `session_start` event, not from the factory body.
+ * - On session_start it writes state/activation-receipt.json atomically. The
+ *   receipt binds the live pane, session identity, start time, and exact
+ *   load-once source manifest digest; matching shutdown removes it.
  * - pi.on("session_start", (event, ctx)): resolve the fleet and start the
  *   long-lived supervision driver once. ctx.cwd locates the firstmate home.
  * - pi.on("session_shutdown", ...): tear the socket / watcher / timers down.
@@ -55,9 +58,9 @@
  *     parsed through type guards (asRecord/asString/toHerdrStatus), never cast
  *     to `any`.
  *   - The fleet is DYNAMIC (firstmate spawns/teardowns crewmates mid-session):
- *     fs.watch(state) re-resolves state/*.meta and we re-send the FULL
- *     subscription set. That is idempotent under both replace- and accumulate-
- *     subscription semantics because per-pane prevStatus dedups repeated events.
+ *     status files are watched with a portable mtime watcher (Bun's directory
+ *     fs.watch callback is not reliable on macOS), and we re-send the FULL
+ *     socket subscription set when the fleet changes.
  *   - A herdr `wait` CLI is deliberately NOT used: `herdr wait agent-status`
  *     takes a SINGLE status (no unions) and rejects `done` ("UI attention
  *     state; use idle"). The socket stream is strictly better and is the only
@@ -92,12 +95,12 @@
  * the benchmark imports it standalone under Bun. The live loop calls it too.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { existsSync, watch, type FSWatcher } from "node:fs";
-import { appendFile, readdir, readFile, writeFile } from "node:fs/promises";
-import { connect, type Socket } from "node:net";
+import { createHash } from "node:crypto";
+import { existsSync, unwatchFile, watchFile } from "node:fs";
+import { appendFile, mkdir, readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { connect, type Socket } from "node:net";
 
 // ============================== PURE SEAM ==============================
 // No I/O, no omp/herdr imports. Bun-importable on its own. Mirrors the shared
@@ -334,6 +337,158 @@ interface MetaFields {
 	agent_identity?: string;
 }
 
+export interface ActivationManifestEntry {
+	path: string;
+	sha256: string;
+}
+
+export interface ActivationReceipt {
+	schema: "firstmate.activation-receipt/v1";
+	session_id?: string;
+	session_path?: string;
+	pane_id: string;
+	started_at: string;
+	manifest_sha256: string;
+	manifest: ActivationManifestEntry[];
+}
+
+interface ActivationIdentity {
+	session_id?: string;
+	session_path?: string;
+}
+
+const ACTIVATION_RECEIPT_NAME = "activation-receipt.json";
+
+function sessionIdentity(ctx: ExtensionContext): ActivationIdentity {
+	const manager = ctx.sessionManager;
+	const id = manager?.getSessionId?.();
+	const path = manager?.getSessionFile?.();
+	return {
+		session_id: typeof id === "string" && id ? id : undefined,
+		session_path: typeof path === "string" && path ? path : undefined,
+	};
+}
+
+function sameIdentity(a: ActivationIdentity, b: ActivationIdentity): boolean {
+	return Boolean(
+		(a.session_id && b.session_id && a.session_id === b.session_id) ||
+		(a.session_path && b.session_path && a.session_path === b.session_path),
+	);
+}
+
+async function collectExtensionPaths(root: string, relative: string, paths: string[]): Promise<void> {
+	const entries = await readdir(join(root, relative), { withFileTypes: true });
+	for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+		const path = `${relative}/${entry.name}`;
+		if (entry.isDirectory()) await collectExtensionPaths(root, path, paths);
+		else paths.push(path);
+	}
+}
+
+async function loadOnceManifest(ctx: ExtensionContext): Promise<ActivationManifestEntry[]> {
+	let root = process.env.FM_ROOT_OVERRIDE || process.env.FM_ROOT || join(import.meta.dir, "../..");
+	try {
+		root = await realpath(root);
+	} catch {
+		// An unavailable source tree remains non-green through its incomplete manifest.
+	}
+	const paths = ["AGENTS.md"];
+	try {
+		await collectExtensionPaths(root, ".omp/extensions", paths);
+	} catch {
+		// Never emit an AGENTS-only receipt when the extension tree is unknown.
+		return [];
+	}
+	paths.sort();
+	const entries: ActivationManifestEntry[] = [];
+	for (const path of paths) {
+		try {
+			const bytes = await readFile(join(root, path));
+			entries.push({ path, sha256: createHash("sha256").update(bytes).digest("hex") });
+		} catch {
+			// Omit unreadable sources; the resulting manifest remains non-matching.
+		}
+	}
+	if (!entries.some((entry) => entry.path === ".omp/extensions/fm-supervisor.ts")) return [];
+	return entries;
+}
+
+function manifestDigest(entries: ActivationManifestEntry[]): string {
+	const hash = createHash("sha256");
+	for (const entry of entries) {
+		hash.update(entry.path);
+		hash.update("\0");
+		hash.update(entry.sha256);
+		hash.update("\0");
+	}
+	return hash.digest("hex");
+}
+async function currentPaneId(pi: ExtensionAPI): Promise<string | undefined> {
+	try {
+		const result = await pi.exec("herdr", ["pane", "current"], { timeout: 5_000 });
+		const parsed: unknown = JSON.parse(result.stdout);
+		const root = asRecord(parsed);
+		const resultRecord = asRecord(root?.result);
+		const pane = asRecord(resultRecord?.pane);
+		const livePane = asString(pane?.pane_id);
+		if (livePane) return livePane;
+	} catch {
+		// Fall back to the process hint only when the live query is unavailable.
+	}
+	return process.env.HERDR_PANE_ID || process.env.FM_HERDR_PANE_ID || undefined;
+}
+
+function activationReceiptPath(ctx: ExtensionContext): string {
+	return join(process.env.FM_HOME || ctx.cwd, "state", ACTIVATION_RECEIPT_NAME);
+}
+
+async function writeActivationReceipt(sup: Supervisor): Promise<void> {
+	const identity = sessionIdentity(sup.ctx);
+	const paneId = await currentPaneId(sup.pi);
+	if (!paneId || (!identity.session_id && !identity.session_path)) {
+		logWarn(sup, "fm-supervisor: activation receipt unavailable (missing pane or session identity)");
+		return;
+	}
+	const manifest = await loadOnceManifest(sup.ctx);
+	const receipt: ActivationReceipt = {
+		schema: "firstmate.activation-receipt/v1",
+		...identity,
+		pane_id: paneId,
+		started_at: new Date().toISOString(),
+		manifest_sha256: manifestDigest(manifest),
+		manifest,
+	};
+	const path = activationReceiptPath(sup.ctx);
+	const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
+	try {
+		await mkdir(join(process.env.FM_HOME || sup.ctx.cwd, "state"), { recursive: true });
+		await writeFile(tmp, `${JSON.stringify(receipt)}\n`, { encoding: "utf8", mode: 0o600 });
+		await rename(tmp, path);
+		sup.activationReceiptPath = path;
+		sup.activationIdentity = identity;
+	} catch (err) {
+		try { await unlink(tmp); } catch {}
+		logWarn(sup, `fm-supervisor: activation receipt write failed: ${String(err)}`);
+	}
+}
+
+async function removeMatchingActivationReceipt(sup: Supervisor): Promise<void> {
+	const path = sup.activationReceiptPath || activationReceiptPath(sup.ctx);
+	try {
+		const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+		const record = asRecord(parsed);
+		if (!record) return;
+		const receiptIdentity: ActivationIdentity = {
+			session_id: asString(record.session_id),
+			session_path: asString(record.session_path),
+		};
+		const current = sup.activationIdentity || sessionIdentity(sup.ctx);
+		if (sameIdentity(receiptIdentity, current)) await unlink(path);
+	} catch {
+		// Missing, malformed, or inaccessible receipts are already non-green.
+	}
+}
+
 interface Supervisor {
 	pi: ExtensionAPI;
 	ctx: ExtensionContext;
@@ -348,11 +503,16 @@ interface Supervisor {
 	lastBlockedWakeMs: Map<string, number>; // pane -> last blocked-wake ts (ship/scout debounce)
 	pendingEvents: FleetEvent[];
 	pendingStale: string[];
+	deferredWakes: Array<{ content: string; notifyOs: boolean }>;
+	activeTurn: boolean;
+	statusWatchers: Set<string>;
+	statusRefreshTimer?: Timer;
 	flushTimer?: Timer;
 	checkTimer?: Timer;
-	watcher?: FSWatcher;
 	lastStatusSeen: Map<string, string>; // task -> last processed status line
 	internalLogWrites: number;
+	activationReceiptPath?: string;
+	activationIdentity?: ActivationIdentity;
 }
 
 // A typed view of one herdr socket push (external input narrowed via guards).
@@ -364,16 +524,29 @@ let supervisor: Supervisor | undefined;
 export default function fmSupervisor(pi: ExtensionAPI): void {
 	pi.setLabel("Firstmate supervisor");
 
+	pi.on("agent_start", () => {
+		if (supervisor) supervisor.activeTurn = true;
+	});
+	pi.on("agent_end", () => {
+		if (!supervisor) return;
+		supervisor.activeTurn = false;
+		flushDeferredWakes(supervisor);
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		if (started) return; // one driver per session; never re-armed
 		started = true;
 		const sup = createSupervisor(pi, ctx);
 		supervisor = sup;
+		await writeActivationReceipt(sup);
 		await startSupervision(sup);
 	});
 
 	pi.on("session_shutdown", async () => {
-		if (supervisor) stopSupervision(supervisor);
+		if (supervisor) {
+			await removeMatchingActivationReceipt(supervisor);
+			stopSupervision(supervisor);
+		}
 		supervisor = undefined;
 		started = false;
 	});
@@ -393,6 +566,9 @@ function createSupervisor(pi: ExtensionAPI, ctx: ExtensionContext): Supervisor {
 		staleTimers: new Map(),
 		pendingEvents: [],
 		pendingStale: [],
+		deferredWakes: [],
+		activeTurn: false,
+		statusWatchers: new Set(),
 		lastStatusSeen: new Map(),
 		internalLogWrites: 0,
 	};
@@ -431,11 +607,9 @@ function stopSupervision(sup: Supervisor): void {
 	} catch {
 		// already gone
 	}
-	try {
-		sup.watcher?.close();
-	} catch {
-		// already closed
-	}
+	for (const path of sup.statusWatchers) unwatchFile(path);
+	sup.statusWatchers.clear();
+	clearTimeout(sup.statusRefreshTimer);
 	clearTimeout(sup.flushTimer);
 	clearTimeout(sup.checkTimer);
 	for (const t of sup.staleTimers.values()) clearTimeout(t);
@@ -629,6 +803,17 @@ function parseHerdrPush(line: string): HerdrPush | undefined {
 }
 
 function handleHerdrPush(sup: Supervisor, push: HerdrPush): void {
+	if (push.kind === "gone") {
+		applyHerdrPush(sup, push);
+		return;
+	}
+	void (async () => {
+		const reconciled = await reconciledPaneStatus(sup, push.pane);
+		applyHerdrPush(sup, reconciled ? { ...push, status: reconciled } : push);
+	})();
+}
+
+function applyHerdrPush(sup: Supervisor, push: HerdrPush): void {
 	const crew = sup.crewByPane.get(push.pane);
 	if (!crew) return; // not one of this home's panes
 
@@ -666,10 +851,6 @@ function handleHerdrPush(sup: Supervisor, push: HerdrPush): void {
 		});
 		return;
 	}
-	// A real working-to-idle edge can mean routed-work completion for a
-	// secondmate, or a crewmate that stopped without reporting a terminal status.
-	// Startup and reconnect idle observations have no working predecessor because
-	// seedStatuses establishes the baseline before subscribing.
 	if (prev === "working" && (crew.kind === "secondmate" || push.status === "idle")) {
 		armCompletionTimer(sup, crew);
 	} else if (crew.kind === "secondmate") {
@@ -694,6 +875,7 @@ async function seedStatuses(sup: Supervisor): Promise<void> {
 }
 
 async function herdrStatus(sup: Supervisor, pane: string): Promise<HerdrStatus> {
+	let herdr: HerdrStatus = "unknown";
 	try {
 		const res = await sup.pi.exec("herdr", ["agent", "get", pane], {
 			timeout: sup.tunables.herdrGetTimeoutMs,
@@ -701,9 +883,30 @@ async function herdrStatus(sup: Supervisor, pane: string): Promise<HerdrStatus> 
 			cwd: sup.ctx.cwd,
 		});
 		const m = res.stdout.match(/"agent_status":"([^"]*)"/);
-		return toHerdrStatus(m?.[1]);
+		herdr = toHerdrStatus(m?.[1]);
 	} catch {
-		return "unknown";
+		// Screen reconciliation below may still recover a useful state.
+	}
+	const reconciled = await reconciledPaneStatus(sup, pane);
+	return reconciled ?? herdr;
+}
+
+// The screen-based reconciler is the operational fallback for the known OMP
+// herdr status gap. Missing/unreadable screens return no override, preserving
+// herdr's state rather than inventing idle.
+async function reconciledPaneStatus(sup: Supervisor, pane: string): Promise<HerdrStatus | undefined> {
+	const script = join(sup.ctx.cwd, "sbin", "fm-reconcile-status.sh");
+	if (!existsSync(script)) return undefined;
+	try {
+		const res = await sup.pi.exec("bash", [script, pane], {
+			timeout: sup.tunables.busyReadTimeoutMs,
+			signal: sup.abort.signal,
+			cwd: sup.ctx.cwd,
+		});
+		const state = res.stdout.trim();
+		return state === "working" || state === "idle" ? state : undefined;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -903,22 +1106,26 @@ async function paneShowsBusyBanner(sup: Supervisor, pane: string): Promise<boole
 // ---------------------------- status files ----------------------------
 
 function startWatch(sup: Supervisor): void {
-	try {
-		sup.watcher = watch(sup.stateDir, (_eventType, filename) => {
-			if (sup.abort.signal.aborted) return;
-			if (!filename) {
-				void refreshFleet(sup);
-				return;
+	const refreshStatusWatchers = async (): Promise<void> => {
+		if (sup.abort.signal.aborted) return;
+		await refreshFleet(sup);
+		try {
+			const files = (await readdir(sup.stateDir)).filter((f) => f.endsWith(".status"));
+			for (const file of files) {
+				const path = join(sup.stateDir, file);
+				if (sup.statusWatchers.has(path)) continue;
+				sup.statusWatchers.add(path);
+				watchFile(path, { interval: 100 }, () => void onStatusFileChange(sup, file));
 			}
-			const name = filename.toString();
-			if (name.endsWith(".status")) void onStatusFileChange(sup, name);
-			else if (name.endsWith(".meta")) void refreshFleet(sup);
-		});
-	} catch (err) {
-		logWarn(sup, `fm-supervisor: watch failed: ${String(err)}`);
-	}
+		} catch {
+			// State directory may not exist yet; the next refresh will retry.
+		}
+		if (!sup.abort.signal.aborted) {
+			sup.statusRefreshTimer = setTimeout(() => void refreshStatusWatchers(), 500);
+		}
+	};
+	void refreshStatusWatchers();
 }
-
 async function onStatusFileChange(sup: Supervisor, filename: string): Promise<void> {
 	const task = filename.slice(0, -".status".length);
 	const last = await lastStatusLine(sup, task);
@@ -1083,6 +1290,16 @@ async function flush(sup: Supervisor): Promise<void> {
 export const FM_WAKE_DELIVERY_OPTIONS = { deliverAs: "nextTurn", triggerTurn: true } as const;
 
 function inject(sup: Supervisor, content: string, notifyOs = false): void {
+	if (sup.activeTurn) {
+		// Never ask OMP to schedule a continuation inside the supervisor's own
+		// active turn. Keep the message hidden and deliver it at agent_end.
+		sup.deferredWakes.push({ content, notifyOs });
+		return;
+	}
+	deliverWake(sup, content, notifyOs);
+}
+
+function deliverWake(sup: Supervisor, content: string, notifyOs: boolean): void {
 	try {
 		sup.pi.sendMessage(
 			{ customType: "fm-wake", content, display: true },
@@ -1090,8 +1307,15 @@ function inject(sup: Supervisor, content: string, notifyOs = false): void {
 		);
 	} catch (err) {
 		logWarn(sup, `fm-supervisor: inject failed: ${String(err)}`);
+		return;
 	}
 	if (notifyOs) notifyCaptainOs(sup, content);
+}
+
+function flushDeferredWakes(sup: Supervisor): void {
+	if (sup.activeTurn || sup.deferredWakes.length === 0) return;
+	const pending = sup.deferredWakes.splice(0);
+	for (const wake of pending) deliverWake(sup, wake.content, wake.notifyOs);
 }
 
 function notifyCaptainOs(sup: Supervisor, content: string): void {

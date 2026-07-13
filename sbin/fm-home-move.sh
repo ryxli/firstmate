@@ -134,6 +134,36 @@ refuse_in_flight_work() {
   done
 }
 
+refuse_live_home_pane() {
+  local home=$1 workspace=$2 panes_json
+  command -v herdr >/dev/null 2>&1 || return 0
+  panes_json=$(herdr pane list 2>/dev/null || true)
+  if FM_PANES_JSON="$panes_json" python3 - "$home" "$workspace" <<'PY'
+import json, os, sys
+home = os.path.realpath(sys.argv[1])
+workspace = sys.argv[2]
+try:
+    panes = json.loads(os.environ.get("FM_PANES_JSON", "")).get("result", {}).get("panes", [])
+except Exception:
+    raise SystemExit(0)
+for pane in panes:
+    if not isinstance(pane, dict):
+        continue
+    cwd = pane.get("cwd")
+    same_workspace = bool(workspace) and pane.get("workspace_id") == workspace
+    same_home = isinstance(cwd, str) and (os.path.realpath(cwd) == home or os.path.realpath(cwd).startswith(home + os.sep))
+    if same_workspace or same_home:
+        print("live pane %s" % (pane.get("pane_id") or "unknown"))
+        raise SystemExit(1)
+raise SystemExit(0)
+PY
+  then
+    return 0
+  fi
+  echo "REFUSED: secondmate home has a live pane; stop it before moving: $home" >&2
+  return 1
+}
+
 is_linked_git_worktree() {
   local home=$1 listed line listed_path
   git -C "$home" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
@@ -214,6 +244,7 @@ validate_safe_home_path "$OLD_HOME" "registered secondmate home"
 validate_safe_home_path "$NEW_HOME" "target secondmate home"
 validate_seeded_home "$ID" "$OLD_HOME"
 validate_target_home_assignment "$ID" "$NEW_HOME"
+refuse_live_home_pane "$OLD_HOME" "$WORKSPACE"
 refuse_in_flight_work "$OLD_HOME"
 [ ! -e "$NEW_HOME" ] && [ ! -L "$NEW_HOME" ] || { echo "error: target path already exists: $NEW_HOME" >&2; exit 1; }
 
