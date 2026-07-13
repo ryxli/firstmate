@@ -19,10 +19,21 @@
 # enabled() proves this is a real herdr-managed pane (HERDR_ENV + pane id + socket
 # all present), re-establish rootSession, re-report the session ref so herdr
 # rebinds the source, and force-publish the true state.
-# The patch also stashes the latest ctx from lifecycle/tool hooks so a heartbeat
-# or session_switch can recover agentActive from ctx.isIdle() instead of
-# publishing a false idle. Self-contained, version-agnostic; run after any herdr
+# The patch also stashes the latest ctx from lifecycle/tool hooks so a reload
+# recovery (heartbeat or session_switch finding rootSession=false) can seed
+# agentActive from ctx.isIdle() before any agent_start/agent_end has run on
+# the fresh runtime. Self-contained, version-agnostic; run after any herdr
 # update to re-apply it.
+#
+# REGRESSION FIXED HERE: the recovery heartbeat used to re-sample
+# ctx.isIdle() on every tick even after rootSession was already true and the
+# agent_start/agent_end lifecycle already owned agentActive. During an
+# active whiteboard-driven turn ctx.isIdle() can read true, so the heartbeat
+# overwrote a correct Working state with false Idle every RESYNC_MS despite
+# healthy pane binding and socket. Invariant enforced now: ctx.isIdle() is
+# consulted ONLY while recovering a newly reloaded runtime (rootSession
+# still false); once activated, the heartbeat force-publishes the retained
+# lifecycle state and never re-derives it from ctx.
 #
 # Idempotent: a second run validates the full patch and no-ops. Safe at bootstrap.
 #
@@ -33,7 +44,7 @@
 set -u
 
 MARKER="fm-resync-heartbeat"
-PATCH_MARKER="fm-resync-heartbeat-ctx-resync"
+PATCH_MARKER="fm-resync-heartbeat-lifecycle-invariant"
 RESYNC_MS="${FM_HERDR_RESYNC_MS:-15000}"
 
 TARGET="$HOME/.omp/agent/extensions/herdr-omp-agent-state.ts"
@@ -72,7 +83,7 @@ def is_patched(text: str) -> bool:
         'pi.on?.("before_agent_start"',
         "resetSessionState();\n    restoreAgentActiveFromCtx(ctx);\n    publishState(true);",
         "if (latestCtx) updateSessionRef(latestCtx);",
-        "restoreAgentActiveFromCtx();\n        publishState(true);",
+        "restoreAgentActiveFromCtx();\n        }\n        publishState(true);",
         "stashLatestCtx(ctx);\n    if (!rootSession && !activateRootSession(ctx))",
     ]
     return all(item in text for item in required)
@@ -276,7 +287,8 @@ insert_at = end + len("});")
 block = (
     "\n\n"
     f"  // {marker}: injected by sbin/fm-patch-herdr-omp.sh.\n"
-    f"  // {patch_marker}: heartbeat also restores agentActive from the latest ctx.\n"
+    f"  // {patch_marker}: heartbeat force-publishes lifecycle state; ctx.isIdle()\n"
+    "  // is consulted only to recover a just-reloaded runtime.\n"
     "  // ROOT CAUSE this fixes: the reporter enables state reporting only after\n"
     "  // activateRootSession() sees ctx.hasUI === true. A long-lived omp session\n"
     "  // auto-compacts / reloads many times (observed hundreds of times per mate),\n"
@@ -287,8 +299,18 @@ block = (
     "  // works only because it has not compacted yet.\n"
     "  // Fix: enabled() already proves this is a real herdr-managed pane (HERDR_ENV\n"
     "  // + pane id + socket are all present), which is the same fact hasUI was a\n"
-    "  // proxy for. The latest ctx lets reload/session_switch/heartbeat recover\n"
-    "  // agentActive from ctx.isIdle(), not from stale local defaults.\n"
+    "  // proxy for, so the heartbeat can re-establish rootSession on its own.\n"
+    "  // REGRESSION FIXED HERE: a prior version of this heartbeat called\n"
+    "  // restoreAgentActiveFromCtx() (re-sampling ctx.isIdle()) on every tick, even\n"
+    "  // once rootSession was already true and agent_start/agent_end lifecycle\n"
+    "  // hooks already owned agentActive. During an active whiteboard-driven turn\n"
+    "  // ctx.isIdle() can read true, so the heartbeat overwrote a correct Working\n"
+    "  // state with false Idle every resync interval - a fleetwide false-idle\n"
+    "  // regression despite healthy pane binding and socket. Invariant enforced\n"
+    "  // now: ctx.isIdle() is sampled ONLY while rootSession is still false (a\n"
+    "  // just-reloaded runtime with no live agent_start/agent_end yet to trust);\n"
+    "  // once activated, the heartbeat force-publishes the agentActive value the\n"
+    "  // lifecycle hooks already set and never re-derives it from ctx.\n"
     "  try {\n"
     f"    const __fmResyncMs = {int(resync_ms)};\n"
     "    const __fmResync = setInterval(() => {\n"
@@ -296,12 +318,13 @@ block = (
     "        if (!enabled()) return;\n"
     "        if (!rootSession) {\n"
     "          // Reload dropped activation; re-establish it. Report the session\n"
-    "          // ref so herdr rebinds this source, then resume publishing.\n"
+    "          // ref so herdr rebinds this source, then seed agentActive from\n"
+    "          // ctx.isIdle() for this just-recovered runtime only.\n"
     "          rootSession = true;\n"
     "          if (latestCtx) updateSessionRef(latestCtx);\n"
     "          void reportSession(\"fm-reload-resync\");\n"
+    "          restoreAgentActiveFromCtx();\n"
     "        }\n"
-    "        restoreAgentActiveFromCtx();\n"
     "        publishState(true);\n"
     "      } catch (_e) {}\n"
     "    }, __fmResyncMs);\n"
