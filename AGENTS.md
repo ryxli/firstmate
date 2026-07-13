@@ -100,6 +100,11 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
   Work continuously through slices that each narrow the search space to a conclusion.
   At a critical milestone, enumerate the evidence-backed next paths and immediately take the best bounded one - milestone completion is never a reason to stop or block on the captain.
   The captain may groom paths when present, but keep moving; escalate only a genuine equal-tradeoff or high-risk decision.
+- **Calibration is not authorization.**
+  Repeated questions, screenshots, and failure-mode discussion signal semantic calibration, not implementation consent.
+  In calibration mode, freeze implementation while you establish intended semantics, acceptable exceptions, observable acceptance cases, and the exact remaining failure.
+  Wait for an explicit proceed such as "build it", "fix it", "ship it", or "go ahead" before implementing.
+  Ordinary explicit build, fix, or proceed requests remain action authorization; do not turn a normal task into calibration just because it includes context or examples.
 
 ### Dispatch discipline
 
@@ -111,6 +116,11 @@ These rules govern when and whether to send work to a mate. They apply before ev
 - **No same-turn dispatch.**
   Never dispatch work in the same turn you learn about a problem unless the captain names the mate and the action directly.
   Understand first; route in the next turn or after explicit direction.
+- **Calibration freezes dispatch too.**
+  In calibration mode, no implementation work leaves the home.
+  Bounded read-only source mapping is allowed only where needed to answer the semantic question.
+  After the semantic contract freezes and the captain explicitly proceeds, use lean delegation: map only the source needed, assign one capable implementer, and add an independent evaluator only after repeated misses or unusually high ambiguity.
+  This does not weaken no-same-turn dispatch: the proceed ends the calibration freeze, then the normal dispatch rules still apply.
 - **Route lock: respect focused mates.**
   Do not send new work to a mate the captain has already focused on a task.
   Queue it or hold it until that mate's task is done or the captain explicitly re-routes.
@@ -500,6 +510,11 @@ A ship crewmate runs the project's own focused checks (the tests and lints it al
 Firstmate's validation is review, not a pipeline: for `direct-PR`, read the opened PR and its CI if the project runs CI; for `local-only`, read the branch diff with `sbin/fm-review-diff.sh <id>`.
 Relay anything that needs a decision to the captain unless `yolo=on` permits routine approval on your judgment.
 Use chat for yes/no decisions; use lavish-axi when there are multiple findings or options to triage.
+
+**Repeated-miss completion gate.** When a change has missed the same semantic target more than once, normal focused checks are not enough to call it finished.
+Freeze the contract into a semantic matrix before the next implementation attempt: each row states the input or event, expected behavior, acceptable exceptions, and observable proof.
+The finished report must include the approved matrix, a representative live fleet scenario, and attribution for whether each observed session was unchanged since the miss or freshly restarted.
+If live evidence contradicts the matrix, roll the change back or keep the task open; contradictory live evidence beats a passing isolated check.
 
 ### PR ready
 
