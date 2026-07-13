@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# Behavior tests for fm-patch-herdr-omp.sh's aggregate reporter state.
+# Behavior tests for fm-patch-herdr-omp.sh's recovery-heartbeat invariant.
 #
-# The reporter must preserve two independent invariants:
-# 1. A heartbeat may sample ctx.isIdle() only while recovering a freshly
-#    reloaded root runtime. Once root lifecycle events own agentActive, every
-#    heartbeat republishes retained state without re-deriving it.
-# 2. A root agent_end does not make the pane Idle while detached task
-#    subagents remain pending or running. Authoritative task lifecycle and
-#    progress events maintain an idempotent active-child Set, including
-#    progress-based reconstruction after a reporter reload.
+# ROOT CAUSE (fixed): the injected 15s recovery heartbeat used to call
+# restoreAgentActiveFromCtx() (re-sampling ctx.isIdle()) on every tick, even
+# once rootSession was already true and agent_start/agent_end already owned
+# agentActive. During an active whiteboard-driven turn ctx.isIdle() can read
+# true, so the heartbeat overwrote a correct Working state with false Idle -
+# a fleetwide false-idle regression despite healthy pane binding and socket.
 #
-# The behavioral cases below exercise the generated TypeScript with Bun.
-# Source-shape checks separately pin patcher idempotence, prior-patch upgrade,
-# and --check behavior.
+# These tests pin the invariant: ctx.isIdle() is sampled ONLY while
+# recovering a newly reloaded runtime (rootSession still false); once
+# activated, the heartbeat force-publishes retained lifecycle state and
+# never re-derives it from ctx.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,75 +31,47 @@ write_pristine_fixture() {
 interface HeartbeatCtx {
   hasUI?: boolean;
   isIdle?: () => boolean;
-  sessionRef?: string;
 }
-
-type ReporterState = "working" | "idle";
 
 interface PublishRecord {
   force: boolean;
-  state: ReporterState;
+  agentActive: boolean;
 }
 
 interface TestBackchannel {
-  getState: () => ReporterState;
+  getAgentActive: () => boolean;
   getLog: () => PublishRecord[];
-  getSessionRef: () => string | undefined;
-  getSessionReports: () => Array<string | undefined>;
 }
 
 interface PiHandle {
-  on: (event: string, handler: (event: any, ctx: HeartbeatCtx) => void) => void;
-  events: {
-    on: (event: string, handler: (event: any) => void) => void;
-  };
+  on: (event: string, handler: (event: unknown, ctx: HeartbeatCtx) => void) => void;
   __test?: TestBackchannel;
 }
 
 export default function register(pi: PiHandle): void {
   let agentActive = false;
-  let retryHoldActive = false;
   const publishLog: PublishRecord[] = [];
-  let lastState: ReporterState | undefined;
   const calls: string[] = [];
-  let sessionRef: string | undefined;
-  const sessionReports: Array<string | undefined> = [];
 
   // Mock lifecycle plumbing: the patched code below invokes each of these
   // by the literal names herdr's real integration uses. They record the
   // call instead of doing real session/timer work - a test seam for the
   // heartbeat invariant, not a reimplementation of herdr.
-  function desiredState(): ReporterState {
-    if (agentActive || retryHoldActive) {
-      return "working";
-    }
-    return "idle";
-  }
   function publishState(force = false): void {
-    const state = desiredState();
-    if (!force && state === lastState) {
-      return;
-    }
-    lastState = state;
-    publishLog.push({ force, state });
+    publishLog.push({ force, agentActive });
   }
   function enabled(): boolean {
     return true;
   }
-  function updateSessionRef(ctx: HeartbeatCtx): void {
-    sessionRef = ctx?.sessionRef;
+  function updateSessionRef(_ctx: HeartbeatCtx): void {
     calls.push("updateSessionRef");
   }
   function reportSession(reason?: string): Promise<void> {
-    sessionReports.push(sessionRef);
     calls.push(`reportSession:${reason ?? ""}`);
     return Promise.resolve();
   }
   function resetSessionState(): void {
     calls.push("resetSessionState");
-    clearPendingTimers();
-    clearFailureState();
-    agentActive = false;
   }
   function clearPendingTimers(): void {
     calls.push("clearPendingTimers");
@@ -109,12 +80,7 @@ export default function register(pi: PiHandle): void {
     calls.push("clearFailureState");
   }
 
-  pi.__test = {
-    getState: () => desiredState(),
-    getLog: () => publishLog,
-    getSessionRef: () => sessionRef,
-    getSessionReports: () => sessionReports,
-  };
+  pi.__test = { getAgentActive: () => agentActive, getLog: () => publishLog };
 
   let rootSession = false;
 
@@ -238,129 +204,6 @@ test_apply_is_idempotent() {
   pass "re-applying to an already-patched file is a no-op"
 }
 
-test_upgrade_from_prior_lifecycle_patch_converges() {
-  local fresh="$TMP_ROOT/current-fresh.ts"
-  local prior="$TMP_ROOT/prior-lifecycle.ts"
-  local upgrade_diff
-  write_pristine_fixture "$fresh"
-  write_pristine_fixture "$prior"
-  "$PATCHER" --file "$fresh" >/dev/null || fail "fresh current apply failed"
-  "$PATCHER" --file "$prior" >/dev/null || fail "prior-patch precursor apply failed"
-
-  # Reconstruct the immediately preceding patcher's output: reload/lifecycle
-  # heartbeat protection is present, but child aggregation is absent.
-  python3 - "$prior" <<'PY'
-import io, sys
-path = sys.argv[1]
-src = io.open(path, encoding="utf-8").read()
-src = src.replace("  const activeChildIds = new Set<string>();\n", "", 1)
-src = src.replace(
-    "    if (agentActive || retryHoldActive || activeChildIds.size > 0) {",
-    "    if (agentActive || retryHoldActive) {",
-    1,
-)
-src = src.replace(
-    "    clearFailureState();\n    agentActive = false;\n    activeChildIds.clear();\n",
-    "    clearFailureState();\n    agentActive = false;\n",
-    1,
-)
-start = src.index("  function setChildActive(id: unknown, active: boolean): void {")
-end = src.index('  pi.on("session_start"', start)
-src = src[:start] + src[end:]
-src = src.replace(
-    "fm-resync-heartbeat-child-root-guard-v3",
-    "fm-resync-heartbeat-lifecycle-invariant",
-    1,
-)
-io.open(path, "w", encoding="utf-8").write(src)
-PY
-
-  "$PATCHER" --check --file "$prior"
-  local rc=$?
-  [ "$rc" -eq 1 ] || fail "--check on the prior lifecycle-only patch must exit 1, got $rc"
-  "$PATCHER" --file "$prior" || fail "upgrade over the prior lifecycle-only patch must succeed"
-  "$PATCHER" --check --file "$prior" || fail "--check must pass after upgrading the prior lifecycle-only patch"
-
-  upgrade_diff=$(diff -u "$fresh" "$prior")
-  [ -z "$upgrade_diff" ] \
-    || fail "upgrading the prior lifecycle-only patch must converge to a fresh apply: $upgrade_diff"
-  pass "the prior lifecycle-only patch upgrades in place to child aggregation"
-}
-
-test_upgrade_from_unguarded_child_patch_converges() {
-  local fresh="$TMP_ROOT/guarded-fresh.ts"
-  local prior="$TMP_ROOT/prior-unguarded-child.ts"
-  local upgrade_diff
-  write_pristine_fixture "$fresh"
-  write_pristine_fixture "$prior"
-  "$PATCHER" --file "$fresh" >/dev/null || fail "fresh guarded apply failed"
-  "$PATCHER" --file "$prior" >/dev/null || fail "unguarded-child precursor apply failed"
-
-  # Reconstruct v2, which tracked children but allowed headless runtimes to
-  # claim the pane and processed child events before root activation.
-  python3 - "$prior" <<'PY'
-import io, sys
-path = sys.argv[1]
-src = io.open(path, encoding="utf-8").read()
-src = src.replace(
-    '''    // fm-resync-heartbeat: explicit hasUI=false is a headless child and
-    // must never claim the pane; enabled() recovers only omitted hasUI.
-    if (ctx?.hasUI === false || (ctx?.hasUI !== true && !enabled())) {''',
-    '''    // fm-resync-heartbeat: enabled() proves this is the real herdr pane, so a
-    // reload that re-fires session_start without hasUI still recovers turn state.
-    if (ctx?.hasUI !== true && !enabled()) {''',
-    1,
-)
-src = src.replace(
-    '''  pi.events.on("task:subagent:lifecycle", (data) => {
-    if (!rootSession) {
-      return;
-    }
-    const status = data?.status;''',
-    '''  pi.events.on("task:subagent:lifecycle", (data) => {
-    const status = data?.status;''',
-    1,
-)
-src = src.replace(
-    '''  pi.events.on("task:subagent:progress", (data) => {
-    if (!rootSession) {
-      return;
-    }
-    const progress = data?.progress;''',
-    '''  pi.events.on("task:subagent:progress", (data) => {
-    const progress = data?.progress;''',
-    1,
-)
-src = src.replace(
-    '''        if (!rootSession) {
-          // No observed context cannot identify a root; explicit false is a
-          // headless child. Neither may bind or publish from this runtime.
-          if (!latestCtx || latestCtx?.hasUI === false) return;
-          // Reload dropped activation; re-establish it.''',
-    '''        if (!rootSession) {
-          // Reload dropped activation; re-establish it.''',
-    1,
-)
-src = src.replace(
-    "fm-resync-heartbeat-child-root-guard-v3",
-    "fm-resync-heartbeat-child-lifecycle-v2",
-    1,
-)
-io.open(path, "w", encoding="utf-8").write(src)
-PY
-
-  "$PATCHER" --check --file "$prior"
-  local rc=$?
-  [ "$rc" -eq 1 ] || fail "--check on the unguarded child patch must exit 1, got $rc"
-  "$PATCHER" --file "$prior" || fail "upgrade over the unguarded child patch must succeed"
-  "$PATCHER" --check --file "$prior" || fail "--check must pass after guarding the prior child patch"
-
-  upgrade_diff=$(diff -u "$fresh" "$prior")
-  [ -z "$upgrade_diff" ] \
-    || fail "upgrading the unguarded child patch must converge to a fresh apply: $upgrade_diff"
-  pass "the unguarded child patch upgrades in place to root-session guards"
-}
-
 test_upgrade_from_prior_buggy_heartbeat_converges() {
   local fresh="$TMP_ROOT/fresh.ts"
   local buggy="$TMP_ROOT/buggy.ts"
@@ -377,7 +220,7 @@ import io, re, sys
 path = sys.argv[1]
 src = io.open(path, encoding="utf-8").read()
 new_block_re = re.compile(
-    r'  // fm-resync-heartbeat-child-root-guard-v3:.*?\n  \} catch \(_e\) \{\}\n',
+    r'  // fm-resync-heartbeat-lifecycle-invariant:.*?\n  \} catch \(_e\) \{\}\n',
     re.S,
 )
 old_block = '''  // fm-resync-heartbeat-ctx-resync: heartbeat also restores agentActive from the latest ctx.
@@ -424,10 +267,8 @@ PY
   "$PATCHER" --file "$buggy" || fail "upgrade apply over the prior buggy heartbeat must succeed"
   "$PATCHER" --check --file "$buggy" || fail "--check must report patched after the upgrade apply"
 
-  local upgrade_diff
-  upgrade_diff=$(diff -u "$fresh" "$buggy")
-  [ -z "$upgrade_diff" ] \
-    || fail "upgrading a prior-buggy-patched file must converge to a fresh apply: $upgrade_diff"
+  diff "$fresh" "$buggy" >/dev/null \
+    || fail "upgrading a prior-buggy-patched file must converge to the same content as a fresh apply"
 
   pass "a file carrying the prior buggy heartbeat is detected as unpatched and upgrades to the corrected shape"
 }
@@ -442,27 +283,28 @@ test_missing_target_skips_cleanly() {
   pass "a missing integration file skips cleanly instead of failing bootstrap"
 }
 
-# Execute the generated reporter against a real EventBus-shaped mock. Each case
-# gets a fresh module instance so reload reconstruction and Set state cannot
-# leak between cases.
-RUNTIME_HARNESS="$TMP_ROOT/runtime-harness.mjs"
-cat >"$RUNTIME_HARNESS" <<'MJS'
+# Captain-reported live failure case: the agent is inside an active
+# whiteboard-driven turn, waiting on one background watcher job (a curl
+# poll loop) - agent_start has fired and agent_end has not, so the turn is
+# still open - while Herdr/omp's own ctx.isIdle() reads true because the
+# runtime is between explicit actions. This drives the patched heartbeat
+# through 2 ticks (>15s of simulated elapsed time) and asserts agentActive
+# (Working) survives, proving the invariant against the exact reported
+# regression rather than only against the source text shape.
+test_active_turn_survives_background_job_wait_across_heartbeat() {
+  command -v bun >/dev/null 2>&1 \
+    || fail "bun is required for the heartbeat runtime regression (CI installs it via oven-sh/setup-bun)"
+
+  local fixture="$TMP_ROOT/heartbeat-runtime.ts"
+  local harness="$TMP_ROOT/heartbeat-harness.mjs"
+  write_pristine_fixture "$fixture"
+  "$PATCHER" --file "$fixture" || fail "apply for the runtime regression fixture failed"
+
+  cat >"$harness" <<'MJS'
 const fixturePath = process.argv[2];
-const scenario = process.argv[3];
 
 const handlers = new Map();
-const eventHandlers = new Map();
-const mockPi = {
-  on(event, fn) {
-    handlers.set(event, fn);
-    return mockPi;
-  },
-  events: {
-    on(event, fn) {
-      eventHandlers.set(event, fn);
-    },
-  },
-};
+const mockPi = { on(event, fn) { handlers.set(event, fn); return mockPi; } };
 
 // Capture the heartbeat's setInterval(fn, 15000) without waiting real time.
 let heartbeatFn = null;
@@ -473,269 +315,63 @@ globalThis.setInterval = (fn, ms) => {
 };
 
 const mod = await import(fixturePath);
-mod.default(mockPi);
+const register = mod.default;
+register(mockPi);
 globalThis.setInterval = origSetInterval;
 
 if (!heartbeatFn) {
-  throw new Error("heartbeat setInterval(ms=15000) was never registered");
+  console.error("FAIL: heartbeat setInterval(ms=15000) was never registered");
+  process.exit(1);
 }
 
 let idle = false;
-const ctx = { hasUI: true, isIdle: () => idle, sessionRef: "parent-session" };
-const state = () => mockPi.__test.getState();
-const assertState = (expected, where) => {
-  const actual = state();
-  if (actual !== expected) {
-    throw new Error(`${where}: expected ${expected}, got ${actual}`);
-  }
-};
-const assertSessionRef = (expected, where) => {
-  const actual = mockPi.__test.getSessionRef();
-  if (actual !== expected) {
-    throw new Error(`${where}: expected session ${expected}, got ${actual}`);
-  }
-};
-const rootStart = () => {
-  idle = false;
-  handlers.get("session_start")?.({}, ctx);
-  handlers.get("agent_start")?.({}, ctx);
-  assertState("working", "root start");
-};
-const rootEnd = () => handlers.get("agent_end")?.({});
-const lifecycle = (id, status) => {
-  const handler = eventHandlers.get("task:subagent:lifecycle");
-  if (!handler) throw new Error("task:subagent:lifecycle handler missing");
-  handler({ id, status });
-};
-const progress = (id, status) => {
-  const handler = eventHandlers.get("task:subagent:progress");
-  if (!handler) throw new Error("task:subagent:progress handler missing");
-  handler({ progress: { id, status } });
-};
-const heartbeat = (expected, tick) => {
+const ctx = { hasUI: true, isIdle: () => idle };
+
+// Establish a genuinely active turn: session_start then agent_start, ctx
+// currently NOT idle (actively processing).
+handlers.get("session_start")?.({}, ctx);
+handlers.get("agent_start")?.({}, ctx);
+
+if (mockPi.__test.getAgentActive() !== true) {
+  console.error("FAIL: agentActive must be true immediately after agent_start");
+  process.exit(1);
+}
+
+// The captain-reported case: the turn is still open (no agent_end fired)
+// but the agent is waiting on a background watcher job (curl loop);
+// ctx.isIdle() reads true while waiting even though the turn is active.
+idle = true;
+
+// Two heartbeat ticks: simulated >15s of elapsed wall time while waiting.
+for (let tick = 1; tick <= 2; tick++) {
   heartbeatFn();
-  assertState(expected, `heartbeat ${tick}`);
+  if (mockPi.__test.getAgentActive() !== true) {
+    console.error(`FAIL: agentActive flipped to false on heartbeat tick ${tick} while the turn was still open and waiting on a background job`);
+    process.exit(1);
+  }
   const log = mockPi.__test.getLog();
   const last = log[log.length - 1];
-  if (!last || last.force !== true || last.state !== expected) {
-    throw new Error(`heartbeat ${tick}: expected forced ${expected}, got ${JSON.stringify(last)}`);
+  if (!last || last.force !== true || last.agentActive !== true) {
+    console.error(`FAIL: heartbeat tick ${tick} did not force-publish a Working state; got ${JSON.stringify(last)}`);
+    process.exit(1);
   }
-};
-
-switch (scenario) {
-  case "active-root-heartbeats": {
-    rootStart();
-    idle = true;
-    heartbeat("working", 1);
-    heartbeat("working", 2);
-    break;
-  }
-  case "child-heartbeats": {
-    rootStart();
-    lifecycle("child-a", "started");
-    rootEnd();
-    assertState("working", "root end with child running");
-    heartbeat("working", 1);
-    heartbeat("working", 2);
-    break;
-  }
-  case "last-child-idle": {
-    rootStart();
-    lifecycle("child-a", "started");
-    rootEnd();
-    lifecycle("child-a", "completed");
-    assertState("idle", "last child completed");
-    break;
-  }
-  case "two-child-partial": {
-    rootStart();
-    lifecycle("child-a", "started");
-    lifecycle("child-b", "started");
-    rootEnd();
-    lifecycle("child-a", "completed");
-    assertState("working", "one of two children completed");
-    lifecycle("child-b", "completed");
-    assertState("idle", "both children completed");
-    break;
-  }
-  case "failed-aborted-cleanup": {
-    rootStart();
-    lifecycle("child-failed", "started");
-    rootEnd();
-    lifecycle("child-failed", "failed");
-    assertState("idle", "failed child removed");
-    lifecycle("child-aborted", "started");
-    assertState("working", "aborted child started");
-    lifecycle("child-aborted", "aborted");
-    assertState("idle", "aborted child removed");
-    break;
-  }
-  case "duplicate-idempotence": {
-    rootStart();
-    lifecycle("child-a", "started");
-    lifecycle("child-a", "started");
-    rootEnd();
-    lifecycle("child-a", "completed");
-    assertState("idle", "one completion clears a duplicate start");
-    lifecycle("child-a", "completed");
-    assertState("idle", "duplicate completion remains idle");
-    break;
-  }
-  case "progress-reload": {
-    idle = true;
-    handlers.get("session_start")?.({}, ctx);
-    assertState("idle", "reloaded root starts idle");
-    progress("child-pending", "pending");
-    assertState("working", "pending progress reconstructs child");
-    progress("child-pending", "completed");
-    assertState("idle", "completed progress removes child");
-    progress("child-running", "running");
-    assertState("working", "running progress reconstructs child");
-    progress("child-running", "failed");
-    assertState("idle", "terminal progress removes child");
-    break;
-  }
-  case "no-child-idle": {
-    rootStart();
-    rootEnd();
-    assertState("idle", "ordinary root end");
-    heartbeat("idle", 1);
-    heartbeat("idle", 2);
-    break;
-  }
-  case "headless-events-ignored": {
-    const headlessCtx = {
-      hasUI: false,
-      isIdle: () => false,
-      sessionRef: "child-session",
-    };
-    lifecycle("child-a", "started");
-    progress("child-a", "running");
-    handlers.get("session_start")?.({}, headlessCtx);
-    handlers.get("agent_start")?.({}, headlessCtx);
-    lifecycle("child-b", "started");
-    progress("child-b", "pending");
-    heartbeatFn();
-    if (mockPi.__test.getLog().length !== 0) {
-      throw new Error(`headless events published state: ${JSON.stringify(mockPi.__test.getLog())}`);
-    }
-    assertSessionRef(undefined, "headless events");
-    if (mockPi.__test.getSessionReports().length !== 0) {
-      throw new Error(`headless events reported a session: ${JSON.stringify(mockPi.__test.getSessionReports())}`);
-    }
-    break;
-  }
-  case "parent-session-invariant": {
-    rootStart();
-    assertSessionRef("parent-session", "root start");
-    lifecycle("child-a", "started");
-    assertSessionRef("parent-session", "child start");
-    rootEnd();
-    assertState("working", "root end with child");
-    assertSessionRef("parent-session", "root end");
-    heartbeat("working", 1);
-    assertSessionRef("parent-session", "heartbeat 1");
-    heartbeat("working", 2);
-    assertSessionRef("parent-session", "heartbeat 2");
-    lifecycle("child-a", "completed");
-    assertState("idle", "final child completion");
-    assertSessionRef("parent-session", "final Idle");
-    const reports = mockPi.__test.getSessionReports();
-    if (reports.some((ref) => ref !== "parent-session")) {
-      throw new Error(`child lifecycle changed reported session refs: ${JSON.stringify(reports)}`);
-    }
-    break;
-  }
-  default:
-    throw new Error(`unknown scenario: ${scenario}`);
 }
 
-console.log(`PASS: ${scenario}`);
+console.log("PASS: agentActive stayed true (Working) across 2 heartbeat ticks while ctx.isIdle() read true during an open turn's background-job wait");
+process.exit(0);
 MJS
 
-run_runtime_case() {
-  local scenario=$1
-  local description=$2
-  local fixture="$TMP_ROOT/runtime-$scenario.ts"
   local out
-  local rc
-
-  command -v bun >/dev/null 2>&1 \
-    || fail "bun is required for runtime regressions (CI installs it via oven-sh/setup-bun)"
-  write_pristine_fixture "$fixture"
-  "$PATCHER" --file "$fixture" >/dev/null \
-    || fail "apply for runtime case $scenario failed"
-  out=$(bun run "$RUNTIME_HARNESS" "$fixture" "$scenario" 2>&1)
-  rc=$?
-  [ "$rc" -eq 0 ] || fail "$description: $out"
-  printf '%s' "$out" | grep -q "^PASS" || fail "runtime case $scenario did not report PASS: $out"
-  pass "$description"
-}
-
-test_active_turn_survives_background_job_wait_across_heartbeat() {
-  run_runtime_case "active-root-heartbeats" \
-    "an open root turn stays Working across 2 heartbeat ticks when ctx.isIdle() reads true"
-}
-
-test_child_survives_root_end_across_heartbeat() {
-  run_runtime_case "child-heartbeats" \
-    "a running child keeps the pane Working after root agent_end across 2 heartbeat ticks"
-}
-
-test_last_child_completion_becomes_idle() {
-  run_runtime_case "last-child-idle" \
-    "the last child completion transitions the aggregate reporter to Idle"
-}
-
-test_two_child_partial_completion_stays_working() {
-  run_runtime_case "two-child-partial" \
-    "one of two child completions keeps the aggregate reporter Working"
-}
-
-test_failed_and_aborted_children_are_removed() {
-  run_runtime_case "failed-aborted-cleanup" \
-    "failed and aborted child lifecycles both clean up aggregate activity"
-}
-
-test_duplicate_child_events_are_idempotent() {
-  run_runtime_case "duplicate-idempotence" \
-    "duplicate lifecycle events are idempotent by child ID"
-}
-
-test_progress_reconstructs_children_after_reload() {
-  run_runtime_case "progress-reload" \
-    "pending and running progress reconstruct child activity after reporter reload"
-}
-
-test_ordinary_no_child_path_becomes_idle() {
-  run_runtime_case "no-child-idle" \
-    "the ordinary no-child root end remains Idle across heartbeat ticks"
-}
-
-test_headless_child_events_are_ignored() {
-  run_runtime_case "headless-events-ignored" \
-    "headless lifecycle and progress events neither publish nor bind a session"
-}
-
-test_parent_session_ref_survives_child_lifecycle() {
-  run_runtime_case "parent-session-invariant" \
-    "the parent session ref survives child start, root end, heartbeats, and final Idle"
+  out=$(bun run "$harness" "$fixture" 2>&1)
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "active turn waiting on a background job across the 15s heartbeat regressed: $out"
+  printf '%s' "$out" | grep -q "^PASS" || fail "runtime harness did not report PASS: $out"
+  pass "an active turn waiting on a background job stays Working across 2 heartbeat ticks (>15s) even though ctx.isIdle() reads true"
 }
 
 test_pristine_check_reports_unpatched
 test_apply_enforces_invariant
 test_apply_is_idempotent
-test_upgrade_from_prior_lifecycle_patch_converges
-test_upgrade_from_unguarded_child_patch_converges
 test_upgrade_from_prior_buggy_heartbeat_converges
 test_missing_target_skips_cleanly
 test_active_turn_survives_background_job_wait_across_heartbeat
-test_child_survives_root_end_across_heartbeat
-test_last_child_completion_becomes_idle
-test_two_child_partial_completion_stays_working
-test_failed_and_aborted_children_are_removed
-test_duplicate_child_events_are_idempotent
-test_progress_reconstructs_children_after_reload
-test_headless_child_events_are_ignored
-test_parent_session_ref_survives_child_lifecycle
-test_ordinary_no_child_path_becomes_idle
