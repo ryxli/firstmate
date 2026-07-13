@@ -21,7 +21,11 @@
 #   (q) self-reload + pane closes                     -> detached worker recovers in replacement pane
 #   (r) durable fm-<name> target + pane closes        -> meta rebound to replacement pane= and tab=
 #   (s) durable fm-<name> target, pane survives       -> meta untouched (no rebind)
-#   (t) self-reload of durable target + pane closes   -> detached worker rebinds meta
+#   (t) self-reload durable target + pane closes      -> detached worker rebinds meta
+#   (u) stale pane agent after visible exit           -> process-info proves restored shell
+#   (v) foreground OMP still running                  -> exit wait times out without relaunch
+#   (w) restored shell                                -> exact captured session resumed
+#   (x) relaunch                                      -> one command-string argument, no standalone --
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -69,6 +73,8 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-reload-tests.XXXXXX")
 #                                pane except the replacement (wR:p1) errors
 #                                with pane_not_found. 'tab create' returns a
 #                                replacement root pane wR:p1.
+#   FM_FAKE_HERDR_POST_QUIT_PROCESS - foreground process after /quit and before
+#                                resume (default "-zsh")
 # ---------------------------------------------------------------------------
 make_fake_herdr() {
   local dir=$1 fakebin log
@@ -103,6 +109,14 @@ case "${1:-}" in
         fi
         printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate"}}}\n' "$agent" "${FM_FAKE_HERDR_CWD:-}"
         exit 0 ;;
+      process-info)
+        if [ -f "$STATE_DIR/quit" ] && [ ! -f "$RESUMED_FILE" ]; then
+          process="${FM_FAKE_HERDR_POST_QUIT_PROCESS:--zsh}"
+        else
+          process="bun /opt/omp/scripts/omp.ts"
+        fi
+        printf '{"result":{"process_info":{"foreground_processes":[{"argv0":"%s","name":"%s","cmdline":"%s"}]}}}\n' "$process" "$process" "$process"
+        exit 0 ;;
       read)
         if [ -f "$RESUMED_FILE" ]; then
           sid="${FM_FAKE_HERDR_POST_SESSION-${FM_FAKE_HERDR_SESSION:-}}"
@@ -119,6 +133,7 @@ case "${1:-}" in
         # /quit leaves a marker (drives pane-closes simulation);
         # non-slash commands = relaunch; create the resumed marker.
         cmd="${4:-}"
+        printf 'pane-run argc=%s pane=<%s> command=<%s>\n' "$#" "${3:-}" "${4:-}" >> "$LOG"
         case "$cmd" in
           /quit) touch "$STATE_DIR/quit" ;;
           /*) ;;
@@ -687,6 +702,94 @@ test_self_reload_durable_target_meta_rebound() {
   pass "(t) self-reload of durable target + pane closes -> detached worker rebinds meta"
 }
 
+# ---------------------------------------------------------------------------
+# (u) Observed mismatch: pane.agent remains "omp" after /quit even though the
+#     foreground process is the restored shell. Process inspection must prove
+#     exit promptly instead of trusting stale pane identity until timeout.
+# ---------------------------------------------------------------------------
+test_stale_agent_shell_detection() {
+  local CASE="$TMP_ROOT/case-u"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-000000000014"
+  FM_FAKE_HERDR_AGENT="omp" \
+  FM_FAKE_HERDR_POST_QUIT_PROCESS="-zsh" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" wu:p1 >/dev/null 2>/dev/null \
+    || fail "(u) stale pane agent hid the restored shell and prevented reload"
+
+  herdr_log "$CASE" | grep -q "pane process-info --pane wu:p1" \
+    || fail "(u) expected foreground process inspection after /quit"
+
+  pass "(u) stale pane agent + shell process -> exit detected promptly"
+}
+
+# ---------------------------------------------------------------------------
+# (v) A genuinely live OMP foreground process must keep the reload fail-closed:
+#     timeout with no relaunch, even if metadata alone could be stale.
+# ---------------------------------------------------------------------------
+test_live_omp_process_times_out() {
+  local CASE="$TMP_ROOT/case-v"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-000000000015"
+  FM_FAKE_HERDR_AGENT="omp" \
+  FM_FAKE_HERDR_POST_QUIT_PROCESS="bun /opt/omp/scripts/omp.ts" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" wv:p1 >/dev/null 2>/dev/null \
+    && fail "(v) expected timeout while OMP remained the foreground process"
+
+  herdr_log "$CASE" | grep -q "pane run wv:p1 omp --resume" \
+    && fail "(v) relaunched before the live OMP process exited"
+
+  pass "(v) live OMP foreground process -> timeout without relaunch"
+}
+
+# ---------------------------------------------------------------------------
+# (w) Shell detection must resume the exact session captured before /quit.
+# ---------------------------------------------------------------------------
+test_shell_detection_resumes_exact_session() {
+  local CASE="$TMP_ROOT/case-w"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-000000000016"
+  FM_FAKE_HERDR_AGENT="omp" \
+  FM_FAKE_HERDR_POST_QUIT_PROCESS="-zsh" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" ww:p1 >/dev/null 2>/dev/null \
+    || fail "(w) reload failed after the shell returned"
+
+  herdr_log "$CASE" | grep -q "pane run ww:p1 omp --resume $sid" \
+    || fail "(w) expected exact captured session $sid"
+
+  pass "(w) restored shell -> exact captured session resumed"
+}
+
+# ---------------------------------------------------------------------------
+# (x) herdr pane run accepts the relaunch as one command-string argument.
+#     A standalone -- would be forwarded to the target shell as the command.
+# ---------------------------------------------------------------------------
+test_resume_command_is_single_argument() {
+  local CASE="$TMP_ROOT/case-x"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local sid="abcd1234-0000-0000-0000-000000000017"
+  FM_FAKE_HERDR_AGENT="omp" \
+  FM_FAKE_HERDR_POST_QUIT_PROCESS="-zsh" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" wx:p1 >/dev/null 2>/dev/null \
+    || fail "(x) reload failed after the shell returned"
+
+  herdr_log "$CASE" | grep -Fqx "pane-run argc=4 pane=<wx:p1> command=<omp --resume $sid>" \
+    || fail "(x) relaunch was not passed as the single fourth herdr argument"
+
+  pass "(x) relaunch -> one command-string argument with no standalone --"
+}
+
 # Run all tests.
 test_resume_path
 test_fail_closed_no_session
@@ -708,3 +811,7 @@ test_self_reload_pane_closes_full_recovery
 test_durable_target_meta_rebound
 test_durable_target_meta_untouched_when_pane_survives
 test_self_reload_durable_target_meta_rebound
+test_stale_agent_shell_detection
+test_live_omp_process_times_out
+test_shell_detection_resumes_exact_session
+test_resume_command_is_single_argument

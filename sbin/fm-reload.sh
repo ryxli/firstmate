@@ -316,19 +316,36 @@ EOF
 herdr pane run "$PANE" "/quit" || exit 1
 sleep "$QUIT_GRACE"
 
-AGENT=""
+EXIT_CONFIRMED=""
 DEADLINE=$((SECONDS + TIMEOUT))
 while [ "$SECONDS" -lt "$DEADLINE" ]; do
-  AGENT="$(herdr pane get "$PANE" 2>/dev/null \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("result",{}).get("pane",{}).get("agent",""))' \
-    2>/dev/null || true)"
-  if [ "$AGENT" != "omp" ]; then
-    break
-  fi
+  PANE_INFO="$(herdr pane get "$PANE" 2>/dev/null || true)"
+  case "$PANE_INFO" in
+    ''|*'"error"'*)
+      EXIT_CONFIRMED=1
+      break
+      ;;
+  esac
+  AGENT="$(printf '%s' "$PANE_INFO" | fm_json_get result pane agent)"
+  case "$(fm_herdr_pane_agent_process_verdict "$PANE")" in
+    shell)
+      EXIT_CONFIRMED=1
+      break
+      ;;
+    agent) ;;
+    err)
+      # Preserve the prior metadata fallback when process inspection is
+      # unavailable. A stale "omp" identity still fails closed.
+      if [ "$AGENT" != "omp" ]; then
+        EXIT_CONFIRMED=1
+        break
+      fi
+      ;;
+  esac
   sleep 0.25
 done
 
-if [ "$AGENT" = "omp" ]; then
+if [ -z "$EXIT_CONFIRMED" ]; then
   echo "fm-reload.sh: pane $PANE still running omp after ${TIMEOUT}s; reload aborted" >&2
   exit 1
 fi
