@@ -25,15 +25,17 @@
 # the fresh runtime. Self-contained, version-agnostic; run after any herdr
 # update to re-apply it.
 #
-# REGRESSION FIXED HERE: the recovery heartbeat used to re-sample
-# ctx.isIdle() on every tick even after rootSession was already true and the
-# agent_start/agent_end lifecycle already owned agentActive. During an
-# active whiteboard-driven turn ctx.isIdle() can read true, so the heartbeat
-# overwrote a correct Working state with false Idle every RESYNC_MS despite
-# healthy pane binding and socket. Invariant enforced now: ctx.isIdle() is
-# consulted ONLY while recovering a newly reloaded runtime (rootSession
-# still false); once activated, the heartbeat force-publishes the retained
-# lifecycle state and never re-derives it from ctx.
+# REGRESSIONS FIXED HERE:
+# - A healthy root lifecycle used to be overwritten by ctx.isIdle() on every
+#   heartbeat. The heartbeat now samples ctx.isIdle() only while recovering a
+#   newly reloaded runtime, then republishes retained lifecycle state.
+# - OMP can end the parent agent turn while detached task subagents remain
+#   pending or running. Root agent_end alone therefore cannot define Idle.
+#   Authoritative task:subagent:lifecycle and task:subagent:progress EventBus
+#   payloads maintain an idempotent Set of active child IDs. The aggregate is
+#   Working while root lifecycle, retry hold, or any child remains active.
+#   Heartbeats only republish that aggregate - they never infer child activity
+#   from terminal text or elapsed time.
 #
 # Idempotent: a second run validates the full patch and no-ops. Safe at bootstrap.
 #
@@ -44,7 +46,7 @@
 set -u
 
 MARKER="fm-resync-heartbeat"
-PATCH_MARKER="fm-resync-heartbeat-lifecycle-invariant"
+PATCH_MARKER="fm-resync-heartbeat-child-root-guard-v3"
 RESYNC_MS="${FM_HERDR_RESYNC_MS:-15000}"
 
 TARGET="$HOME/.omp/agent/extensions/herdr-omp-agent-state.ts"
@@ -76,13 +78,19 @@ src = io.open(path, encoding="utf-8").read()
 def is_patched(text: str) -> bool:
     required = [
         patch_marker,
-        "ctx?.hasUI !== true && !enabled()",
+        "ctx?.hasUI === false || (ctx?.hasUI !== true && !enabled())",
         "let latestCtx: any | undefined;",
+        "const activeChildIds = new Set<string>();",
         "function stashLatestCtx(ctx: any): void",
         "function restoreAgentActiveFromCtx(ctx: any = latestCtx): void",
+        "function setChildActive(id: unknown, active: boolean): void",
+        'pi.events.on("task:subagent:lifecycle", (data) => {\n    if (!rootSession)',
+        'pi.events.on("task:subagent:progress", (data) => {\n    if (!rootSession)',
+        "agentActive || retryHoldActive || activeChildIds.size > 0",
         'pi.on?.("before_agent_start"',
         "resetSessionState();\n    restoreAgentActiveFromCtx(ctx);\n    publishState(true);",
         "if (latestCtx) updateSessionRef(latestCtx);",
+        "if (!latestCtx || latestCtx?.hasUI === false) return;",
         "restoreAgentActiveFromCtx();\n        }\n        publishState(true);",
         "stashLatestCtx(ctx);\n    if (!rootSession && !activateRootSession(ctx))",
     ]
@@ -105,32 +113,33 @@ heartbeat_re = re.compile(
 )
 src = heartbeat_re.sub("", src)
 
-# Root fix: on a reload the re-fired session_start does not reliably carry
-# hasUI. A real herdr-managed pane is proven by enabled() (HERDR_ENV + pane id +
-# socket), so recover on enabled() too.
+# Root fix: a real UI context has hasUI=true. An explicit false belongs to a
+# headless child and must never claim the pane's root session. A reload may omit
+# hasUI, so enabled() still permits that missing-field recovery case.
 gate_old = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
             '    if (ctx?.hasUI !== true) {')
-gate_new = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
-            '    stashLatestCtx(ctx);\n'
-            '    // fm-resync-heartbeat: enabled() proves this is the real herdr pane, so a\n'
-            '    // reload that re-fires session_start without hasUI still recovers turn state.\n'
-            '    if (ctx?.hasUI !== true && !enabled()) {')
 gate_old_with_comment = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
                          '    // fm-resync-heartbeat: enabled() proves this is the real herdr pane, so a\n'
                          '    // reload that re-fires session_start without hasUI still recovers turn state.\n'
                          '    if (ctx?.hasUI !== true && !enabled()) {')
-gate_new_with_comment = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
-                         '    stashLatestCtx(ctx);\n'
-                         '    // fm-resync-heartbeat: enabled() proves this is the real herdr pane, so a\n'
-                         '    // reload that re-fires session_start without hasUI still recovers turn state.\n'
-                         '    if (ctx?.hasUI !== true && !enabled()) {')
-if gate_old in src:
-    src = src.replace(gate_old, gate_new, 1)
-elif gate_old_with_comment in src:
-    src = src.replace(gate_old_with_comment, gate_new_with_comment, 1)
-elif "ctx?.hasUI !== true && !enabled()" not in src or "stashLatestCtx(ctx);" not in src:
-    sys.stderr.write("error: activateRootSession hasUI gate not found; integration shape changed\n")
-    sys.exit(3)
+gate_v2 = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
+           '    stashLatestCtx(ctx);\n'
+           '    // fm-resync-heartbeat: enabled() proves this is the real herdr pane, so a\n'
+           '    // reload that re-fires session_start without hasUI still recovers turn state.\n'
+           '    if (ctx?.hasUI !== true && !enabled()) {')
+gate_new = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
+            '    stashLatestCtx(ctx);\n'
+            '    // fm-resync-heartbeat: explicit hasUI=false is a headless child and\n'
+            '    // must never claim the pane; enabled() recovers only omitted hasUI.\n'
+            '    if (ctx?.hasUI === false || (ctx?.hasUI !== true && !enabled())) {')
+for gate_variant in (gate_old, gate_old_with_comment, gate_v2):
+    if gate_variant in src:
+        src = src.replace(gate_variant, gate_new, 1)
+        break
+else:
+    if gate_new not in src:
+        sys.stderr.write("error: activateRootSession hasUI gate not found; integration shape changed\n")
+        sys.exit(3)
 
 helper_anchor = "  let rootSession = false;\n"
 helper = (
@@ -163,6 +172,109 @@ if "let latestCtx: any | undefined;" not in src:
         sys.stderr.write("error: rootSession declaration not found; integration shape changed\n")
         sys.exit(3)
     src = src.replace(helper_anchor, helper, 1)
+
+child_decl_anchor = "  let rootSession = false;\n"
+child_decl = "  const activeChildIds = new Set<string>();\n"
+if child_decl not in src:
+    if child_decl_anchor not in src:
+        sys.stderr.write("error: rootSession declaration not found for child tracking; integration shape changed\n")
+        sys.exit(3)
+    src = src.replace(child_decl_anchor, child_decl_anchor + child_decl, 1)
+
+aggregate_old = "    if (agentActive || retryHoldActive) {"
+aggregate_new = "    if (agentActive || retryHoldActive || activeChildIds.size > 0) {"
+if aggregate_old in src:
+    src = src.replace(aggregate_old, aggregate_new, 1)
+elif aggregate_new not in src:
+    sys.stderr.write("error: desiredState working aggregate not found; integration shape changed\n")
+    sys.exit(3)
+
+reset_old = "    clearFailureState();\n    agentActive = false;\n"
+reset_new = "    clearFailureState();\n    agentActive = false;\n    activeChildIds.clear();\n"
+if reset_new in src:
+    pass
+elif reset_old in src:
+    src = src.replace(reset_old, reset_new, 1)
+else:
+    sys.stderr.write("error: resetSessionState active state reset not found; integration shape changed\n")
+    sys.exit(3)
+
+child_event_block = '''  function setChildActive(id: unknown, active: boolean): void {
+    if (typeof id !== "string" || id.length === 0) {
+      return;
+    }
+    if (active) {
+      if (activeChildIds.has(id)) {
+        return;
+      }
+      activeChildIds.add(id);
+    } else if (!activeChildIds.delete(id)) {
+      return;
+    }
+    publishState();
+  }
+
+  pi.events.on("task:subagent:lifecycle", (data) => {
+    if (!rootSession) {
+      return;
+    }
+    const status = data?.status;
+    if (status === "started") {
+      setChildActive(data?.id, true);
+      return;
+    }
+    if (status === "completed" || status === "failed" || status === "aborted") {
+      setChildActive(data?.id, false);
+    }
+  });
+
+  pi.events.on("task:subagent:progress", (data) => {
+    if (!rootSession) {
+      return;
+    }
+    const progress = data?.progress;
+    const status = progress?.status;
+    if (status === "pending" || status === "running") {
+      setChildActive(progress?.id, true);
+      return;
+    }
+    if (status === "completed" || status === "failed" || status === "aborted") {
+      setChildActive(progress?.id, false);
+    }
+  });
+
+'''
+child_guard_replacements = [
+    ('''  pi.events.on("task:subagent:lifecycle", (data) => {
+    const status = data?.status;''',
+     '''  pi.events.on("task:subagent:lifecycle", (data) => {
+    if (!rootSession) {
+      return;
+    }
+    const status = data?.status;'''),
+    ('''  pi.events.on("task:subagent:progress", (data) => {
+    const progress = data?.progress;''',
+     '''  pi.events.on("task:subagent:progress", (data) => {
+    if (!rootSession) {
+      return;
+    }
+    const progress = data?.progress;'''),
+]
+for old, new in child_guard_replacements:
+    if old in src:
+        src = src.replace(old, new, 1)
+
+if child_event_block not in src:
+    if ('pi.events.on("task:subagent:lifecycle"' in src
+            or 'pi.events.on("task:subagent:progress"' in src):
+        sys.stderr.write("error: partial task subagent handlers found; integration shape changed\n")
+        sys.exit(3)
+    child_event_anchor = '  pi.on("session_start"'
+    child_event_at = src.find(child_event_anchor)
+    if child_event_at == -1:
+        sys.stderr.write("error: session_start handler not found for child event insertion\n")
+        sys.exit(3)
+    src = src[:child_event_at] + child_event_block + src[child_event_at:]
 
 session_start_old = '''  pi.on("session_start", (_event, ctx) => {
     if (!activateRootSession(ctx)) {
@@ -287,36 +399,30 @@ insert_at = end + len("});")
 block = (
     "\n\n"
     f"  // {marker}: injected by sbin/fm-patch-herdr-omp.sh.\n"
-    f"  // {patch_marker}: heartbeat force-publishes lifecycle state; ctx.isIdle()\n"
-    "  // is consulted only to recover a just-reloaded runtime.\n"
-    "  // ROOT CAUSE this fixes: the reporter enables state reporting only after\n"
-    "  // activateRootSession() sees ctx.hasUI === true. A long-lived omp session\n"
-    "  // auto-compacts / reloads many times (observed hundreds of times per mate),\n"
-    "  // and a reload replaces this extension runtime; the re-fired session event\n"
-    "  // does not reliably carry hasUI, so rootSession stays false and the reporter\n"
-    "  // goes permanently silent - herdr then falls back to idle for the rest of\n"
-    "  // the session even while the agent is actively working. A fresh session\n"
-    "  // works only because it has not compacted yet.\n"
-    "  // Fix: enabled() already proves this is a real herdr-managed pane (HERDR_ENV\n"
-    "  // + pane id + socket are all present), which is the same fact hasUI was a\n"
-    "  // proxy for, so the heartbeat can re-establish rootSession on its own.\n"
-    "  // REGRESSION FIXED HERE: a prior version of this heartbeat called\n"
-    "  // restoreAgentActiveFromCtx() (re-sampling ctx.isIdle()) on every tick, even\n"
-    "  // once rootSession was already true and agent_start/agent_end lifecycle\n"
-    "  // hooks already owned agentActive. During an active whiteboard-driven turn\n"
-    "  // ctx.isIdle() can read true, so the heartbeat overwrote a correct Working\n"
-    "  // state with false Idle every resync interval - a fleetwide false-idle\n"
-    "  // regression despite healthy pane binding and socket. Invariant enforced\n"
-    "  // now: ctx.isIdle() is sampled ONLY while rootSession is still false (a\n"
-    "  // just-reloaded runtime with no live agent_start/agent_end yet to trust);\n"
-    "  // once activated, the heartbeat force-publishes the agentActive value the\n"
-    "  // lifecycle hooks already set and never re-derives it from ctx.\n"
+    f"  // {patch_marker}: heartbeat force-publishes retained aggregate state;\n"
+    "  // ctx.isIdle() is consulted only to recover a just-reloaded root runtime.\n"
+    "  // activateRootSession() sees a UI root. A long-lived omp session can\n"
+    "  // reload the extension with hasUI omitted, so enabled() permits that\n"
+    "  // recovery. An explicit hasUI=false is authoritative headless context and\n"
+    "  // must never bind or publish for the pane's parent reporter.\n"
+    "  //\n"
+    "  // Once activated, root agent_start/agent_end owns agentActive. Re-sampling\n"
+    "  // ctx.isIdle() on every heartbeat caused false Idle during a healthy turn,\n"
+    "  // so heartbeat recovery samples it only while rootSession is still false.\n"
+    "  // OMP can also end that root turn while detached task subagents continue.\n"
+    "  // Authoritative task lifecycle/progress events retain their active IDs in\n"
+    "  // a Set; desiredState aggregates root, retry hold, and child activity.\n"
+    "  // Heartbeats only republish that aggregate. They never infer child activity\n"
+    "  // from terminal text or elapsed time.\n"
     "  try {\n"
     f"    const __fmResyncMs = {int(resync_ms)};\n"
     "    const __fmResync = setInterval(() => {\n"
     "      try {\n"
     "        if (!enabled()) return;\n"
     "        if (!rootSession) {\n"
+    "          // No observed context cannot identify a root; explicit false is a\n"
+    "          // headless child. Neither may bind or publish from this runtime.\n"
+    "          if (!latestCtx || latestCtx?.hasUI === false) return;\n"
     "          // Reload dropped activation; re-establish it. Report the session\n"
     "          // ref so herdr rebinds this source, then seed agentActive from\n"
     "          // ctx.isIdle() for this just-recovered runtime only.\n"
