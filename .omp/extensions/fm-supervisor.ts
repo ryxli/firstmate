@@ -455,6 +455,10 @@ async function refreshFleet(sup: Supervisor): Promise<void> {
 	const next = new Map<string, Crewmate>();
 	for (const f of files) {
 		const task = f.slice(0, -".meta".length);
+		// state/self.meta records this firstmate's own pane identity for recovery
+		// and labels; the supervisor must never treat its own pane as a crewmate
+		// (it would fire idle/stale/completion wakes at its own resting turns).
+		if (task === "self") continue;
 		const meta = await parseMeta(join(sup.stateDir, f));
 		if (!meta.pane) continue;
 		const pane = await resolveLivePane(sup, task, meta.pane);
