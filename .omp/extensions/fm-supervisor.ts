@@ -865,7 +865,7 @@ async function writeMetaPane(sup: Supervisor, task: string, pane: string): Promi
 async function paneShowsBusyBanner(sup: Supervisor, pane: string): Promise<boolean> {
 	let text: string;
 	try {
-		const res = await sup.pi.exec("herdr", ["pane", "read", pane, "--lines", "6", "--source", "visible"], {
+		const res = await sup.pi.exec("herdr", ["pane", "read", pane, "--lines", "12", "--source", "visible"], {
 			timeout: sup.tunables.busyReadTimeoutMs,
 			signal: sup.abort.signal,
 			cwd: sup.ctx.cwd,
@@ -874,14 +874,20 @@ async function paneShowsBusyBanner(sup: Supervisor, pane: string): Promise<boole
 	} catch {
 		return false;
 	}
+	// omp renders a working turn as a braille spinner glyph plus an interrupt
+	// hint; other harnesses use Working/Thinking text. The braille set is the
+	// decisive omp signal because its socket status report to herdr is
+	// unreliable (drops leave agent_status stuck at idle mid-turn), so without
+	// this the completion/stale backstops fire false wakes on a live mate.
+	const spinner = "[\u2801-\u28ff]"; // any non-blank braille cell = an omp spinner frame
 	const source =
 		process.env.FM_BUSY_REGEX ??
-		["esc (to )?interrupt", "⟨esc⟩", "Working(\\.\\.\\.|…)?", "Thinking"].join("|");
+		["esc (to )?interrupt", "⟨esc⟩", "Working(\\.\\.\\.|…)?", "Thinking", spinner].join("|");
 	let busy: RegExp;
 	try {
 		busy = new RegExp(source, "i");
 	} catch {
-		busy = /esc (to )?interrupt|⟨esc⟩|Working(\.\.\.|…)?|Thinking/i;
+		busy = /esc (to )?interrupt|⟨esc⟩|Working(\.\.\.|…)?|Thinking|[\u2801-\u28ff]/i;
 	}
 	return text
 		.split("\n")

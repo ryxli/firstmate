@@ -78,6 +78,18 @@ self_pane_sync() {
   rm -f "$tmp"
 }
 
+# Re-apply the herdr omp status-integration self-heal patch. A herdr update
+# overwrites the managed integration file and reverts the patch, so bootstrap
+# re-applies it every session. Idempotent and silent when already patched; only
+# surfaces a line when it actually (re)patches after an update.
+herdr_omp_patch_sync() {
+  [ -x "$FM_ROOT/sbin/fm-patch-herdr-omp.sh" ] || return 0
+  "$FM_ROOT/sbin/fm-patch-herdr-omp.sh" --check >/dev/null 2>&1 && return 0
+  if "$FM_ROOT/sbin/fm-patch-herdr-omp.sh" >/dev/null 2>&1; then
+    echo "HERDR_OMP_PATCH: re-applied status self-heal after integration update"
+  fi
+}
+
 install_cmd() {
   case "$1" in
     herdr) echo "mise install herdr  # or download from https://herdr.dev" ;;
@@ -113,6 +125,7 @@ if command -v herdr >/dev/null 2>&1 && ! herdr_server_running; then
   echo "MISSING: herdr-server (start with: herdr)"
 fi
 self_pane_sync
+herdr_omp_patch_sync
 gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
 crew=
 [ -f "$CONFIG/crew-harness" ] && crew=$(tr -d '[:space:]' < "$CONFIG/crew-harness" || true)
