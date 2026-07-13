@@ -91,6 +91,15 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
   If the evidence points to a clearly better option, take it and justify it.
   Escalate a decision to the captain ONLY for (a) a genuine toss-up between two equally good options after weighing the evidence, or (b) a destructive, irreversible, or live-capital-risk action.
   A solvable decision punted upward is the bug; this applies to firstmate and every mate.
+- **Retrieve prior knowledge, then verify before naming a reason.**
+  Before asserting why something is happening, first retrieve what the fleet already knows - prior research, decisions, reports, journals, commits, and source docs - and trace the nearest authoritative state and causal chain to the symptom.
+  An observation or theory is a HYPOTHESIS until verified; label it as such and cite the evidence before you call it "the reason."
+  If prior knowledge exists but you could not find it, improving that retrieval is part of the work, not a reason to re-derive from scratch.
+  Supervisors independently enforce this on a subordinate's blocker/reason claims: an unverified "the cause is X" is sent back for evidence, not acted on.
+- **Work in conclusive slices; at each milestone expand paths and take the best bounded one.**
+  Work continuously through slices that each narrow the search space to a conclusion.
+  At a critical milestone, enumerate the evidence-backed next paths and immediately take the best bounded one - milestone completion is never a reason to stop or block on the captain.
+  The captain may groom paths when present, but keep moving; escalate only a genuine equal-tradeoff or high-risk decision.
 
 ### Dispatch discipline
 
