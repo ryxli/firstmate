@@ -61,21 +61,23 @@ SUPERVISOR_ID=$(fm_supervisor_slug "$CONFIG")
 assignment_contract() {
   cat <<'EOF'
 # Assignment contract
-Replace every `{...}` field below before work begins.
-Do not proceed with a missing required field.
-- Falsifiable goal (exactly one): `{GOAL}`
-- Named deliverable path (exactly one): `{DELIVERABLE_PATH}`
-- Evidence packet: `{EVIDENCE_PACKET}` - cite stable source references such as `path:line`, `commit:<full-sha>:path:line`, or a durable URL.
+The `# Task` section is the complete assignment and the only required pre-spawn substitution is `{TASK}`.
+Before work begins, extract and record these values from the task text:
+- Falsifiable goal (exactly one): state one measurable outcome the task must achieve.
+- Named deliverable path (exactly one): state the file, report, branch, or PR that will carry the result.
+- Evidence packet: cite stable source references such as `path:line`, `commit:<full-sha>:path:line`, or a durable URL.
 - Acceptance criteria:
-  - `{ACCEPTANCE_CRITERION}`
-- Non-goals: `{NON_GOALS}`
-- Stopping point: `{STOPPING_POINT}`
+  - preserve every criterion stated in the `# Task` section and verify each one.
+- Non-goals: honor explicit exclusions in the task and do not add unrelated scope.
+- Stopping point: stop only after the acceptance criteria are verified.
 - Method owner: You own the specialist method.
   Choose, execute, and justify the method needed to meet the goal; escalate only a real decision or blocker.
-- Blocker: `{BLOCKER_OR_NONE}`
-- Next action: `{NEXT_ACTION_OR_NONE}`
+- Blocker: report `none` unless a real blocker prevents completion.
+- Next action: report the next concrete action while work is in progress, or `none` when complete.
 - Completion return shape:
-  `done: {delivery status}; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}`
+  `done: <delivery status>; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>`
+Use the extracted values in status updates and the final completion report. Do not report completion without evidence and per-criterion pass/fail results.
+At completion, replace the angle-bracket labels in the return shape with actual values.
 EOF
 }
 
@@ -175,7 +177,7 @@ The report is the only thing that survives, so anything worth keeping must be in
 # Definition of done
 Write your findings to $DATA/$ID/report.md.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
-When the report is complete, append \`done: report $DATA/$ID/report.md; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable scout.
+When the report is complete, append \`done: report $DATA/$ID/report.md; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable scout.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
 echo "scaffolded: $BRIEF (scout; replace {TASK})"
@@ -198,7 +200,7 @@ This project ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`fm/$ID\`. Do NOT push, do NOT open a PR, do NOT merge.
 Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass; fix anything you broke.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
-When it is implemented and committed, append \`done: ready in branch fm/$ID; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
+When it is implemented and committed, append \`done: ready in branch fm/$ID; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 Firstmate then reviews your branch diff, the captain approves, and firstmate merges it into local \`main\`.
 EOF
 )
@@ -211,7 +213,7 @@ EOF
 This project ships **direct-PR**: you raise the PR yourself, backed by focused review and tests. There is no separate validation pipeline to run.
 The task is complete only when committed on your branch.
 Before you push, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
-When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
+When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
 The captain reviews and merges the PR; firstmate relays it.
 EOF

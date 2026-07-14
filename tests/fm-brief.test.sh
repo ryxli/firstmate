@@ -39,33 +39,37 @@ check_assignment_contract() {
   local brief=$1
   grep -qF '# Assignment contract' "$brief" \
     || fail "$brief has no assignment contract"
-  grep -qF 'Do not proceed with a missing required field.' "$brief" \
-    || fail "$brief does not flag incomplete assignment fields"
-  grep -qF -- '- Falsifiable goal (exactly one): `{GOAL}`' "$brief" \
-    || fail "$brief has no falsifiable goal field"
-  grep -qF -- '- Named deliverable path (exactly one): `{DELIVERABLE_PATH}`' "$brief" \
-    || fail "$brief has no named deliverable path field"
-  grep -qF 'Evidence packet: `{EVIDENCE_PACKET}` - cite stable source references' "$brief" \
+  grep -qF 'only required pre-spawn substitution is `{TASK}`' "$brief" \
+    || fail "$brief did not preserve the documented single substitution"
+  grep -qF -- '- Falsifiable goal (exactly one): state one measurable outcome' "$brief" \
+    || fail "$brief has no falsifiable goal guidance"
+  grep -qF -- '- Named deliverable path (exactly one): state the file, report, branch, or PR' "$brief" \
+    || fail "$brief has no named deliverable guidance"
+  grep -qF 'Evidence packet: cite stable source references' "$brief" \
     || fail "$brief has no stable-reference evidence packet"
   grep -qF -- '- Acceptance criteria:' "$brief" \
-    || fail "$brief has no acceptance criteria field"
-  grep -qF -- '- Non-goals: `{NON_GOALS}`' "$brief" \
-    || fail "$brief has no non-goals field"
-  grep -qF -- '- Stopping point: `{STOPPING_POINT}`' "$brief" \
-    || fail "$brief has no stopping point field"
+    || fail "$brief has no acceptance criteria guidance"
+  grep -qF -- '- Non-goals: honor explicit exclusions' "$brief" \
+    || fail "$brief has no non-goals guidance"
+  grep -qF -- '- Stopping point: stop only after the acceptance criteria are verified.' "$brief" \
+    || fail "$brief has no stopping-point guidance"
   grep -qF -- '- Method owner: You own the specialist method.' "$brief" \
     || fail "$brief does not assign method ownership"
-  grep -qF -- '- Blocker: `{BLOCKER_OR_NONE}`' "$brief" \
-    || fail "$brief has no separate blocker field"
-  grep -qF -- '- Next action: `{NEXT_ACTION_OR_NONE}`' "$brief" \
-    || fail "$brief has no separate next-action field"
-  grep -qF 'done: {delivery status}; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}' "$brief" \
-    || fail "$brief has no literal completion return shape"
+  grep -qF -- '- Blocker: report `none` unless a real blocker' "$brief" \
+    || fail "$brief has no blocker guidance"
+  grep -qF -- '- Next action: report the next concrete action' "$brief" \
+    || fail "$brief has no next-action guidance"
+  grep -qF 'Completion return shape:' "$brief" \
+    || fail "$brief has no completion return shape"
+  grep -qF 'done: <delivery status>; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>' "$brief" \
+    || fail "$brief has no evidence-first completion return shape"
+  ! grep -Eq '\{(GOAL|DELIVERABLE_PATH|EVIDENCE_PACKET|ACCEPTANCE_CRITERION|NON_GOALS|STOPPING_POINT|BLOCKER_OR_NONE|NEXT_ACTION_OR_NONE|SOURCE_REF)\}' "$brief" \
+    || fail "$brief still has legacy assignment placeholders"
 }
 
 check_assignment_completion() {
   local brief=$1 prefix=$2
-  grep -qF "append \`$prefix; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}\` to the status file, then stop." "$brief" \
+  grep -qF "append \`$prefix; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop." "$brief" \
     || fail "$brief does not use the assignment completion return"
 }
 
