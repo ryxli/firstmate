@@ -14,6 +14,7 @@ mkdirSync(join(home, "data"), { recursive: true });
 mkdirSync(join(home, "sbin"), { recursive: true });
 writeFileSync(join(home, "sbin", "fm-spawn.sh"), "");
 writeFileSync(join(home, "data", "backlog.md"), "## In flight\n## Queued\n## Done\n");
+writeFileSync(join(home, "data", "fleet-capabilities.json"), JSON.stringify({ schema: "firstmate.capability-registry/v1", targets: [{ id: "home", home, required_probe_result: { activation: "ok" } }] }));
 writeFileSync(join(state, "self.meta"), "kind=ship\npane=w1:p1\nworker=self\n");
 writeFileSync(join(state, "self.status"), "working: activation\n");
 symlinkSync(join(root, "AGENTS.md"), join(home, "AGENTS.md"));
@@ -62,6 +63,8 @@ if (receipt.session_path !== join(home, "session.jsonl")) throw new Error("recei
 if (receipt.pane_id !== "w1:p1") throw new Error("receipt pane id mismatch");
 if (!/^\d{4}-\d{2}-\d{2}T/.test(receipt.started_at)) throw new Error("receipt start time is not ISO");
 if (!/^[0-9a-f]{64}$/.test(receipt.manifest_sha256)) throw new Error("receipt manifest digest missing");
+if (!/^[0-9a-f]{40}$/.test(receipt.source_revision)) throw new Error("source revision missing from receipt");
+if (receipt.required_probe_result?.activation !== "ok") throw new Error("required probe result missing from receipt");
 if (!Array.isArray(receipt.manifest) || receipt.manifest.length === 0) throw new Error("receipt manifest missing");
 if (!receipt.manifest.some((entry) => entry.path === ".omp/extensions/bridge/index.ts")) throw new Error("recursive extension manifest missing");
 const { collectSnapshot } = await import(pathToFileURL(join(root, ".omp/extensions/bridge/collect.ts")).href);

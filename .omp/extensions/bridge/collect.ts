@@ -571,7 +571,7 @@ interface ManifestHashResult {
 	reason?: string;
 }
 
-function manifestHash(home: string): ManifestHashResult {
+export function manifestHash(home: string): ManifestHashResult {
 	const paths: string[] = ["AGENTS.md"];
 	const sizes = new Map<string, number>();
 	let totalBytes = 0;

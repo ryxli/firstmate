@@ -100,6 +100,7 @@ import { existsSync, unwatchFile, watchFile } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { capabilityForHome, readCapabilityRegistry, readSourceRevision } from "./bridge/update";
 import { connect, type Socket } from "node:net";
 
 // ============================== PURE SEAM ==============================
@@ -353,6 +354,8 @@ export interface ActivationReceipt {
 	started_at: string;
 	manifest_sha256: string;
 	manifest: ActivationManifestEntry[];
+	source_revision?: string;
+	required_probe_result?: unknown;
 }
 
 interface ActivationIdentity {
@@ -454,6 +457,9 @@ async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 		return;
 	}
 	const manifest = await loadOnceManifest(sup.ctx);
+	const sourceHome = process.env.FM_FLEET_SOURCE_HOME || process.env.FM_ROOT_OVERRIDE || process.env.FM_ROOT || sup.ctx.cwd;
+	const source = readSourceRevision(sourceHome);
+	const capability = capabilityForHome(readCapabilityRegistry(sup.ctx.cwd).registry, sup.ctx.cwd);
 	const receipt: ActivationReceipt = {
 		schema: "firstmate.activation-receipt/v1",
 		...identity,
@@ -461,6 +467,8 @@ async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 		started_at: new Date().toISOString(),
 		manifest_sha256: manifestDigest(manifest),
 		manifest,
+		...(source.revision ? { source_revision: source.revision } : {}),
+		...(capability?.requiredProbe !== undefined ? { required_probe_result: capability.requiredProbe } : {}),
 	};
 	const path = activationReceiptPath(sup.ctx);
 	const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;

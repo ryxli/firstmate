@@ -9,6 +9,7 @@ import {
 	normalizeTaskState,
 } from "../.omp/extensions/bridge/collect";
 import type { AgentRow, FleetSnapshot, TaskRow } from "../.omp/extensions/bridge/fleet";
+import { updateFleet } from "../.omp/extensions/bridge/update";
 
 function output(value: unknown): void {
 	process.stdout.write(`${encode(value, { keyFolding: "safe" })}\n`);
@@ -17,9 +18,10 @@ function output(value: unknown): void {
 function commandHelp(command = "fm-axi"): Record<string, unknown> {
 	return {
 		command,
-		usage: "fm-axi fleet [--check] [tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics]",
+		usage: "fm-axi fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics]",
 		commands: [
 			{ command: "fleet", description: "Compact activation, health, attention, task, and agent overview." },
+			{ command: "fleet update", description: "Selectively fast-forward registered homes and prove live-session reloads." },
 			{ command: "fleet tasks", description: "Ranked task list, optionally filtered by state." },
 			{ command: "fleet task get <id>", description: "Full task record; bare ids must be unique." },
 			{ command: "fleet agent get <id>", description: "Full agent record; bare ids must be unique." },
@@ -105,6 +107,17 @@ async function main(argv: string[]): Promise<number> {
 	const command = argv[1];
 	if (command === "fleet") return validationError(`Unexpected argument: ${argv.slice(1).join(" ")}`, ["Run `fm-axi fleet --help` for available commands."]);
 	try {
+		if (command === "update") {
+			if (argv.length === 3 && (argv[2] === "--help" || argv[2] === "-h")) {
+				output({ command: "fleet update", usage: "fm-axi fleet update", description: "Selectively fast-forward registered homes and prove live-session reloads." });
+				return 0;
+			}
+			if (argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Use `fm-axi fleet update` without arguments."]);
+			const update = await updateFleet();
+			output({ command: "fleet update", result: update });
+			if (update.results.some(target => target.status === "failed")) return 1;
+			return update.results.some(target => target.status === "pending") ? 1 : 0;
+		}
 		if (command === "tasks") {
 			let state: TaskRow["state"] | undefined;
 			if (argv.length === 3 && (argv[2] === "--help" || argv[2] === "-h")) {
@@ -148,14 +161,13 @@ async function main(argv: string[]): Promise<number> {
 			if (argv[2] === "--help" || argv[2] === "-h") {
 				if (argv.length !== 3) return validationError(`Unexpected argument: ${argv.slice(3).join(" ")}`, ["Use `fm-axi fleet metrics --help` without additional arguments."]);
 				output({ command: "fleet metrics", usage: "fm-axi fleet metrics", description: "Optional cost and productivity metrics." });
-				return 0;
 			}
 			if (argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Use `fm-axi fleet metrics` without arguments."]);
 			const snapshot = await collectSnapshot(new Date().toISOString(), undefined, { includeMetrics: true });
 			output({ command: "fleet metrics", result: snapshot.metrics ?? null });
 			return 0;
 		}
-		if (!["fleet", "tasks", "task", "agent", "metrics"].includes(command)) {
+		if (!["fleet", "update", "tasks", "task", "agent", "metrics"].includes(command)) {
 			return validationError(`Unknown fleet command: ${command}`, ["Run `fm-axi fleet --help` for available commands."]);
 		}
 		if (command !== "fleet" || argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Run `fm-axi fleet --help` for available commands."]);
