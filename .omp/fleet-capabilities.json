@@ -1,0 +1,17 @@
+{
+  "schema": "firstmate.capability-registry/v2",
+  "roles": [
+    {
+      "id": "firstmate",
+      "selector": { "role": "firstmate" },
+      "surfaces": ["AGENTS.md", ".omp/extensions", "sbin"],
+      "required_probe_result": { "activation": "ok" }
+    },
+    {
+      "id": "secondmate",
+      "selector": { "role": "secondmate" },
+      "surfaces": ["AGENTS.md", ".omp/extensions", "sbin"],
+      "required_probe_result": { "activation": "ok" }
+    }
+  ]
+}

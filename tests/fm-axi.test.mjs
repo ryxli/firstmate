@@ -27,6 +27,7 @@ function run(args, extra = {}) {
       FM_FLEET_PANES_FILE: panes,
       PATH: `${fakebin}:${process.env.PATH}`,
       FM_FLEET_STATS_FILE: stats,
+      FM_FLEET_SOURCE_HOME: home,
       FM_ROOT_OVERRIDE: root,
       ...extra,
     },
