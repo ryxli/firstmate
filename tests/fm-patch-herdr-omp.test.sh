@@ -204,6 +204,50 @@ test_apply_is_idempotent() {
   [ "$(cat "$f")" = "$before" ] || fail "second apply must not modify an already-patched file"
   pass "re-applying to an already-patched file is a no-op"
 }
+test_patch_check_requires_publish_guard_at_publish_state() {
+  local fixture="$TMP_ROOT/missing-publish-guard.ts"
+  write_pristine_fixture "$fixture"
+  "$PATCHER" --file "$fixture" >/dev/null || fail "initial apply failed"
+
+  python3 - "$fixture" <<'PY' || fail "could not remove the real publishState guard"
+import io, re, sys
+
+path = sys.argv[1]
+src = io.open(path, encoding="utf-8").read()
+guard = "    if (!rootSession || !validateRootSession(undefined, latestCtx)) return;\n"
+publish_re = re.compile(
+    r'(  function publishState\(force = false\)(?:: [^{]+)? \{\n)'
+    + re.escape(guard),
+)
+src, count = publish_re.subn(r"\1", src, count=1)
+if count != 1:
+    raise SystemExit(f"expected one publishState guard, removed {count}")
+io.open(path, "w", encoding="utf-8").write(src)
+PY
+
+  "$PATCHER" --check --file "$fixture" \
+    && fail "--check accepted a partially patched file with its publishState guard removed"
+  "$PATCHER" --file "$fixture" >/dev/null \
+    || fail "apply did not restore a missing publishState guard"
+  "$PATCHER" --check --file "$fixture" \
+    || fail "--check rejected the repaired publishState guard"
+
+  python3 - "$fixture" <<'PY' || fail "publishState guard was not restored at its actual location"
+import io, re, sys
+
+src = io.open(sys.argv[1], encoding="utf-8").read()
+guard = "    if (!rootSession || !validateRootSession(undefined, latestCtx)) return;\n"
+publish_re = re.compile(
+    r'  function publishState\(force = false\)(?:: [^{]+)? \{\n'
+    + re.escape(guard),
+)
+if len(publish_re.findall(src)) != 1:
+    raise SystemExit("publishState is not immediately guarded")
+PY
+
+  pass "patch integrity check requires the publishState guard instead of heartbeat-only text"
+}
+
 
 test_upgrade_from_prior_buggy_heartbeat_converges() {
   local fresh="$TMP_ROOT/fresh.ts"
@@ -272,6 +316,198 @@ PY
     || fail "upgrading a prior-buggy-patched file must converge to the same content as a fresh apply"
 
   pass "a file carrying the prior buggy heartbeat is detected as unpatched and upgrades to the corrected shape"
+}
+
+test_upgrade_from_actual_parent_7a20f3d() {
+  command -v bun >/dev/null 2>&1 \
+    || fail "bun is required for the parent patch upgrade regression"
+
+  local fixture="$TMP_ROOT/parent-7a20f3d.ts"
+  local harness="$TMP_ROOT/parent-7a20f3d-harness.mjs"
+  write_pristine_fixture "$fixture"
+  "$PATCHER" --file "$fixture" >/dev/null || fail "current patch apply failed"
+
+  # Replace the current helper with the exact helper emitted by parent
+  # commit 7a20f3d. This is the reviewed parent output, not a hand-trimmed
+  # approximation, and leaves the rest of the patched integration intact.
+  python3 - "$fixture" <<'PY' || fail "could not install the actual parent helper"
+import io, re, sys
+
+path = sys.argv[1]
+src = io.open(path, encoding="utf-8").read()
+parent_helper = '''// fm-exact-root-session-claim-v1: process-local exact root authority.
+type RootSessionClaim = {
+  rootSessionFile: string;
+  rootSessionId: string;
+};
+
+const rootSessionClaimKey = Symbol.for("herdr:omp:root-session-claim:v1");
+const rootSessionReporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
+const rootSessionModuleReload =
+  (globalThis as any)[rootSessionReporterLoadKey] === true;
+(globalThis as any)[rootSessionReporterLoadKey] = true;
+const allowedRootStartReasons = new Set(["startup", "new", "resume", "fork"]);
+
+function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined {
+  try {
+    const rootSessionFile = ctx?.sessionManager?.getSessionFile?.();
+    const rootSessionId = ctx?.sessionManager?.getSessionId?.();
+    if (
+      typeof rootSessionFile !== "string" ||
+      rootSessionFile.length === 0 ||
+      typeof rootSessionId !== "string" ||
+      rootSessionId.length === 0
+    ) {
+      return undefined;
+    }
+    return { rootSessionFile, rootSessionId };
+  } catch {
+    return undefined;
+  }
+}
+
+function hasRootChildMarker(event: any, ctx: any): boolean {
+  if (event?.agentKind === "sub" || ctx?.agentKind === "sub") {
+    return true;
+  }
+  try {
+    const branch = ctx?.sessionManager?.getBranch?.();
+    return !Array.isArray(branch) || branch.some((entry: any) => entry?.type === "session_init");
+  } catch {
+    return true;
+  }
+}
+
+function processRootSessionClaim(): RootSessionClaim | undefined {
+  const claim = (globalThis as any)[rootSessionClaimKey];
+  if (
+    typeof claim?.rootSessionFile !== "string" ||
+    typeof claim?.rootSessionId !== "string"
+  ) {
+    return undefined;
+  }
+  return claim;
+}
+
+function sameRootSessionClaim(
+  left: RootSessionClaim | undefined,
+  right: RootSessionClaim | undefined,
+): boolean {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.rootSessionFile === right.rootSessionFile &&
+    left.rootSessionId === right.rootSessionId
+  );
+}
+
+'''
+helper_re = re.compile(
+    r'// fm-exact-root-session-claim-v2: process-local exact root authority\.\n'
+    r'.*?(?=export default function)',
+    re.S,
+)
+src, count = helper_re.subn(parent_helper, src, count=1)
+if count != 1:
+    raise SystemExit(f"expected one current helper, replaced {count}")
+io.open(path, "w", encoding="utf-8").write(src)
+PY
+
+  "$PATCHER" --check --file "$fixture" \
+    && fail "--check accepted actual parent 7a20f3d output as current"
+  "$PATCHER" --file "$fixture" >/dev/null \
+    || fail "upgrade from actual parent 7a20f3d output failed"
+  "$PATCHER" --check --file "$fixture" \
+    || fail "--check rejected the upgraded parent output"
+
+  grep -q "fm-exact-root-session-claim-v2" "$fixture" \
+    || fail "upgrade did not version the root helper marker"
+  grep -q "rootSessionFile?: string;" "$fixture" \
+    || fail "upgrade did not install the ID-only root helper"
+
+  cat >"$harness" <<'MJS'
+const fixturePath = process.argv[2];
+const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
+const reporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(`FAIL: ${message}`);
+    process.exit(1);
+  }
+}
+
+function ctx(file, id, hasUI = true) {
+  return {
+    hasUI,
+    agentKind: "main",
+    isIdle: () => false,
+    sessionManager: {
+      getSessionFile: () => file,
+      getSessionId: () => id,
+      getBranch: () => [],
+    },
+  };
+}
+
+let serial = 0;
+async function loadRuntime() {
+  const handlers = new Map();
+  const pi = {
+    on(event, fn) {
+      handlers.set(event, fn);
+      return pi;
+    },
+  };
+  const originalSetInterval = globalThis.setInterval;
+  globalThis.setInterval = () => ({ unref() {} });
+  const mod = await import(`${fixturePath}?parent-upgrade=${++serial}`);
+  mod.default(pi);
+  globalThis.setInterval = originalSetInterval;
+  return { handlers, pi };
+}
+
+const oldFile = "/sessions/parent-before-move.jsonl";
+const newFile = "/sessions/parent-after-move.jsonl";
+const stableId = "parent-stable-id";
+delete globalThis[claimKey];
+delete globalThis[reporterLoadKey];
+
+const root = await loadRuntime();
+root.handlers.get("session_start")?.({ reason: "startup" }, ctx(oldFile, stableId));
+const moved = await loadRuntime();
+moved.handlers.get("session_switch")?.(
+  { reason: "resume", previousSessionFile: oldFile },
+  ctx(newFile, stableId, false),
+);
+assert(moved.pi.__test.getLog().length > 0, "upgraded parent output lost moved-root publication");
+assert(
+  globalThis[claimKey]?.rootSessionFile === newFile &&
+    globalThis[claimKey]?.rootSessionId === stableId,
+  `upgraded parent output kept the wrong moved-root claim: ${JSON.stringify(globalThis[claimKey])}`,
+);
+
+delete globalThis[claimKey];
+delete globalThis[reporterLoadKey];
+const memory = await loadRuntime();
+const memoryId = "parent-memory-id";
+memory.handlers.get("session_start")?.({ reason: "startup" }, ctx(undefined, memoryId));
+assert(memory.pi.__test.getLog().length > 0, "upgraded parent output rejected an ID-only root");
+assert(
+  globalThis[claimKey]?.rootSessionId === memoryId &&
+    globalThis[claimKey]?.rootSessionFile === undefined,
+  `upgraded parent output did not retain an ID-only claim: ${JSON.stringify(globalThis[claimKey])}`,
+);
+
+console.log("PASS: actual 7a20f3d helper upgraded to stable-ID and ID-only root authority");
+MJS
+
+  local out
+  out=$(bun run "$harness" "$fixture" 2>&1)
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "actual parent upgrade runtime regression: $out"
+  printf '%s' "$out" | grep -q "^PASS" || fail "actual parent upgrade harness did not report PASS: $out"
+  pass "actual 7a20f3d output is detected, upgraded, and runtime-safe"
 }
 
 test_missing_target_skips_cleanly() {
@@ -514,10 +750,23 @@ for (const hasUI of [undefined, false, undefined, false]) {
   assert(exactClaim().rootSessionId === "root-id", "same-session reload mutated the claim");
   reloaded.heartbeat?.();
   assert(reloaded.pi.__test.getLog().length > 1, "reloaded heartbeat did not preserve publication");
+  if (reloadIndex === 1) {
+    const oldOwnerPublishCount = root.pi.__test.getLog().length;
+    root.heartbeat?.();
+    assert(
+      root.pi.__test.getLog().length === oldOwnerPublishCount,
+      "old reporter heartbeat published after reload ownership transfer",
+    );
+    assert(
+      exactClaim().rootSessionFile === "/sessions/root.jsonl" &&
+        exactClaim().rootSessionId === "root-id",
+      "old reporter heartbeat changed the claim after reload ownership transfer",
+    );
+  }
 }
 
 // An interactive replacement may move authority, but only for the approved
-// startup/new/resume/fork reasons and only to its exact tuple.
+// startup/new/resume/fork/handoff reasons and only to its exact tuple.
 let previousFile = "/sessions/root.jsonl";
 for (const reason of ["fork", "new", "resume"]) {
   const replacement = await loadRuntime();
@@ -527,12 +776,29 @@ for (const reason of ["fork", "new", "resume"]) {
     { reason, previousSessionFile: previousFile },
     ctx(replacementFile, replacementId),
   );
+
   assert(
     exactClaim().rootSessionFile === replacementFile && exactClaim().rootSessionId === replacementId,
     `interactive ${reason} did not replace the exact root claim`,
   );
   previousFile = replacementFile;
 }
+// OMP's current root handoff arrives as session_switch(reason=handoff) with a
+// new session ID. It must be an allowed lifecycle takeover.
+const handoff = await loadRuntime();
+const handoffFile = "/sessions/handoff.jsonl";
+const handoffId = "handoff-id";
+handoff.handlers.get("session_switch")?.(
+  { reason: "handoff", previousSessionFile: previousFile },
+  ctx(handoffFile, handoffId),
+);
+assert(
+  exactClaim().rootSessionFile === handoffFile &&
+    exactClaim().rootSessionId === handoffId,
+  `handoff did not replace the root claim: ${JSON.stringify(exactClaim())}`,
+);
+assert(handoff.pi.__test.getLog().length > 0, "handoff lifecycle did not publish");
+previousFile = handoffFile;
 
 const established = { ...exactClaim() };
 
@@ -586,6 +852,155 @@ MJS
   [ "$fresh_rc" -eq 0 ] || fail "stale root claim survived process exit: $fresh_out"
   printf '%s' "$fresh_out" | grep -q "^PASS" || fail "fresh-process claim check did not report PASS: $fresh_out"
   pass "exact-session root claim is process-global, reload-safe, replaceable, and child-safe"
+}
+
+test_root_move_and_id_only_claims() {
+  command -v bun >/dev/null 2>&1 \
+    || fail "bun is required for root move and in-memory session regressions"
+
+  local fixture="$TMP_ROOT/root-identity-runtime.ts"
+  local harness="$TMP_ROOT/root-identity-harness.mjs"
+  write_pristine_fixture "$fixture"
+  "$PATCHER" --file "$fixture" || fail "apply for root identity regression fixture failed"
+
+  cat >"$harness" <<'MJS'
+const fixturePath = process.argv[2];
+const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
+const reporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(`FAIL: ${message}`);
+    process.exit(1);
+  }
+}
+
+function ctx(file, id, { hasUI = true, agentKind = "main", sessionInit = false } = {}) {
+  const getFile = typeof file === "function" ? file : () => file;
+  return {
+    hasUI,
+    agentKind,
+    isIdle: () => false,
+    sessionManager: {
+      getSessionFile: getFile,
+      getSessionId: () => id,
+      getBranch: () => sessionInit ? [{ type: "session_init" }] : [],
+    },
+  };
+}
+
+let serial = 0;
+async function loadRuntime() {
+  const handlers = new Map();
+  let heartbeat = null;
+  const pi = {
+    on(event, fn) {
+      handlers.set(event, fn);
+      return pi;
+    },
+  };
+  const originalSetInterval = globalThis.setInterval;
+  globalThis.setInterval = (fn, ms) => {
+    if (ms === 15000) heartbeat = fn;
+    return { unref() {} };
+  };
+  const mod = await import(`${fixturePath}?identity=${++serial}`);
+  mod.default(pi);
+  globalThis.setInterval = originalSetInterval;
+  return { handlers, pi, heartbeat };
+}
+
+delete globalThis[claimKey];
+delete globalThis[reporterLoadKey];
+
+// The root remains the same session when its persisted file moves. The
+// resumed context deliberately lacks hasUI, so only the retained session ID
+// can preserve authority.
+const root = await loadRuntime();
+const oldFile = "/sessions/root-before-move.jsonl";
+const stableId = "stable-root-id";
+const rootCtx = ctx(oldFile, stableId);
+root.handlers.get("session_start")?.({ reason: "startup" }, rootCtx);
+assert(root.pi.__test.getLog().length > 0, "root did not publish before its file moved");
+
+const moved = await loadRuntime();
+const newFile = "/sessions/root-after-move.jsonl";
+let movedFile = newFile;
+const movedCtx = ctx(() => movedFile, stableId, { hasUI: false });
+moved.handlers.get("session_switch")?.(
+  { reason: "resume", previousSessionFile: oldFile },
+  movedCtx,
+);
+assert(moved.pi.__test.getLog().length > 0, "moved root lost publication with stable session ID");
+assert(
+  globalThis[claimKey]?.rootSessionFile === newFile &&
+    globalThis[claimKey]?.rootSessionId === stableId,
+  `moved root did not refresh the claimed session file: ${JSON.stringify(globalThis[claimKey])}`,
+);
+
+// SessionManager.moveTo mutates the live session file without a lifecycle
+// event. The current module owns the process claim, so its heartbeat may
+// perform the stable-ID transition.
+const movedToFile = "/sessions/root-after-moveto.jsonl";
+movedFile = movedToFile;
+moved.heartbeat?.();
+assert(
+  globalThis[claimKey]?.rootSessionFile === movedToFile &&
+    globalThis[claimKey]?.rootSessionId === stableId,
+  `same-module moveTo did not update the claim: ${JSON.stringify(globalThis[claimKey])}`,
+);
+
+// The old module still owns an interval and its latest context points at the
+// old file. Stable-ID matching is forbidden here, so it cannot reclaim the
+// moved root or pass publishState's validation guard.
+const oldHeartbeatPublishCount = root.pi.__test.getLog().length;
+root.heartbeat?.();
+assert(
+  globalThis[claimKey]?.rootSessionFile === movedToFile &&
+    globalThis[claimKey]?.rootSessionId === stableId,
+  `stale old heartbeat reclaimed the moved root: ${JSON.stringify(globalThis[claimKey])}`,
+);
+assert(
+  root.pi.__test.getLog().length === oldHeartbeatPublishCount,
+  "stale old heartbeat published after the root file moved",
+);
+
+// `omp --no-session` is an interactive in-memory session with an ID but no
+// persisted file. It must establish authority and retain it across reload.
+delete globalThis[claimKey];
+delete globalThis[reporterLoadKey];
+const memory = await loadRuntime();
+const memoryId = "in-memory-root-id";
+const memoryCtx = ctx(undefined, memoryId);
+memory.handlers.get("session_start")?.({ reason: "startup" }, memoryCtx);
+assert(memory.pi.__test.getLog().length > 0, "id-only interactive session did not publish");
+assert(
+  globalThis[claimKey]?.rootSessionId === memoryId &&
+    globalThis[claimKey]?.rootSessionFile === undefined,
+  `id-only session did not establish an ID-only claim: ${JSON.stringify(globalThis[claimKey])}`,
+);
+
+const memoryReload = await loadRuntime();
+memoryReload.handlers.get("session_start")?.(
+  { reason: "resume" },
+  ctx(undefined, memoryId, { hasUI: false }),
+);
+assert(memoryReload.pi.__test.getLog().length > 0, "id-only root lost authority after reload");
+assert(
+  globalThis[claimKey]?.rootSessionId === memoryId &&
+    globalThis[claimKey]?.rootSessionFile === undefined,
+  `id-only claim changed during reload: ${JSON.stringify(globalThis[claimKey])}`,
+);
+
+console.log("PASS: stable-ID handoff and same-module moveTo survived, while the old interval was blocked and an id-only claim was retained");
+MJS
+
+  local out
+  out=$(bun run "$harness" "$fixture" 2>&1)
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "root move or id-only session regression: $out"
+  printf '%s' "$out" | grep -q "^PASS" || fail "root identity harness did not report PASS: $out"
+  pass "stable-ID handoff and same-module moveTo survive, stale intervals are blocked, and --no-session claims are retained"
 }
 
 test_live_resumed_root_heartbeat_proof() {
@@ -702,9 +1117,12 @@ MJS
 
 test_pristine_check_reports_unpatched
 test_apply_enforces_invariant
+test_patch_check_requires_publish_guard_at_publish_state
 test_apply_is_idempotent
 test_upgrade_from_prior_buggy_heartbeat_converges
+test_upgrade_from_actual_parent_7a20f3d
 test_missing_target_skips_cleanly
 test_active_turn_survives_background_job_wait_across_heartbeat
 test_exact_session_root_claim_lifecycle
 test_live_resumed_root_heartbeat_proof
+test_root_move_and_id_only_claims
