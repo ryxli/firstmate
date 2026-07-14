@@ -35,36 +35,72 @@ check_ship_setup() {
     || fail "$brief still instructs git checkout -b"
 }
 
+check_assignment_contract() {
+  local brief=$1
+  grep -qF '# Assignment contract' "$brief" \
+    || fail "$brief has no assignment contract"
+  grep -qF 'Do not proceed with a missing required field.' "$brief" \
+    || fail "$brief does not flag incomplete assignment fields"
+  grep -qF -- '- Falsifiable goal (exactly one): `{GOAL}`' "$brief" \
+    || fail "$brief has no falsifiable goal field"
+  grep -qF -- '- Named deliverable path (exactly one): `{DELIVERABLE_PATH}`' "$brief" \
+    || fail "$brief has no named deliverable path field"
+  grep -qF 'Evidence packet: `{EVIDENCE_PACKET}` - cite stable source references' "$brief" \
+    || fail "$brief has no stable-reference evidence packet"
+  grep -qF -- '- Acceptance criteria:' "$brief" \
+    || fail "$brief has no acceptance criteria field"
+  grep -qF -- '- Non-goals: `{NON_GOALS}`' "$brief" \
+    || fail "$brief has no non-goals field"
+  grep -qF -- '- Stopping point: `{STOPPING_POINT}`' "$brief" \
+    || fail "$brief has no stopping point field"
+  grep -qF -- '- Method owner: You own the specialist method.' "$brief" \
+    || fail "$brief does not assign method ownership"
+  grep -qF -- '- Blocker: `{BLOCKER_OR_NONE}`' "$brief" \
+    || fail "$brief has no separate blocker field"
+  grep -qF -- '- Next action: `{NEXT_ACTION_OR_NONE}`' "$brief" \
+    || fail "$brief has no separate next-action field"
+  grep -qF 'done: {delivery status}; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}' "$brief" \
+    || fail "$brief has no literal completion return shape"
+}
+
+check_assignment_completion() {
+  local brief=$1 prefix=$2
+  grep -qF "append \`$prefix; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}\` to the status file, then stop." "$brief" \
+    || fail "$brief does not use the assignment completion return"
+}
+
 brief=$(scaffold task-a1 app)
-grep -qF 'append `done: PR {url}` to the status file, then stop.' "$brief" \
-  || fail "direct-PR ship brief did not use status-file completion"
+check_assignment_contract "$brief"
+check_assignment_completion "$brief" 'done: PR {url}'
 ! grep -qF 'use `peer_send` to send' "$brief" \
   || fail "ordinary ship brief required unavailable peer bus"
 check_ship_setup "$brief" task-a1
-pass "direct-PR ship brief uses the precreated fm/<id> branch and status completion"
+pass "direct-PR ship brief has the evidence-first assignment contract and status completion"
 
 brief=$(scaffold task-b2 legacy)
 check_ship_setup "$brief" task-b2
+check_assignment_contract "$brief"
+check_assignment_completion "$brief" 'done: PR {url}'
 grep -qF 'This project ships **direct-PR**' "$brief" \
   || fail "no-mistakes registry entry did not produce a direct-PR ship brief"
 pass "legacy no-mistakes project scaffolds a direct-PR ship brief"
 
 brief=$(scaffold task-local local)
-grep -qF 'append `done: ready in branch fm/task-local` to the status file, then stop.' "$brief" \
-  || fail "local-only brief did not use status-file completion"
+check_assignment_contract "$brief"
+check_assignment_completion "$brief" 'done: ready in branch fm/task-local'
 ! grep -qF 'use `peer_send` to send' "$brief" \
   || fail "local-only brief required unavailable peer bus"
-pass "local-only ship brief uses status-file completion"
+pass "local-only ship brief has the evidence-first assignment contract and status completion"
 
 scout="$TMP/home/data/scout-d4/brief.md"
 FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' FM_STATE_OVERRIDE='' \
   "$BRIEF" scout-d4 app --scout >/dev/null 2>&1 \
   || fail "fm-brief.sh failed for scout-d4/app"
-grep -qF 'append `done: {one-line conclusion}` to the status file, then stop.' "$scout" \
-  || fail "scout brief did not use status-file completion"
+check_assignment_contract "$scout"
+check_assignment_completion "$scout" "done: report $TMP/home/data/scout-d4/report.md"
 ! grep -qF 'use `peer_send` to send' "$scout" \
   || fail "scout brief required unavailable peer bus"
-pass "scout brief uses status-file completion"
+pass "scout brief has the evidence-first assignment contract and status completion"
 
 secondmate="$TMP/home/data/secondmate-c3/brief.md"
 FM_HOME="$TMP/home" FM_SECONDMATE_CHARTER='operations supervision' \

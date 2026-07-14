@@ -58,6 +58,29 @@ shell_quote() {
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
 REPORT_HELPER=$(shell_quote "$FM_ROOT/sbin/fm-report.sh")
 SUPERVISOR_ID=$(fm_supervisor_slug "$CONFIG")
+assignment_contract() {
+  cat <<'EOF'
+# Assignment contract
+Replace every `{...}` field below before work begins.
+Do not proceed with a missing required field.
+- Falsifiable goal (exactly one): `{GOAL}`
+- Named deliverable path (exactly one): `{DELIVERABLE_PATH}`
+- Evidence packet: `{EVIDENCE_PACKET}` - cite stable source references such as `path:line`, `commit:<full-sha>:path:line`, or a durable URL.
+- Acceptance criteria:
+  - `{ACCEPTANCE_CRITERION}`
+- Non-goals: `{NON_GOALS}`
+- Stopping point: `{STOPPING_POINT}`
+- Method owner: You own the specialist method.
+  Choose, execute, and justify the method needed to meet the goal; escalate only a real decision or blocker.
+- Blocker: `{BLOCKER_OR_NONE}`
+- Next action: `{NEXT_ACTION_OR_NONE}`
+- Completion return shape:
+  `done: {delivery status}; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}`
+EOF
+}
+
+ASSIGNMENT_CONTRACT=$(assignment_contract)
+
 
 if [ "$KIND" = secondmate ]; then
 SECONDMATE_PROJECTS=""
@@ -126,6 +149,8 @@ You are a crewmate: an autonomous worker agent managed by firstmate. Work on you
 # Task
 {TASK}
 
+$ASSIGNMENT_CONTRACT
+
 # Setup
 You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.
 This is a SCOUT task: the deliverable is a written report, not a PR.
@@ -150,7 +175,7 @@ The report is the only thing that survives, so anything worth keeping must be in
 # Definition of done
 Write your findings to $DATA/$ID/report.md.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
-When the report is complete, append \`done: {one-line conclusion}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable scout.
+When the report is complete, append \`done: report $DATA/$ID/report.md; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable scout.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
 echo "scaffolded: $BRIEF (scout; replace {TASK})"
@@ -173,7 +198,7 @@ This project ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`fm/$ID\`. Do NOT push, do NOT open a PR, do NOT merge.
 Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass; fix anything you broke.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
-When it is implemented and committed, append \`done: ready in branch fm/$ID\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
+When it is implemented and committed, append \`done: ready in branch fm/$ID; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 Firstmate then reviews your branch diff, the captain approves, and firstmate merges it into local \`main\`.
 EOF
 )
@@ -186,7 +211,7 @@ EOF
 This project ships **direct-PR**: you raise the PR yourself, backed by focused review and tests. There is no separate validation pipeline to run.
 The task is complete only when committed on your branch.
 Before you push, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
-When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
+When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}; goal {GOAL}; deliverable {DELIVERABLE_PATH}; evidence {SOURCE_REF,...}; acceptance {criterion=pass|fail,...}; blocker {none|...}; next action {none|...}\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
 The captain reviews and merges the PR; firstmate relays it.
 EOF
@@ -199,6 +224,8 @@ You are a crewmate: an autonomous worker agent managed by firstmate. Work on you
 
 # Task
 {TASK}
+
+$ASSIGNMENT_CONTRACT
 
 # Setup
 You are in a disposable git worktree of $REPO, already on your branch \`fm/$ID\` (created off a clean default branch).
