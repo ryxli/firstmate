@@ -83,12 +83,19 @@ export interface RawHome {
 	metas: { id: string; text: string }[];
 	/** id -> raw status file contents. */
 	statuses: Record<string, string>;
+	/** id -> status-file modification time, in Unix seconds. */
+	statusMtimes?: Record<string, number>;
+	/** Recursive registry depth from the main home. */
+	depth?: number;
+	/** Pane id recorded by the activation receipt, when available. */
+	activationPane?: string;
 }
 
 export interface ParsedAgent {
 	id: string;
 	meta: Meta;
 	status?: StatusLine;
+	statusMtime?: number;
 }
 
 export interface ParsedHome {
@@ -97,7 +104,10 @@ export interface ParsedHome {
 	isMain: boolean;
 	backlog: Backlog;
 	agents: ParsedAgent[];
+	depth?: number;
+	activationPane?: string;
 }
+
 
 const STATUS_STATES: readonly StatusState[] = [
 	"working",
@@ -191,6 +201,13 @@ function parseItemId(body: string): { id: string; desc: string } {
 	return { id: clean, desc: "" };
 }
 
+/** Status-line states that take precedence over live Herdr status. */
+export function isTerminalStatus(status: StatusLine | undefined): boolean {
+	if (!status) return false;
+	if (["failed", "needs-decision", "blocked", "done"].includes(status.state)) return true;
+	return /\bready in branch\b|\bchecks green\b|\bpr ready\b|\bmerged\b/i.test(status.text);
+}
+
 /** Parse a backlog.md file into its In flight / Queued / Done sections. */
 export function parseBacklog(text: string | null): Backlog {
 	const backlog: Backlog = { inflight: [], queued: [], done: [] };
@@ -227,15 +244,17 @@ export function parseHome(raw: RawHome): ParsedHome {
 		const meta = parseMeta(id, text);
 		const statusText = raw.statuses[id];
 		const status = statusText !== undefined ? parseStatus(statusText) : undefined;
-		agents.push({ id, meta, status });
+		agents.push({ id, meta, status, statusMtime: raw.statusMtimes?.[id] });
 	}
 	agents.sort((a, b) => a.id.localeCompare(b.id));
 	return {
 		path: raw.path,
 		label: basename(raw.path),
+		activationPane: raw.activationPane,
 		isMain: raw.isMain,
 		backlog: parseBacklog(raw.backlogText),
 		agents,
+		depth: raw.depth,
 	};
 }
 
@@ -314,13 +333,15 @@ export interface TaskRow {
 
 /** Full state/meta record for an agent or supervisor pane. */
 export interface AgentRow {
-	/** Canonical owner-qualified identifier, `${owner}/${id}`. */
+	/** Canonical owner-qualified key, `${owner}/${id}`. */
 	key: string;
 	id: string;
 	owner: string;
 	kind?: string;
 	status?: string;
 	statusText?: string;
+	statusMtime?: number;
+	depth?: number;
 	pane?: string;
 	worker?: string;
 	domain?: string;
@@ -445,6 +466,15 @@ export function normalizeHomePath(path?: string): string {
 	return (path ?? "").replace(/\/+$/, "");
 }
 
+/** Resolve a home pane using explicit receipt/meta identity before safe fallback. */
+export function resolveHomePane(home: ParsedHome, homes: ParsedHome[], herdrByPane: Map<string, HerdrAgent>, herdrAll: HerdrAgent[]): HerdrAgent | undefined {
+	const linkedPane = home.activationPane ?? homes.flatMap(parent => parent.agents)
+		.find(agent => agent.meta.kind === "secondmate" && agent.meta.home && normalizeHomePath(agent.meta.home) === normalizeHomePath(home.path) && agent.meta.pane)?.meta.pane;
+	if (linkedPane) return herdrByPane.get(linkedPane);
+	const candidates = herdrAll.filter(agent => (!agent.agent || agent.agent === "omp") && normalizeHomePath(agent.cwd) === normalizeHomePath(home.path));
+	return candidates.length === 1 ? candidates[0] : undefined;
+}
+
 /** Resolve the one owner name used by both task and agent identifiers. */
 export function resolveOwnerByHome(homes: ParsedHome[]): Map<string, string> {
 	const owners = new Map<string, string>();
@@ -490,8 +520,8 @@ export function buildSnapshot(
 	const mainHome = homes.find(h => h.isMain) ?? null;
 
 	if (mainHome) {
-		// The firstmate: its own supervisor pane sits at the main-home cwd.
-		const ownPane = herdrAll.find(h => normPath(h.cwd) === normPath(mainHome.path));
+		// Prefer the activation receipt/meta pane, then a unique OMP cwd fallback.
+		const ownPane = resolveHomePane(mainHome, homes, herdrByPane, herdrAll);
 		if (ownPane?.pane_id) usedPanes.add(ownPane.pane_id);
 		mates.push({ name: mainHome.label, role: "firstmate", herdrStatus: ownPane?.agent_status, load: mainHome.backlog.inflight.length });
 
@@ -499,17 +529,16 @@ export function buildSnapshot(
 		for (const a of mainHome.agents) {
 			if (a.meta.kind !== "secondmate") continue;
 			const smHome = a.meta.home ? homeByPath.get(normPath(a.meta.home)) : undefined;
-			if (smHome) {
-				consumedHomes.add(normPath(smHome.path));
-			}
-			const herdr = a.meta.pane ? herdrByPane.get(a.meta.pane) : undefined;
+			if (smHome) consumedHomes.add(normPath(smHome.path));
+			const herdr = smHome ? resolveHomePane(smHome, homes, herdrByPane, herdrAll) : a.meta.pane ? herdrByPane.get(a.meta.pane) : undefined;
+			if (herdr?.pane_id) usedPanes.add(herdr.pane_id);
 			mates.push({ name: a.id, role: "secondmate", herdrStatus: herdr?.agent_status, load: smHome ? smHome.backlog.inflight.length : 0 });
 		}
 
 		// Registered secondmate homes with no linking meta (recovery transient).
 		for (const smHome of secondmateHomes) {
 			if (consumedHomes.has(normPath(smHome.path))) continue;
-			const own = herdrAll.find(h => normPath(h.cwd) === normPath(smHome.path));
+			const own = resolveHomePane(smHome, homes, herdrByPane, herdrAll);
 			if (own?.pane_id) usedPanes.add(own.pane_id);
 			mates.push({ name: basename(smHome.path), role: "secondmate", herdrStatus: own?.agent_status, load: smHome.backlog.inflight.length });
 		}
@@ -524,6 +553,8 @@ export function buildSnapshot(
 		const owner = ownerByHome.get(normPath(home.path)) ?? home.label;
 		const workerById = new Map<string, ParsedAgent>();
 		for (const a of home.agents) if (a.meta.kind !== "secondmate") workerById.set(a.id, a);
+		const workerState = (worker: ParsedAgent | undefined, herdr: HerdrAgent | undefined): string | undefined => isTerminalStatus(worker?.status) ? worker?.status?.state : herdr?.agent_status;
+		const workerNote = (worker: ParsedAgent | undefined): string => isTerminalStatus(worker?.status) ? worker?.status?.text ?? "" : "";
 		for (const it of home.backlog.inflight) {
 			const w = workerById.get(it.id);
 			const herdr = w?.meta.pane ? herdrByPane.get(w.meta.pane) : undefined;
@@ -533,8 +564,8 @@ export function buildSnapshot(
 				state: "inflight",
 				owner,
 				project: parseProject(it.desc),
-				workerState: w?.status?.state ?? herdr?.agent_status,
-				note: w?.status?.text ?? "",
+				workerState: workerState(w, herdr),
+				note: workerNote(w),
 				topology: topologyFor(home, w?.meta, herdr),
 			});
 		}

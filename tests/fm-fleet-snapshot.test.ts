@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { collectSnapshot, findTask, normalizeTaskState } from "../.omp/extensions/bridge/collect";
+import { attentionFor, collectSnapshot, findTask, normalizeTaskState } from "../.omp/extensions/bridge/collect";
+import type { AgentRow, ParsedHome } from "../.omp/extensions/bridge/fleet";
 const FIXTURE_MANIFEST = "fixture manifest\n";
 
 function receiptManifestHash(content: string): string {
@@ -65,6 +66,10 @@ describe("canonical FleetSnapshot collector", () => {
 			expect(snapshot.activation).toMatchObject({ state: "fresh", fresh: 1, stale: 0, unknown: 0 });
 			expect(snapshot.identity).toMatchObject({ state: "bound", bound: 1, mismatch: 0, unknown: 0 });
 			expect(snapshot.health?.state).toBe("healthy");
+			writeFileSync(join(fixture.home, "state", "self.status"), "blocked: waiting on captain\n");
+			const blocked = await collectSnapshot("2026-07-13T00:00:00.500Z");
+			expect(blocked.pending?.find(item => item.id === "self")?.cls).toBe("CAPTAIN-BLOCKED");
+			writeFileSync(join(fixture.home, "state", "self.status"), "working: building\n");
 
 			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent: "omp" }] } }));
 			const identityUnknown = await collectSnapshot("2026-07-13T00:00:01Z");
@@ -160,5 +165,58 @@ describe("canonical FleetSnapshot collector", () => {
 		expect(normalizeTaskState("queued")).toBe("queued");
 		expect(normalizeTaskState("done")).toBe("done");
 		expect(normalizeTaskState("running")).toBeUndefined();
+	});
+
+	it("preserves focus priority classes, blast radius, and forwarded proximity", () => {
+		const row = (id: string, statusLine: string, kind = "ship", depth = 0): AgentRow => ({
+			key: `home/${id}`,
+			id,
+			owner: "home",
+			kind,
+			status: statusLine.split(":", 1)[0],
+			statusText: statusLine,
+			depth,
+			home: "/tmp/home",
+			topology: { home: "/tmp/home" },
+		});
+		const homes = [{
+			path: "/tmp/home",
+			label: "home",
+			isMain: true,
+			depth: 0,
+			backlog: {
+				inflight: [],
+				queued: [
+					{ id: "q1", desc: "one blocked-by: add-tests", section: "queued", resolved: false },
+					{ id: "q2", desc: "two blocked-by: add-tests", section: "queued", resolved: false },
+					{ id: "q3", desc: "three blocked-by: wire-api", section: "queued", resolved: false },
+				],
+				done: [],
+			},
+			agents: [],
+		}] as ParsedHome[];
+		const pending = attentionFor([
+			row("failed", "failed: wedged"),
+			row("add-tests", "needs-decision: framework"),
+			row("wire-api", "needs-decision: auth"),
+			row("grandkid", "needs-decision: deep choice", "ship", 1),
+			row("refactor", "done: PR checks green"),
+			row("cleanup", "done: PR merged"),
+			row("working", "working: active"),
+			row("idle", "idle"),
+			row("unknown", "unknown"),
+			row("plum", "done: independent audit", "secondmate"),
+		], homes, "2026-07-13T00:00:00Z");
+		const byId = (id: string) => pending.find(item => item.id === id);
+		const order = pending.map(item => item.id);
+		expect(order).toEqual(["failed", "add-tests", "wire-api", "grandkid", "refactor", "cleanup", "working", "idle", "plum", "unknown"]);
+		expect(byId("failed")?.cls).toBe("CAPTAIN-BLOCKED");
+		expect(byId("add-tests")?.cls).toBe("CAPTAIN-BLOCKED");
+		expect(byId("refactor")?.cls).toBe("REVIEW-READY");
+		expect(byId("cleanup")?.cls).toBe("REVIEW-READY");
+		expect(byId("working")?.cls).toBe("IN-FLIGHT");
+		expect(byId("idle")?.cls).toBe("DORMANT");
+		expect(byId("unknown")?.cls).toBe("UNKNOWN");
+		expect(byId("plum")?.cls).toBe("DORMANT");
 	});
 });

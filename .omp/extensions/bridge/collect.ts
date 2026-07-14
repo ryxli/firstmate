@@ -6,15 +6,17 @@
 
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
 	basename,
 	buildSnapshot,
 	canonicalTaskKey,
+	isTerminalStatus,
 	normalizeHomePath,
+	resolveHomePane,
 	resolveOwnerByHome,
 	type AgentRow,
 	type ActivationSummary,
@@ -43,6 +45,26 @@ export interface CollectOptions {
 
 const DEFAULT_MAX_LIVE_PANES = 200;
 
+function canonicalPath(path?: string): string {
+	const value = path?.trim() ?? "";
+	if (!value) return "";
+	try {
+		return realpathSync(value).replace(/\/+$/, "");
+	} catch {
+		return resolve(value).replace(/\/+$/, "");
+	}
+}
+
+function normalizeSessionPath(path?: string): string | undefined {
+	const value = canonicalPath(path);
+	return value || undefined;
+}
+
+
+function normalizePaneCap(value: number | undefined): number {
+	if (value === undefined || !Number.isFinite(value)) return DEFAULT_MAX_LIVE_PANES;
+	return Math.max(0, Math.min(DEFAULT_MAX_LIVE_PANES, Math.trunc(value)));
+}
 function readFileOrNull(path: string): string | null {
 	try {
 		return existsSync(path) ? readFileSync(path, "utf8") : null;
@@ -97,11 +119,12 @@ export function resolveMainHome(cwd?: string): string | null {
 }
 
 /** Read one home's backlog, metadata, and matching status files. */
-export function readRawHome(homePath: string, isMain: boolean): RawHome {
+export function readRawHome(homePath: string, isMain: boolean, depth = 0): RawHome {
 	const backlogText = readFileOrNull(join(homePath, "data", "backlog.md"));
 	const stateDir = join(homePath, "state");
 	const metas: { id: string; text: string }[] = [];
 	const statuses: Record<string, string> = {};
+	const statusMtimes: Record<string, number> = {};
 	let entries: string[] = [];
 	try {
 		entries = existsSync(stateDir) ? readdirSync(stateDir) : [];
@@ -114,10 +137,20 @@ export function readRawHome(homePath: string, isMain: boolean): RawHome {
 		const text = readFileOrNull(join(stateDir, name));
 		if (text === null) continue;
 		metas.push({ id, text });
-		const status = readFileOrNull(join(stateDir, `${id}.status`));
-		if (status !== null) statuses[id] = status;
+		const statusPath = join(stateDir, `${id}.status`);
+		const status = readFileOrNull(statusPath);
+		if (status !== null) {
+			statuses[id] = status;
+			try {
+				statusMtimes[id] = Math.floor(statSync(statusPath).mtimeMs / 1000);
+			} catch {
+				// The status may disappear between the read and stat.
+			}
+		}
 	}
-	return { path: homePath, isMain, backlogText, metas, statuses };
+	const receipt = objectRecord(parseJson(readFileOrNull(join(homePath, "state", "activation-receipt.json")) ?? ""));
+	const activationPane = stringValue(receipt?.pane_id);
+	return { path: homePath, isMain, backlogText, metas, statuses, statusMtimes, depth, activationPane };
 }
 
 interface Spawned {
@@ -147,11 +180,11 @@ function paneFromRecord(value: unknown): HerdrAgent | null {
 	const legacyKind = stringValue(legacy?.kind);
 	const legacyPath = legacyValue && (legacyKind === "path" || legacyKind === "session_path" || legacyKind === "file" || (!legacyKind && legacyValue.startsWith("/"))) ? legacyValue : undefined;
 	const legacyId = legacyValue && (legacyKind === "id" || legacyKind === "session_id") ? legacyValue : undefined;
+	const cwd = text("cwd") ?? text("foreground_cwd");
 	return {
 		pane_id: text("pane_id") ?? text("id"),
 		agent_status: text("agent_status") ?? text("status"),
-		name: text("name") ?? text("display_agent"),
-		cwd: text("cwd") ?? text("foreground_cwd"),
+		cwd: cwd ? canonicalPath(cwd) : undefined,
 		workspace_id: text("workspace_id"),
 		workspace_label: text("workspace_label"),
 		tab_id: text("tab_id"),
@@ -201,7 +234,7 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 	for (const home of homes) {
 		const owner = owners.get(normalizeHomePath(home.path)) ?? home.label;
 		if (home.isMain) {
-			const supervisor = panes.find(pane => normalizeHomePath(pane.cwd) === normalizeHomePath(home.path));
+			const supervisor = paneForHome(home.path, homes, panes);
 			if (supervisor) {
 				agents.push({
 					key: canonicalTaskKey(owner, "supervisor"),
@@ -212,19 +245,25 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 					statusText: "",
 					pane: supervisor.pane_id,
 					home: home.path,
+					depth: home.depth,
 					topology: { home: home.path, pane: supervisor.pane_id, cwd: supervisor.cwd, workspace: supervisor.workspace_id, workspaceLabel: supervisor.workspace_label, tab: supervisor.tab_id, tabLabel: supervisor.tab_label, agentStatus: supervisor.agent_status },
 				});
 			}
 		}
 		for (const agent of home.agents) {
 			const pane = agent.meta.pane ? byPane.get(agent.meta.pane) : undefined;
+			const statusKnown = isTerminalStatus(agent.status);
+			const status = statusKnown ? agent.status?.state : pane?.agent_status;
+			const statusText = statusKnown ? agent.status?.text : undefined;
 			agents.push({
 				key: canonicalTaskKey(owner, agent.id),
 				id: agent.id,
 				owner,
 				kind: agent.meta.kind,
-				status: agent.status?.state ?? pane?.agent_status,
-				statusText: agent.status?.text,
+				status,
+				statusText,
+				statusMtime: agent.statusMtime,
+				depth: home.depth,
 				pane: agent.meta.pane,
 				worker: agent.meta.raw.worker,
 				domain: agent.meta.raw.domain,
@@ -238,36 +277,120 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 	return agents.sort((a, b) => a.key.localeCompare(b.key));
 }
 
-
-function attentionFor(agents: AgentRow[]): PendingItem[] {
-	const rows: PendingItem[] = [];
+function humanAge(seconds: number): string {
+	if (seconds >= 86400) return `${Math.floor(seconds / 86400)}d`;
+	if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h`;
+	if (seconds >= 60) return `${Math.floor(seconds / 60)}m`;
+	return `${seconds}s`;
+}
+export function attentionFor(agents: AgentRow[], homes: ParsedHome[], now: string): PendingItem[] {
+	const blast = new Map<string, number>();
+	for (const home of homes) {
+		for (const item of home.backlog.queued) {
+			const match = /blocked-by:\s*([a-z0-9][a-z0-9-]*)/i.exec(item.desc);
+			if (match) blast.set(match[1], (blast.get(match[1]) ?? 0) + 1);
+		}
+	}
+	const parsedNow = Date.parse(now);
+	const nowSeconds = Number.isFinite(parsedNow) ? Math.floor(parsedNow / 1000) : Math.floor(Date.now() / 1000);
+	const rows: Array<PendingItem & { severity: number; blast: number; ageSec: number; proximity: number }> = [];
 	for (const agent of agents) {
 		const state = (agent.status ?? "").toLowerCase();
 		const text = (agent.statusText ?? "").toLowerCase();
 		let clsRank = 0;
-		let cls = "UNKNOWN";
-		if (agent.kind === "secondmate" && !["failed", "needs-decision", "blocked"].includes(state)) continue;
-		if (["failed", "needs-decision", "blocked"].includes(state)) {
+		let severity = 0;
+		let tag = "UNBOUND";
+		if (agent.kind === "secondmate") {
+			if (state === "failed") {
+				clsRank = 4;
+				severity = 2;
+				tag = "FAILED (secondmate)";
+			} else if (state === "needs-decision") {
+				clsRank = 4;
+				severity = 1;
+				tag = "NEEDS DECISION (secondmate)";
+			} else if (state === "blocked") {
+				clsRank = 4;
+				severity = 1;
+				tag = "BLOCKED (secondmate)";
+			} else if (state === "unknown" || state === "") {
+				tag = "UNBOUND (secondmate)";
+			} else {
+				clsRank = 1;
+				tag = "secondmate idle";
+			}
+		} else if (state === "failed") {
 			clsRank = 4;
-			cls = "CAPTAIN-BLOCKED";
-		} else if (state === "done" || text.includes("ready in branch") || text.includes("checks green") || text.includes("pr ready")) {
+			severity = 2;
+			tag = "FAILED";
+		} else if (state === "needs-decision") {
+			clsRank = 4;
+			severity = 1;
+			tag = "NEEDS DECISION";
+		} else if (state === "blocked") {
+			clsRank = 4;
+			severity = 1;
+			tag = "BLOCKED";
+		} else if (/\bready in branch\b/i.test(text)) {
 			clsRank = 3;
-			cls = "REVIEW-READY";
+			severity = 1;
+			tag = "READY (branch)";
+		} else if (/\bchecks green\b|\bpr ready\b/i.test(text)) {
+			clsRank = 3;
+			severity = 1;
+			tag = "PR READY";
+		} else if (state === "done") {
+			clsRank = 3;
+			severity = /\bmerged\b/i.test(text) ? 0 : 1;
+			tag = severity === 0 ? "MERGED (teardown)" : "DONE (review)";
+		} else if (/\bmerged\b/i.test(text)) {
+			clsRank = 3;
+			tag = "MERGED (teardown)";
 		} else if (state === "working") {
 			clsRank = 2;
-			cls = "IN-FLIGHT";
+			tag = "working";
+		} else if (state === "idle") {
+			clsRank = 1;
+			tag = "idle";
+		} else if (state === "unknown" || state === "") {
+			tag = "UNBOUND";
+		} else {
+			clsRank = 1;
+			tag = state;
 		}
-		if (clsRank < 3) continue;
-		const detail = agent.statusText ? ` - ${agent.statusText}` : "";
-		rows.push({ key: agent.key, cls, clsRank, home: basename(agent.home), id: agent.id, reason: `${cls}${detail}` });
+		const blastCount = blast.get(agent.id) ?? 0;
+		const ageSec = agent.statusMtime ? Math.max(0, nowSeconds - agent.statusMtime) : 0;
+		const proximity = -(agent.depth ?? 0);
+		const extras: string[] = [];
+		if (agent.statusText && clsRank >= 3) extras.push(agent.statusText.slice(0, 64));
+		if (blastCount > 0) extras.push(`blocks ${blastCount}`);
+		if (ageSec >= 60 && clsRank >= 3) extras.push(humanAge(ageSec));
+		if (proximity < 0 && clsRank >= 3) extras.push("forwarded");
+		rows.push({
+			key: agent.key,
+			cls: clsRank === 4 ? "CAPTAIN-BLOCKED" : clsRank === 3 ? "REVIEW-READY" : clsRank === 2 ? "IN-FLIGHT" : clsRank === 1 ? "DORMANT" : "UNKNOWN",
+			clsRank,
+			home: basename(agent.home),
+			id: agent.id,
+			reason: `${tag}${extras.length ? ` - ${extras.join(", ")}` : ""}`,
+			severity,
+			blast: 1 + blastCount,
+			ageSec,
+			proximity,
+		});
 	}
-	return rows.sort((a, b) => b.clsRank - a.clsRank || (a.key ?? "").localeCompare(b.key ?? ""));
+	return rows
+		.sort((a, b) => b.clsRank - a.clsRank || b.severity - a.severity || b.blast - a.blast || b.ageSec - a.ageSec || b.proximity - a.proximity || (a.key ?? "").localeCompare(b.key ?? ""))
+		.map(({ severity: _severity, blast: _blast, ageSec: _ageSec, proximity: _proximity, ...row }) => row);
 }
+
+
 function paneForHome(home: string, homes: ParsedHome[], panes: HerdrAgent[]): HerdrAgent | undefined {
-	const direct = panes.find(candidate => normalizeHomePath(candidate.cwd) === normalizeHomePath(home));
-	if (direct) return direct;
-	const link = homes.flatMap(parent => parent.agents).find(agent => agent.meta.kind === "secondmate" && agent.meta.home && normalizeHomePath(agent.meta.home) === normalizeHomePath(home) && agent.meta.pane);
-	return link?.meta.pane ? panes.find(candidate => candidate.pane_id === link.meta.pane) : undefined;
+	const parsed = homes.find(candidate => canonicalPath(candidate.path) === canonicalPath(home));
+	if (!parsed) return undefined;
+	const byPane = new Map<string, HerdrAgent>();
+	for (const pane of panes) if (pane.pane_id) byPane.set(pane.pane_id, pane);
+	return resolveHomePane(parsed, homes, byPane, panes);
 }
 
 function topologyForFleet(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null, herdrOk: boolean): TopologySummary {
@@ -312,9 +435,9 @@ function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHo
 		if (pane && receiptRecord?.schema === "firstmate.activation-receipt/v1") {
 			const current = manifestHash(home);
 			const manifest = stringValue(receiptRecord.manifest_sha256);
-			const sessionPath = pane.agent_session_path;
+			const sessionPath = normalizeSessionPath(pane.agent_session_path);
 			const sessionId = pane.agent_session_id;
-			const receiptPath = stringValue(receiptRecord.session_path);
+			const receiptPath = normalizeSessionPath(stringValue(receiptRecord.session_path));
 			const receiptId = stringValue(receiptRecord.session_id);
 			if (sessionPath || sessionId) {
 				const paneMatches = !receiptRecord.pane_id || receiptRecord.pane_id === pane.pane_id;
@@ -341,7 +464,16 @@ function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHo
 function manifestHash(home: string): string | undefined {
 	const paths: string[] = ["AGENTS.md"];
 	const extensions = join(home, ".omp", "extensions");
+	const visitedDirs = new Set<string>();
 	const walk = (dir: string): void => {
+		let realDir: string;
+		try {
+			realDir = realpathSync(dir);
+		} catch {
+			return;
+		}
+		if (visitedDirs.has(realDir)) return;
+		visitedDirs.add(realDir);
 		let entries: string[];
 		try {
 			entries = readdirSync(dir).sort();
@@ -351,10 +483,11 @@ function manifestHash(home: string): string | undefined {
 		for (const entry of entries) {
 			const path = join(dir, entry);
 			try {
-				readFileSync(path);
-				paths.push(path.slice(home.length + 1));
+				const stat = statSync(path);
+				if (stat.isDirectory()) walk(path);
+				else if (stat.isFile()) paths.push(path.slice(home.length + 1));
 			} catch {
-				walk(path);
+				// A symlink or extension entry may disappear during the read.
 			}
 		}
 	};
@@ -421,6 +554,10 @@ async function collectMetrics(snapshot: FleetSnapshot, home: string, statsFile?:
 			cache_hit_rate: numberValue(folder.cacheRate),
 			error_rate: numberValue(folder.errorRate),
 			requests: numberValue(folder.totalRequests),
+			cache_read_tokens: numberValue(folder.totalCacheReadTokens),
+			cache_write_tokens: numberValue(folder.totalCacheWriteTokens),
+			input_tokens: numberValue(folder.totalInputTokens),
+			failed_requests: numberValue(folder.failedRequests),
 		};
 	});
 	const productive = new Set(["supervisor", "secondmate", "crew"]);
@@ -429,8 +566,11 @@ async function collectMetrics(snapshot: FleetSnapshot, home: string, statsFile?:
 		const cost = selected.reduce((sum, folder) => sum + folder.cost_usd, 0);
 		const tokens = selected.reduce((sum, folder) => sum + folder.tokens, 0);
 		const requests = selected.reduce((sum, folder) => sum + folder.requests, 0);
-		const input = selected.reduce((sum, folder) => sum + folder.tokens, 0);
-		return { cost, tokens, requests, cache_hit_rate: input ? selected.reduce((sum, folder) => sum + folder.cache_hit_rate * folder.tokens, 0) / input : 0, error_rate: requests ? selected.reduce((sum, folder) => sum + folder.error_rate * folder.requests, 0) / requests : 0 };
+		const input = selected.reduce((sum, folder) => sum + folder.input_tokens, 0);
+		const cacheRead = selected.reduce((sum, folder) => sum + folder.cache_read_tokens, 0);
+		const cacheWrite = selected.reduce((sum, folder) => sum + folder.cache_write_tokens, 0);
+		const failures = selected.reduce((sum, folder) => sum + folder.failed_requests, 0);
+		return { cost, tokens, requests, cache_hit_rate: input + cacheRead + cacheWrite ? cacheRead / (input + cacheRead + cacheWrite) : 0, error_rate: requests ? failures / requests : 0 };
 	};
 	const prod = agg(productive);
 	const supervisor = agg(new Set(["supervisor"]));
@@ -456,7 +596,14 @@ async function collectMetrics(snapshot: FleetSnapshot, home: string, statsFile?:
 		tokens_per_landed: counts.landed ? Math.round(prod.tokens / counts.landed) : null,
 		by_role: byRole,
 		by_folder: byFolder,
-		by_agent_type: arrayValue(root.byAgentType).map(objectRecord).filter((value): value is Record<string, unknown> => value !== null),
+		by_agent_type: arrayValue(root.byAgentType)
+			.map(objectRecord)
+			.filter((value): value is Record<string, unknown> => value !== null)
+			.map(value => ({
+				agent_type: stringValue(value.agentType) ?? stringValue(value.agent_type) ?? "",
+				cost_usd: Number(numberValue(value.totalCost ?? value.cost_usd).toFixed(4)),
+				tokens: numberValue(value.totalInputTokens ?? value.input_tokens) + numberValue(value.totalOutputTokens ?? value.output_tokens),
+			})),
 		gaps: ["exact per-task cost (needs task-to-folder-to-landed join)", "live escalation precision/recall (needs an escalation log)", "cycle time + autonomous task horizon (needs dispatch/landed timestamps)"],
 	};
 }
@@ -464,17 +611,18 @@ async function collectMetrics(snapshot: FleetSnapshot, home: string, statsFile?:
 /** Read one complete fleet snapshot. Default mode never calls GitHub or OMP stats. */
 export async function collectSnapshot(now = new Date().toISOString(), cwd?: string, options: CollectOptions = {}): Promise<FleetSnapshot> {
 	const notes: string[] = [];
-	const main = resolveMainHome(cwd);
+	const discoveredMain = resolveMainHome(cwd);
+	const main = discoveredMain ? discoveredMain.replace(/\/+$/, "") : null;
 	const rawHomes: RawHome[] = [];
 	const homePaths: string[] = [];
 	if (!main) {
 		notes.push("could not locate the firstmate home");
 	} else {
-		const queue: Array<{ path: string; isMain: boolean }> = [{ path: main, isMain: true }];
+		const queue: Array<{ path: string; isMain: boolean; depth: number }> = [{ path: main, isMain: true, depth: 0 }];
 		const seenHomes = new Set<string>();
 		while (queue.length) {
 			const current = queue.shift()!;
-			const normalized = normalizeHomePath(current.path);
+			const normalized = canonicalPath(current.path);
 			if (seenHomes.has(normalized)) continue;
 			seenHomes.add(normalized);
 			homePaths.push(current.path);
@@ -482,32 +630,34 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 				notes.push(`secondmate home not found: ${current.path}`);
 				continue;
 			}
-			rawHomes.push(readRawHome(current.path, current.isMain));
+			rawHomes.push(readRawHome(current.path, current.isMain, current.depth));
 			const secondmatesText = readFileOrNull(join(current.path, "data", "secondmates.md"));
 			if (!secondmatesText) {
 				if (current.isMain) notes.push("data/secondmates.md missing - only the main home is shown");
 				continue;
 			}
 			for (const childPath of parseSecondmateHomes(secondmatesText)) {
-				if (seenHomes.has(normalizeHomePath(childPath))) continue;
-				if (existsSync(childPath)) queue.push({ path: childPath, isMain: false });
+				const child = childPath.replace(/\/+$/, "");
+				const childKey = canonicalPath(child);
+				if (seenHomes.has(childKey)) continue;
+				if (existsSync(child)) queue.push({ path: child, isMain: false, depth: current.depth + 1 });
 				else {
-					seenHomes.add(normalizeHomePath(childPath));
-					homePaths.push(childPath);
-					notes.push(`secondmate home not found: ${childPath}`);
+					seenHomes.add(childKey);
+					homePaths.push(child);
+					notes.push(`secondmate home not found: ${child}`);
 				}
 			}
 		}
 	}
 	const homes = rawHomes.map(parseHome);
-	const live = await fetchPaneInventory(options.maxLivePanes ?? DEFAULT_MAX_LIVE_PANES);
+	const live = await fetchPaneInventory(normalizePaneCap(options.maxLivePanes));
 	if (!live.ok) notes.push("herdr pane inventory unavailable - live topology omitted");
 	const byPane = new Map<string, HerdrAgent>();
 	for (const pane of live.panes) if (pane.pane_id) byPane.set(pane.pane_id, pane);
 	const base = buildSnapshot(homes, byPane, live.panes, new Map(), [], now, notes);
 	const owners = resolveOwnerByHome(homes);
 	const agents = buildAgents(homes, live.panes, owners);
-	const attention = attentionFor(agents);
+	const attention = attentionFor(agents, homes, now);
 	base.schema = "fleet-snapshot/1";
 	base.home = main;
 	base.homePaths = homePaths;
