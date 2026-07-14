@@ -38,7 +38,11 @@ EOF
 # missing "$2" would otherwise abort with an unbound-variable error, so callers
 # pass "${2:-}" and this exits cleanly with usage when the value is absent.
 need_value() {
-  [ -n "$2" ] || { printf 'fm-fleet-view: %s requires a value\n' "$1" >&2; usage >&2; exit 2; }
+  [ -n "$2" ] && [ "${2#-}" = "$2" ] || {
+    printf 'fm-fleet-view: %s requires a value\n' "$1" >&2
+    usage >&2
+    exit 2
+  }
 }
 
 while [ $# -gt 0 ]; do

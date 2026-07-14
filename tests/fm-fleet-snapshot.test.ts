@@ -148,14 +148,20 @@ describe("canonical FleetSnapshot collector", () => {
 			}));
 			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [
 				{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "session-1", agent: "omp" },
-				{ pane_id: "w1:p2", cwd: join(child, "project"), agent_status: "idle", workspace_id: "w1", tab_id: "t2", agent_session_id: "child-session", agent: "omp" },
-				{ pane_id: "w1:p3", cwd: join(gauge, "project"), agent_status: "idle", workspace_id: "w1", tab_id: "t3", agent_session_id: "gauge-session", agent: "omp" },
+				{ pane_id: "w1:p2", cwd: child, agent_status: "idle", workspace_id: "w1", tab_id: "t2", agent_session_id: "child-session", agent: "omp" },
+				{ pane_id: "w1:p3", cwd: gauge, agent_status: "idle", workspace_id: "w1", tab_id: "t3", agent_session_id: "gauge-session", agent: "omp" },
 			] } }));
 			const linkedChild = await collectSnapshot("2026-07-13T00:00:04Z");
 			expect(linkedChild.homePaths).toEqual([fixture.home, child, gauge]);
 			expect(linkedChild.topology).toMatchObject({ state: "complete", present: 3, missing: 0, incomplete: 0 });
 			expect(linkedChild.activation?.state).toBe("fresh");
 			expect(linkedChild.identity?.state).toBe("bound");
+			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [
+				{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "session-1", agent: "omp" },
+				{ pane_id: "w1:p2", cwd: "/other-home", agent_status: "working", workspace_id: "w1", tab_id: "t2", agent_session_id: "other-session", agent: "omp" },
+				{ pane_id: "w1:p3", cwd: gauge, agent_status: "idle", workspace_id: "w1", tab_id: "t3", agent_session_id: "gauge-session", agent: "omp" },
+				{ pane_id: "w1:p4", cwd: child, agent_status: "idle", workspace_id: "w1", tab_id: "t4", agent_session_id: "child-session", agent: "omp" },
+			] } }));
 			writeFileSync(join(child, "state", "activation-receipt.json"), JSON.stringify({
 				schema: "firstmate.activation-receipt/v1",
 				manifest_sha256: receiptManifestHash("child manifest\n"),
@@ -187,6 +193,9 @@ describe("canonical FleetSnapshot collector", () => {
 		try {
 			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
 			expect(snapshot.agents?.find(agent => agent.key === "home/self")?.status).toBe("working");
+			expect(snapshot.tasks.find(task => task.key === "home/self")?.topology).toMatchObject({ degraded: "missing-pane" });
+			expect(snapshot.tasks.find(task => task.key === "home/self")?.topology?.pane).toBeUndefined();
+			expect(snapshot.agents?.find(agent => agent.key === "home/self")?.topology?.pane).toBeUndefined();
 			expect(snapshot.tasks.find(task => task.key === "home/self")?.workerState).toBe("working");
 			expect(snapshot.attention?.find(item => item.key === "home/self")?.cls).toBe("IN-FLIGHT");
 		} finally {
@@ -195,6 +204,93 @@ describe("canonical FleetSnapshot collector", () => {
 			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
 			else process.env.FM_FLEET_PANES_FILE = oldPanes;
 			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
+	});
+	it("marks failed, missing, and malformed metrics input unavailable", async () => {
+		const fixture = fixtureHome();
+		const oldHome = process.env.FM_HOME;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		process.env.FM_HOME = fixture.home;
+		process.env.FM_FLEET_PANES_FILE = fixture.panes;
+		const stats = join(fixture.home, "stats.json");
+		try {
+			const missing = await collectSnapshot("2026-07-13T00:00:00Z", undefined, { includeMetrics: true, statsFile: stats });
+			expect(missing.metrics).toBeUndefined();
+			expect(missing.notes).toContain(`fleet metrics unavailable: stats file missing: ${stats}`);
+			writeFileSync(stats, "{}");
+			const malformed = await collectSnapshot("2026-07-13T00:00:00Z", undefined, { includeMetrics: true, statsFile: stats });
+			expect(malformed.metrics).toBeUndefined();
+			expect(malformed.notes).toContain(`fleet metrics unavailable: malformed stats JSON in ${stats}`);
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
+	});
+	it("accepts descendant home panes and rejects lexical-prefix impostors", async () => {
+		const fixture = fixtureHome();
+		const oldHome = process.env.FM_HOME;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		process.env.FM_HOME = fixture.home;
+		process.env.FM_FLEET_PANES_FILE = fixture.panes;
+		try {
+		mkdirSync(join(fixture.home, "project"));
+			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: join(fixture.home, "project"), agent_status: "working", agent: "omp" }] } }));
+			const descendant = await collectSnapshot("2026-07-13T00:00:00Z");
+			expect(descendant.topology).toMatchObject({ state: "complete", present: 1, missing: 0 });
+			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: `${fixture.home}-impostor`, agent_status: "working", agent: "omp" }] } }));
+			const impostor = await collectSnapshot("2026-07-13T00:00:00Z");
+			expect(impostor.topology).toMatchObject({ state: "unknown", present: 0, missing: 1 });
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
+	});
+	it("classifies semantic terminal text consistently with idle Herdr", async () => {
+		const fixture = fixtureHome();
+		const oldHome = process.env.FM_HOME;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		process.env.FM_HOME = fixture.home;
+		process.env.FM_FLEET_PANES_FILE = fixture.panes;
+		writeFileSync(join(fixture.home, "state", "self.status"), "working: checks green\n");
+		writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "idle", agent: "omp" }] } }));
+		try {
+			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
+			expect(snapshot.agents?.find(agent => agent.key === "home/self")?.status).toBe("done");
+			expect(snapshot.tasks.find(task => task.key === "home/self")?.workerState).toBe("done");
+			expect(snapshot.attention?.find(item => item.key === "home/self")?.cls).toBe("REVIEW-READY");
+			expect(render(snapshot, "tasks")).toContain("\u2713");
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
+	});
+	it("honors an explicit home over inherited FM_HOME", async () => {
+		const first = fixtureHome();
+		const second = fixtureHome();
+		const oldHome = process.env.FM_HOME;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		process.env.FM_HOME = first.home;
+		process.env.FM_FLEET_PANES_FILE = second.panes;
+		try {
+			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z", second.home);
+			expect(snapshot.home).toBe(second.home);
+			expect(snapshot.tasks.find(task => task.key === "home/self")?.topology?.home).toBe(second.home);
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(join(first.home, ".."), { recursive: true, force: true });
+			rmSync(join(second.home, ".."), { recursive: true, force: true });
 		}
 	});
 

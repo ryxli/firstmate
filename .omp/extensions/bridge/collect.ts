@@ -6,7 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -15,6 +15,7 @@ import {
 	buildSnapshot,
 	canonicalTaskKey,
 	isTerminalStatus,
+	publicStatusState,
 	normalizeHomePath,
 	resolveHomePane,
 	resolveOwnerByHome,
@@ -44,6 +45,11 @@ export interface CollectOptions {
 }
 
 const DEFAULT_MAX_LIVE_PANES = 200;
+export const MAX_HOME_DISCOVERY = 64;
+export const MAX_HOME_DISCOVERY_DEPTH = 8;
+export const MAX_MANIFEST_FILES = 512;
+export const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
+export const MAX_MANIFEST_DEPTH = 16;
 
 function canonicalPath(path?: string): string {
 	const value = path?.trim() ?? "";
@@ -101,17 +107,26 @@ function isMainHome(dir: string): boolean {
 	return existsSync(join(dir, "sbin", "fm-spawn.sh")) && !existsSync(join(dir, ".fm-secondmate-home"));
 }
 
-/** Resolve the main home from explicit env, cwd ancestry, then known clones. */
+/** Resolve the main home from explicit cwd, env, process cwd, then known clones. */
 export function resolveMainHome(cwd?: string): string | null {
+	const findHome = (start: string): string | null => {
+		let dir = start;
+		for (let i = 0; i < 64; i++) {
+			if (isMainHome(dir)) return dir;
+			const parent = dirname(dir);
+			if (parent === dir) break;
+			dir = parent;
+		}
+		return null;
+	};
+	if (cwd && cwd.length > 0) {
+		const explicit = findHome(cwd);
+		if (explicit) return explicit;
+	}
 	const env = process.env.FM_HOME?.trim() || process.env.FIRSTMATE_HOME?.trim();
 	if (env && isMainHome(env)) return env;
-	let dir = cwd && cwd.length > 0 ? cwd : process.cwd();
-	for (let i = 0; i < 64; i++) {
-		if (isMainHome(dir)) return dir;
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
+	const current = findHome(process.cwd());
+	if (current) return current;
 	for (const candidate of [join(homedir(), "code", "harness", "firstmate"), join(homedir(), "code", "firstmate")]) {
 		if (isMainHome(candidate)) return candidate;
 	}
@@ -217,7 +232,7 @@ async function fetchPaneInventory(cap: number): Promise<{ panes: HerdrAgent[]; o
 function topologyForAgent(home: ParsedHome, meta: { pane?: string; raw: Record<string, string> }, pane: HerdrAgent | undefined): Topology {
 	return {
 		home: home.path,
-		pane: meta.pane,
+		pane: pane?.pane_id,
 		tab: pane?.tab_id ?? meta.raw.tab,
 		tabLabel: pane?.tab_label,
 		workspace: pane?.workspace_id ?? meta.raw.workspace,
@@ -226,6 +241,19 @@ function topologyForAgent(home: ParsedHome, meta: { pane?: string; raw: Record<s
 		agentStatus: pane?.agent_status,
 		degraded: meta.pane && pane?.pane_id ? undefined : meta.pane ? "missing-pane" : "state-only",
 	};
+}
+
+function paneForTrackedAgent(home: ParsedHome, meta: { pane?: string; home?: string; kind?: string; raw: Record<string, string> }, byPane: Map<string, HerdrAgent>): HerdrAgent | undefined {
+	if (!meta.pane) return undefined;
+	const pane = byPane.get(meta.pane);
+	if (!pane || (pane.agent && pane.agent !== "omp")) return undefined;
+	const expected = meta.kind === "secondmate" && meta.home
+		? canonicalPath(meta.home)
+		: meta.raw.worktree
+			? canonicalPath(meta.raw.worktree)
+			: canonicalPath(home.path);
+	const cwd = pane.cwdKey ?? canonicalPath(pane.cwd);
+	return expected && cwd === expected ? pane : undefined;
 }
 
 function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<string, string>): AgentRow[] {
@@ -253,13 +281,14 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 			}
 		}
 		for (const agent of home.agents) {
-			const pane = agent.meta.pane ? byPane.get(agent.meta.pane) : undefined;
+			const pane = paneForTrackedAgent(home, agent.meta, byPane);
 			const statusFile = agent.status;
 			const liveStatus = pane?.agent_status;
 			const statusKnown = isTerminalStatus(statusFile);
+			const persistedStatus = publicStatusState(statusFile);
 			// Terminal file signals win; otherwise live Herdr wins when present,
 			// with the persisted signal as the offline/missing-pane fallback.
-			const status = statusKnown ? statusFile?.state : liveStatus ?? statusFile?.state;
+			const status = statusKnown ? persistedStatus : liveStatus ?? persistedStatus;
 			const statusText = statusKnown || !liveStatus ? statusFile?.text : undefined;
 			agents.push({
 				key: canonicalTaskKey(owner, agent.id),
@@ -446,7 +475,7 @@ function topologyForFleet(homePaths: string[], panes: HerdrAgent[], homes: Parse
 }
 
 
-function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null): { activation: ActivationSummary; identity: IdentitySummary } {
+function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null, notes: string[]): { activation: ActivationSummary; identity: IdentitySummary } {
 	const activation: ActivationSummary = { state: "unknown", total: homePaths.length, fresh: 0, stale: 0, unknown: 0 };
 	const identity: IdentitySummary = { state: "unknown", bound: 0, mismatch: 0, unknown: 0 };
 	for (const home of homePaths) {
@@ -457,6 +486,7 @@ function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHo
 		if (pane && receiptRecord?.schema === "firstmate.activation-receipt/v1") {
 			const current = manifestHash(home);
 			const manifest = stringValue(receiptRecord.manifest_sha256);
+			if (current.reason) notes.push(`activation manifest degraded for ${home}: ${current.reason}`);
 			const sessionPath = normalizeSessionPath(pane.agent_session_path);
 			const sessionId = pane.agent_session_id;
 			const receiptPath = normalizeSessionPath(stringValue(receiptRecord.session_path));
@@ -467,8 +497,8 @@ function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHo
 				const idMatches = !sessionId || sessionId === receiptId;
 				identityState = paneMatches && pathMatches && idMatches ? "bound" : "mismatch";
 			}
-			if (current && manifest && current === manifest) activationState = "fresh";
-			else if (current && manifest) activationState = "stale";
+			if (current.hash && manifest && current.hash === manifest) activationState = "fresh";
+			else if (current.hash && manifest) activationState = "stale";
 		}
 		activation[activationState] += 1;
 		identity[identityState] += 1;
@@ -483,47 +513,93 @@ function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHo
 	else identity.state = "bound";
 	return { activation, identity };
 }
-function manifestHash(home: string): string | undefined {
+
+interface ManifestHashResult {
+	hash?: string;
+	reason?: string;
+}
+
+function manifestHash(home: string): ManifestHashResult {
 	const paths: string[] = ["AGENTS.md"];
+	const sizes = new Map<string, number>();
+	let totalBytes = 0;
+	let reason: string | undefined;
+	const addPath = (relativePath: string, size: number): boolean => {
+		if (paths.length >= MAX_MANIFEST_FILES) {
+			reason = "file-count limit reached";
+			return false;
+		}
+		if (totalBytes + size > MAX_MANIFEST_BYTES) {
+			reason = "byte-count limit reached";
+			return false;
+		}
+		paths.push(relativePath);
+		sizes.set(relativePath, size);
+		totalBytes += size;
+		return true;
+	};
+	try {
+		const agents = statSync(join(home, "AGENTS.md"));
+		if (!agents.isFile()) return { reason: "AGENTS.md is not a regular file" };
+		if (agents.size > MAX_MANIFEST_BYTES) return { reason: "byte-count limit reached" };
+		sizes.set("AGENTS.md", agents.size);
+		totalBytes = agents.size;
+	} catch {
+		return { reason: "AGENTS.md is unreadable" };
+	}
 	const extensions = join(home, ".omp", "extensions");
-	const visitedDirs = new Set<string>();
-	const walk = (dir: string): void => {
-		let realDir: string;
+	const walk = (dir: string, depth: number): void => {
+		if (reason) return;
+		let dirStat;
 		try {
-			realDir = realpathSync(dir);
+			dirStat = lstatSync(dir);
 		} catch {
 			return;
 		}
-		if (visitedDirs.has(realDir)) return;
-		visitedDirs.add(realDir);
+		if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) return;
 		let entries: string[];
 		try {
 			entries = readdirSync(dir).sort();
 		} catch {
 			return;
 		}
+		if (depth >= MAX_MANIFEST_DEPTH && entries.length > 0) {
+			reason = "directory-depth limit reached";
+			return;
+		}
 		for (const entry of entries) {
 			const path = join(dir, entry);
 			try {
-				const stat = statSync(path);
-				if (stat.isDirectory()) walk(path);
-				else if (stat.isFile()) paths.push(path.slice(home.length + 1));
+				const linkStat = lstatSync(path);
+				if (linkStat.isSymbolicLink()) {
+					const targetStat = statSync(path);
+					if (targetStat.isDirectory()) continue;
+					if (targetStat.isFile() && !addPath(path.slice(home.length + 1), targetStat.size)) return;
+				} else if (linkStat.isDirectory()) {
+					walk(path, depth + 1);
+				} else if (linkStat.isFile() && !addPath(path.slice(home.length + 1), linkStat.size)) {
+					return;
+				}
 			} catch {
-				// A symlink or extension entry may disappear during the read.
+				reason = "manifest entry unreadable";
+				return;
 			}
+			if (reason) return;
 		}
 	};
-	walk(extensions);
+	walk(extensions, 0);
+	if (reason) return { reason };
 	const entries: { path: string; sha256: string }[] = [];
 	for (const relativePath of paths.sort()) {
 		try {
-			const digest = createHash("sha256").update(readFileSync(join(home, relativePath))).digest("hex");
-			entries.push({ path: relativePath, sha256: digest });
+			const expectedSize = sizes.get(relativePath);
+			const bytes = readFileSync(join(home, relativePath));
+			if (expectedSize !== undefined && bytes.byteLength !== expectedSize) return { reason: "manifest entry changed during read" };
+			entries.push({ path: relativePath, sha256: createHash("sha256").update(bytes).digest("hex") });
 		} catch {
-			return undefined;
+			return { reason: "manifest entry unreadable" };
 		}
 	}
-	if (!entries.length || entries.length !== paths.length) return undefined;
 	const hash = createHash("sha256");
 	for (const entry of entries) {
 		hash.update(entry.path);
@@ -531,7 +607,7 @@ function manifestHash(home: string): string | undefined {
 		hash.update(entry.sha256);
 		hash.update("\0");
 	}
-	return hash.digest("hex");
+	return { hash: hash.digest("hex") };
 }
 
 function taskCounts(tasks: TaskRow[]): { landed: number; inflight: number; queued: number } {
@@ -550,9 +626,29 @@ function workspaceName(home: string): string {
 	return readFileOrNull(join(home, "config", "workspace"))?.trim() || process.env.HOSTNAME || "unknown";
 }
 
-async function collectMetrics(snapshot: FleetSnapshot, home: string, statsFile?: string): Promise<FleetMetrics> {
-	const statsText = statsFile ? readFileOrNull(statsFile) ?? "" : (await run(["omp", "stats", "--json"], 10000)).stdout;
-	const root = objectRecord(parseJson(statsText)) ?? {};
+async function collectMetrics(snapshot: FleetSnapshot, home: string, statsFile: string | undefined, notes: string[]): Promise<FleetMetrics | undefined> {
+	let statsText: string;
+	if (statsFile !== undefined) {
+		const file = readFileOrNull(statsFile);
+		if (file === null) {
+			notes.push(`fleet metrics unavailable: stats file missing: ${statsFile}`);
+			return undefined;
+		}
+		statsText = file;
+	} else {
+		const result = await run(["omp", "stats", "--json"], 10000);
+		if (!result.ok) {
+			notes.push("fleet metrics unavailable: omp stats --json failed");
+			return undefined;
+		}
+		statsText = result.stdout;
+	}
+	const parsed = parseJson(statsText);
+	const root = objectRecord(parsed);
+	if (!root || !Array.isArray(root.byFolder)) {
+		notes.push(`fleet metrics unavailable: malformed stats JSON${statsFile ? ` in ${statsFile}` : ""}`);
+		return undefined;
+	}
 	const folders = arrayValue(root.byFolder).map(objectRecord).filter((value): value is Record<string, unknown> => value !== null);
 	const homeDir = process.env.HOME ?? homedir();
 	const worktreeBase = process.env.FM_WORKTREE_BASE ?? join(home, "worktrees");
@@ -576,8 +672,8 @@ async function collectMetrics(snapshot: FleetSnapshot, home: string, statsFile?:
 			cache_hit_rate: numberValue(folder.cacheRate),
 			error_rate: numberValue(folder.errorRate),
 			requests: numberValue(folder.totalRequests),
-			cache_read_tokens: numberValue(folder.totalCacheReadTokens),
-			cache_write_tokens: numberValue(folder.totalCacheWriteTokens),
+			cache_read_tokens: numberValue(folder.totalCacheReadTokens ?? folder.cacheReadTokens ?? folder.cache_read_tokens),
+			cache_write_tokens: numberValue(folder.totalCacheWriteTokens ?? folder.cacheWriteTokens ?? folder.cache_write_tokens),
 			input_tokens: numberValue(folder.totalInputTokens),
 			failed_requests: numberValue(folder.failedRequests),
 		};
@@ -641,12 +737,11 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 		notes.push("could not locate the firstmate home");
 	} else {
 		const queue: Array<{ path: string; isMain: boolean; depth: number }> = [{ path: main, isMain: true, depth: 0 }];
-		const seenHomes = new Set<string>();
+		const seenHomes = new Set<string>([canonicalPath(main)]);
+		let homeLimitNoted = false;
+		let depthLimitNoted = false;
 		while (queue.length) {
 			const current = queue.shift()!;
-			const normalized = canonicalPath(current.path);
-			if (seenHomes.has(normalized)) continue;
-			seenHomes.add(normalized);
 			homePaths.push(current.path);
 			if (!existsSync(current.path)) {
 				notes.push(`secondmate home not found: ${current.path}`);
@@ -661,10 +756,25 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 			for (const childPath of parseSecondmateHomes(secondmatesText)) {
 				const child = childPath.replace(/\/+$/, "");
 				const childKey = canonicalPath(child);
+				const childDepth = current.depth + 1;
 				if (seenHomes.has(childKey)) continue;
-				if (existsSync(child)) queue.push({ path: child, isMain: false, depth: current.depth + 1 });
+				if (childDepth > MAX_HOME_DISCOVERY_DEPTH) {
+					if (!depthLimitNoted) {
+						notes.push(`secondmate discovery depth limit reached at ${current.path}`);
+						depthLimitNoted = true;
+					}
+					continue;
+				}
+				if (seenHomes.size >= MAX_HOME_DISCOVERY) {
+					if (!homeLimitNoted) {
+						notes.push(`secondmate discovery home-count limit reached at ${current.path}`);
+						homeLimitNoted = true;
+					}
+					break;
+				}
+				seenHomes.add(childKey);
+				if (existsSync(child)) queue.push({ path: child, isMain: false, depth: childDepth });
 				else {
-					seenHomes.add(childKey);
 					homePaths.push(child);
 					notes.push(`secondmate home not found: ${child}`);
 				}
@@ -675,9 +785,14 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 		const home = parseHome(raw);
 		return {
 			...home,
+			label: raw.isMain ? basename(raw.pathKey ?? canonicalPath(raw.path)) : home.label,
 			agents: home.agents.map(agent => ({
 				...agent,
-				meta: { ...agent.meta, homeKey: agent.meta.home ? canonicalPath(agent.meta.home) : undefined },
+				meta: {
+					...agent.meta,
+					homeKey: agent.meta.home ? canonicalPath(agent.meta.home) : undefined,
+					worktreeKey: agent.meta.raw.worktree ? canonicalPath(agent.meta.raw.worktree) : undefined,
+				},
 			})),
 		};
 	});
@@ -695,19 +810,23 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 	base.agents = agents;
 	base.attention = attention;
 	base.pending = attention.filter(item => item.clsRank >= 3);
-	const activationCheck = activationFor(homePaths, live.panes, homes, main);
+	const activationCheck = activationFor(homePaths, live.panes, homes, main, notes);
 	base.activation = activationCheck.activation;
 	base.identity = activationCheck.identity;
 	base.topology = topologyForFleet(homePaths, live.panes, homes, main, live.ok);
 	const missingHomes = notes.filter(note => note.startsWith("secondmate home not found:")).length;
+	const boundedDegradation = notes.some(note => note.includes("limit reached") || note.startsWith("activation manifest degraded"));
 	base.health = {
-		state: !main ? "unknown" : live.ok && missingHomes === 0 && base.activation.state === "fresh" && base.topology.state === "complete" && base.identity.state !== "mismatch" ? "healthy" : "degraded",
+		state: !main ? "unknown" : live.ok && missingHomes === 0 && !boundedDegradation && base.activation.state === "fresh" && base.topology.state === "complete" && base.identity.state !== "mismatch" ? "healthy" : "degraded",
 		herdr: live.ok ? "ok" : "unavailable",
 		homes: homePaths.length,
 		missingHomes,
 		livePanes: live.panes.length,
 	};
-	if (options.includeMetrics && main) base.metrics = await collectMetrics(base, main, options.statsFile ?? process.env.FM_FLEET_STATS_FILE);
+	if (options.includeMetrics && main) {
+		const metrics = await collectMetrics(base, main, options.statsFile ?? process.env.FM_FLEET_STATS_FILE, notes);
+		if (metrics) base.metrics = metrics;
+	}
 	return base;
 }
 

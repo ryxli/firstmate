@@ -28,4 +28,16 @@ assert '"cache_hit_rate":0.2' in text
 assert '"agent_type":"gpt-camel"' in text
 assert '"agent_type":"snake-compatible"' in text
 PY
+mkdir -p "$TMP/bin"
+printf '%s\n' '#!/bin/sh' 'exit 7' > "$TMP/bin/omp"
+chmod +x "$TMP/bin/omp"
+env -u FM_FLEET_STATS_FILE FM_HOME="$HOME_DIR" FM_FLEET_PANES_FILE="$TMP/panes.json" PATH="$TMP/bin:$PATH" \
+  "$ROOT/sbin/fm-fleet-snapshot.ts" --metrics > "$TMP/failed.json"
+python3 - "$TMP/failed.json" <<'PY'
+import json
+import sys
+data = json.load(open(sys.argv[1]))
+assert "metrics" not in data
+assert "fleet metrics unavailable: omp stats --json failed" in data["notes"]
+PY
 printf '%s\n' 'ok - KPI view uses FleetSnapshot metrics and normalizes agent types'

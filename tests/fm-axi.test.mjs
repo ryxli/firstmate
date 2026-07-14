@@ -85,7 +85,7 @@ try {
   writeFileSync(join(secondmate, "state", "self.meta"), "kind=ship\nworker=self\n");
   writeFileSync(panes, JSON.stringify({ result: { panes: [
     { pane_id: "w1:p1", cwd: home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "home-session", agent: "omp" },
-    { pane_id: "w1:p2", cwd: join(secondmate, "project"), agent_status: "idle", workspace_id: "w1", tab_id: "t2", agent_session_id: "plum-session", agent: "omp" },
+    { pane_id: "w1:p2", cwd: secondmate, agent_status: "idle", workspace_id: "w1", tab_id: "t2", agent_session_id: "plum-session", agent: "omp" },
   ] } }));
   writeFileSync(stats, JSON.stringify({ byFolder: [] }));
 

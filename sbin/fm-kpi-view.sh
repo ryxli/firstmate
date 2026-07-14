@@ -35,7 +35,11 @@ EOF
 }
 
 need_value() {
-  [ -n "$2" ] || { printf 'fm-kpi-view: %s requires a value\n' "$1" >&2; usage >&2; exit 2; }
+  [ -n "$2" ] && [ "${2#-}" = "$2" ] || {
+    printf 'fm-kpi-view: %s requires a value\n' "$1" >&2
+    usage >&2
+    exit 2
+  }
 }
 
 while [ $# -gt 0 ]; do

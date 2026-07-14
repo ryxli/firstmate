@@ -39,7 +39,7 @@ const mainHome: ParsedHome = {
 	},
 	agents: [
 		{ id: "plum", meta: { id: "plum", pane: "w15:p2", kind: "secondmate", home: "/sm-plum", raw: {} }, status: { state: "done", text: "ADOPT" } },
-		{ id: "feat-x", meta: { id: "feat-x", pane: "w20:p1", raw: {} }, status: { state: "working", text: "building" } },
+		{ id: "feat-x", meta: { id: "feat-x", pane: "w20:p1", raw: { worktree: "/wt/feat-x" } }, status: { state: "working", text: "building" } },
 	],
 };
 
@@ -48,7 +48,7 @@ const smHome: ParsedHome = {
 	label: "fm-sm-plum",
 	isMain: false,
 	backlog: { inflight: [{ id: "triage-1", desc: "repro bug (repo: support)", section: "inflight", resolved: false }], queued: [], done: [] },
-	agents: [{ id: "triage-1", meta: { id: "triage-1", pane: "w21:p1", raw: {} }, status: { state: "working", text: "reproducing" } }],
+	agents: [{ id: "triage-1", meta: { id: "triage-1", pane: "w21:p1", raw: { worktree: "/wt/triage-1" } }, status: { state: "working", text: "reproducing" } }],
 };
 
 const herdrAgents: HerdrAgent[] = [
