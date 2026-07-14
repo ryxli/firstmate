@@ -172,7 +172,7 @@
 
   function summarize(root) {
     var counts = { working: 0, blocked: 0, idle: 0, done: 0, unknown: 0 };
-    var total = 0, homes = 1, warnings = [];
+    var total = 0, homes = typeof root.home_count === "number" ? root.home_count : 1, warnings = [];
     eachPane(root, function (pane, home) {
       total++;
       counts[normStatus(pane.agent_status)]++;
@@ -198,7 +198,7 @@
           }
       for (var d = 0; d < reg.length; d++) { homes++; countHomes(reg[d]); }
     }
-    countHomes(root);
+    if (typeof root.home_count !== "number") countHomes(root);
     return { counts: counts, total: total, homes: homes, warnings: warnings };
   }
 
@@ -460,7 +460,10 @@
 
   // Project the shared snapshot's flat topology records into the existing tree view.
   function snapshotTree(snap) {
-    var root = { home: snap.home || "", supervisor: "firstmate", role: "firstmate",
+    var homeCount = snap.health && typeof snap.health.homes === "number"
+      ? snap.health.homes
+      : Array.isArray(snap.homePaths) ? snap.homePaths.length : 1;
+    var root = { home: snap.home || "", home_count: homeCount, supervisor: "firstmate", role: "firstmate",
       harness: "", availability: "running", fleet_status: (snap.health && snap.health.state) || "unknown",
       workspaces: [], otherLivePanes: snap.otherLivePanes || [] };
     var wsIndex = {};

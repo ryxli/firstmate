@@ -34,6 +34,7 @@ import {
 	type Topology,
 	type TopologySummary,
 	parseHome,
+	parseMeta,
 	parseSecondmateHomes,
 	render,
 } from "./fleet";
@@ -123,8 +124,12 @@ export function resolveMainHome(cwd?: string): string | null {
 		const explicit = findHome(cwd);
 		if (explicit) return explicit;
 	}
-	const env = process.env.FM_HOME?.trim() || process.env.FIRSTMATE_HOME?.trim();
-	if (env && isMainHome(env)) return env;
+	const envCandidates = [process.env.FM_HOME, process.env.FIRSTMATE_HOME, process.env.FM_ROOT_OVERRIDE]
+		.map(value => value?.trim())
+		.filter((value): value is string => Boolean(value));
+	for (const env of envCandidates) {
+		if (isMainHome(env)) return env;
+	}
 	const current = findHome(process.cwd());
 	if (current) return current;
 	for (const candidate of [join(homedir(), "code", "harness", "firstmate"), join(homedir(), "code", "firstmate")]) {
@@ -136,23 +141,23 @@ export function resolveMainHome(cwd?: string): string | null {
 /** Read one home's backlog, metadata, and matching status files. */
 export function readRawHome(homePath: string, isMain: boolean, depth = 0): RawHome {
 	const backlogText = readFileOrNull(join(homePath, "data", "backlog.md"));
-	const stateDir = join(homePath, "state");
+	const statePath = isMain ? (process.env.FM_STATE_OVERRIDE?.trim() || join(homePath, "state")) : join(homePath, "state");
 	const metas: { id: string; text: string }[] = [];
 	const statuses: Record<string, string> = {};
 	const statusMtimes: Record<string, number> = {};
 	let entries: string[] = [];
 	try {
-		entries = existsSync(stateDir) ? readdirSync(stateDir) : [];
+		entries = existsSync(statePath) ? readdirSync(statePath) : [];
 	} catch {
 		entries = [];
 	}
 	for (const name of entries) {
 		if (!name.endsWith(".meta")) continue;
 		const id = name.slice(0, -5);
-		const text = readFileOrNull(join(stateDir, name));
+		const text = readFileOrNull(join(statePath, name));
 		if (text === null) continue;
 		metas.push({ id, text });
-		const statusPath = join(stateDir, `${id}.status`);
+		const statusPath = join(statePath, `${id}.status`);
 		const status = readFileOrNull(statusPath);
 		if (status !== null) {
 			statuses[id] = status;
@@ -163,9 +168,10 @@ export function readRawHome(homePath: string, isMain: boolean, depth = 0): RawHo
 			}
 		}
 	}
-	const receipt = objectRecord(parseJson(readFileOrNull(join(homePath, "state", "activation-receipt.json")) ?? ""));
+	const receiptValue = parseJson(readFileOrNull(join(statePath, "activation-receipt.json")) ?? "");
+	const receipt = validActivationReceipt(receiptValue) ? receiptValue : undefined;
 	const activationPane = stringValue(receipt?.pane_id);
-	return { path: homePath, pathKey: canonicalPath(homePath), isMain, backlogText, metas, statuses, statusMtimes, depth, activationPane };
+	return { path: homePath, pathKey: canonicalPath(homePath), statePath, isMain, backlogText, metas, statuses, statusMtimes, depth, activationPane };
 }
 
 interface Spawned {
@@ -344,11 +350,11 @@ export function attentionFor(agents: AgentRow[], homes: ParsedHome[], now: strin
 		let severity = 0;
 		let tag = "UNBOUND";
 		if (agent.kind === "secondmate") {
-			if (fileState === "failed") {
+			if (fileState === "failed" || live === "failed") {
 				clsRank = 4;
 				severity = 2;
 				tag = "FAILED (secondmate)";
-			} else if (fileState === "needs-decision") {
+			} else if (fileState === "needs-decision" || live === "needs-decision") {
 				clsRank = 4;
 				severity = 1;
 				tag = "NEEDS DECISION (secondmate)";
@@ -390,6 +396,14 @@ export function attentionFor(agents: AgentRow[], homes: ParsedHome[], now: strin
 			clsRank = 3;
 			severity = 0;
 			tag = "MERGED (teardown)";
+		} else if (live === "failed") {
+			clsRank = 4;
+			severity = 2;
+			tag = "FAILED (live)";
+		} else if (live === "needs-decision") {
+			clsRank = 4;
+			severity = 1;
+			tag = "NEEDS DECISION (live)";
 		} else if (live === "blocked") {
 			clsRank = 4;
 			severity = 1;
@@ -475,6 +489,40 @@ function topologyForFleet(homePaths: string[], panes: HerdrAgent[], homes: Parse
 }
 
 
+function validActivationReceipt(value: unknown): value is Record<string, unknown> {
+	const record = objectRecord(value);
+	if (!record || record.schema !== "firstmate.activation-receipt/v1") return false;
+	if (!stringValue(record.pane_id)) return false;
+	const sessionId = stringValue(record.session_id);
+	const sessionPath = stringValue(record.session_path);
+	if ((record.session_id !== undefined && !sessionId) || (record.session_path !== undefined && !sessionPath) || (!sessionId && !sessionPath)) return false;
+	const startedAt = stringValue(record.started_at);
+	if (!startedAt || !Number.isFinite(Date.parse(startedAt))) return false;
+	const digest = stringValue(record.manifest_sha256);
+	if (!digest || !/^[0-9a-f]{64}$/i.test(digest)) return false;
+	const manifest = arrayValue(record.manifest);
+	if (manifest.length === 0) return false;
+	const paths = new Set<string>();
+	const entries: { path: string; sha256: string }[] = [];
+	for (const entry of manifest) {
+		const item = objectRecord(entry);
+		const path = stringValue(item?.path);
+		const sha256 = stringValue(item?.sha256);
+		if (!path || path.startsWith("/") || path.includes("..") || !sha256 || !/^[0-9a-f]{64}$/i.test(sha256) || paths.has(path)) return false;
+		paths.add(path);
+		entries.push({ path, sha256: sha256.toLowerCase() });
+	}
+	if (!paths.has("AGENTS.md")) return false;
+	const hash = createHash("sha256");
+	for (const entry of entries.sort((a, b) => a.path.localeCompare(b.path))) {
+		hash.update(entry.path);
+		hash.update("\0");
+		hash.update(entry.sha256);
+		hash.update("\0");
+	}
+	return hash.digest("hex") === digest.toLowerCase();
+}
+
 function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null, notes: string[]): { activation: ActivationSummary; identity: IdentitySummary } {
 	const activation: ActivationSummary = { state: "unknown", total: homePaths.length, fresh: 0, stale: 0, unknown: 0 };
 	const identity: IdentitySummary = { state: "unknown", bound: 0, mismatch: 0, unknown: 0 };
@@ -482,23 +530,27 @@ function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHo
 		const pane = paneForHome(home, homes, panes);
 		let activationState: "fresh" | "stale" | "unknown" = "unknown";
 		let identityState: "bound" | "mismatch" | "unknown" = "unknown";
-		const receiptRecord = objectRecord(parseJson(readFileOrNull(join(home, "state", "activation-receipt.json")) ?? ""));
-		if (pane && receiptRecord?.schema === "firstmate.activation-receipt/v1") {
+		const parsedHome = homes.find(candidate => canonicalPath(candidate.path) === canonicalPath(home));
+		const statePath = parsedHome?.statePath ?? join(home, "state");
+		const receiptValue = parseJson(readFileOrNull(join(statePath, "activation-receipt.json")) ?? "");
+		const receiptRecord = validActivationReceipt(receiptValue) ? receiptValue : undefined;
+		if (receiptValue !== undefined && receiptValue !== null && !receiptRecord) notes.push(`activation receipt malformed for ${home}`);
+		if (pane && receiptRecord) {
 			const current = manifestHash(home);
-			const manifest = stringValue(receiptRecord.manifest_sha256);
+			const manifest = receiptRecord.manifest_sha256 as string;
 			if (current.reason) notes.push(`activation manifest degraded for ${home}: ${current.reason}`);
 			const sessionPath = normalizeSessionPath(pane.agent_session_path);
 			const sessionId = pane.agent_session_id;
 			const receiptPath = normalizeSessionPath(stringValue(receiptRecord.session_path));
 			const receiptId = stringValue(receiptRecord.session_id);
 			if (sessionPath || sessionId) {
-				const paneMatches = !receiptRecord.pane_id || receiptRecord.pane_id === pane.pane_id;
+				const paneMatches = receiptRecord.pane_id === pane.pane_id;
 				const pathMatches = !sessionPath || sessionPath === receiptPath;
 				const idMatches = !sessionId || sessionId === receiptId;
 				identityState = paneMatches && pathMatches && idMatches ? "bound" : "mismatch";
 			}
-			if (current.hash && manifest && current.hash === manifest) activationState = "fresh";
-			else if (current.hash && manifest) activationState = "stale";
+			if (current.hash === manifest) activationState = "fresh";
+			else if (current.hash) activationState = "stale";
 		}
 		activation[activationState] += 1;
 		identity[identityState] += 1;
@@ -548,15 +600,19 @@ function manifestHash(home: string): ManifestHashResult {
 		return { reason: "AGENTS.md is unreadable" };
 	}
 	const extensions = join(home, ".omp", "extensions");
+	const visitedDirs = new Set<string>();
 	const walk = (dir: string, depth: number): void => {
 		if (reason) return;
 		let dirStat;
 		try {
-			dirStat = lstatSync(dir);
+			dirStat = statSync(dir);
+			const realDir = realpathSync(dir);
+			if (visitedDirs.has(realDir)) return;
+			visitedDirs.add(realDir);
 		} catch {
 			return;
 		}
-		if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) return;
+		if (!dirStat.isDirectory()) return;
 		let entries: string[];
 		try {
 			entries = readdirSync(dir).sort();
@@ -573,8 +629,8 @@ function manifestHash(home: string): ManifestHashResult {
 				const linkStat = lstatSync(path);
 				if (linkStat.isSymbolicLink()) {
 					const targetStat = statSync(path);
-					if (targetStat.isDirectory()) continue;
-					if (targetStat.isFile() && !addPath(path.slice(home.length + 1), targetStat.size)) return;
+					if (targetStat.isDirectory()) walk(path, depth + 1);
+					else if (targetStat.isFile() && !addPath(path.slice(home.length + 1), targetStat.size)) return;
 				} else if (linkStat.isDirectory()) {
 					walk(path, depth + 1);
 				} else if (linkStat.isFile() && !addPath(path.slice(home.length + 1), linkStat.size)) {
@@ -749,11 +805,16 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 			}
 			rawHomes.push(readRawHome(current.path, current.isMain, current.depth));
 			const secondmatesText = readFileOrNull(join(current.path, "data", "secondmates.md"));
-			if (!secondmatesText) {
-				if (current.isMain) notes.push("data/secondmates.md missing - only the main home is shown");
-				continue;
+			const rawHome = rawHomes[rawHomes.length - 1];
+			const metadataHomes = rawHome.metas
+				.map(({ id, text }) => parseMeta(id, text))
+				.filter(meta => meta.kind === "secondmate" && Boolean(meta.home))
+				.map(meta => meta.home as string);
+			if (!secondmatesText && current.isMain && metadataHomes.length === 0) {
+				notes.push("data/secondmates.md missing - only the main home is shown");
 			}
-			for (const childPath of parseSecondmateHomes(secondmatesText)) {
+			const childPaths = [...(secondmatesText ? parseSecondmateHomes(secondmatesText) : []), ...metadataHomes];
+			for (const childPath of childPaths) {
 				const child = childPath.replace(/\/+$/, "");
 				const childKey = canonicalPath(child);
 				const childDepth = current.depth + 1;

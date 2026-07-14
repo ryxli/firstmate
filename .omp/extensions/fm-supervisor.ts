@@ -99,7 +99,7 @@ import { createHash } from "node:crypto";
 import { existsSync, unwatchFile, watchFile } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { connect, type Socket } from "node:net";
 
 // ============================== PURE SEAM ==============================
@@ -439,7 +439,8 @@ async function currentPaneId(pi: ExtensionAPI): Promise<string | undefined> {
 }
 
 function activationReceiptPath(ctx: ExtensionContext): string {
-	return join(process.env.FM_HOME || ctx.cwd, "state", ACTIVATION_RECEIPT_NAME);
+	const statePath = process.env.FM_STATE_OVERRIDE?.trim() || join(process.env.FM_HOME || ctx.cwd, "state");
+	return join(statePath, ACTIVATION_RECEIPT_NAME);
 }
 
 async function writeActivationReceipt(sup: Supervisor): Promise<void> {
@@ -461,7 +462,7 @@ async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 	const path = activationReceiptPath(sup.ctx);
 	const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
 	try {
-		await mkdir(join(process.env.FM_HOME || sup.ctx.cwd, "state"), { recursive: true });
+		await mkdir(dirname(path), { recursive: true });
 		await writeFile(tmp, `${JSON.stringify(receipt)}\n`, { encoding: "utf8", mode: 0o600 });
 		await rename(tmp, path);
 		sup.activationReceiptPath = path;

@@ -87,6 +87,8 @@ export interface RawHome {
 	/** Canonical path identity used for matching; `path` remains display-only. */
 	pathKey?: string;
 	isMain: boolean;
+	/** State directory actually used for this home, honoring FM_STATE_OVERRIDE for the main home. */
+	statePath?: string;
 	backlogText: string | null;
 	metas: { id: string; text: string }[];
 	/** id -> raw status file contents. */
@@ -110,6 +112,8 @@ export interface ParsedHome {
 	path: string;
 	/** Canonical path identity used for matching; `path` remains display-only. */
 	pathKey?: string;
+	/** State directory actually used for this home, honoring FM_STATE_OVERRIDE for the main home. */
+	statePath?: string;
 	/** Raw backlog source retained for exact dependency scanning. */
 	backlogText?: string | null;
 	label: string;
@@ -268,6 +272,7 @@ export function parseHome(raw: RawHome): ParsedHome {
 	return {
 		path: raw.path,
 		pathKey: raw.pathKey ?? normalizeHomePath(raw.path),
+		statePath: raw.statePath,
 		backlogText: raw.backlogText,
 		label: basename(raw.path),
 		activationPane: raw.activationPane,
