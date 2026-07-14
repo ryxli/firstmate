@@ -803,6 +803,9 @@ No section has a silent or null move: when no listed move obviously applies, the
 4. **Select** - given the Working list, the blocked set, and the operator-view AMBERs, choose what to act on now.
    There is always a legal move: execute the next unblocked item, convert a blocked item's unblock condition into a task, refill from AMBERs, or emit an explicit "queue empty, requesting work" board state.
    Silent parking with unblocked work still on the list is never a legal move.
+   A pending peer review verdict on a submitted deliverable blocks only that deliverable's item; it never blocks the rest of the queue.
+   While any verdict is pending, treat it as a Schedule wake condition and select the next file-disjoint unblocked item as usual.
+   (Amended 2026-07-14: observed incident - an agent parked "awaiting verdicts" with 13 unblocked queued items and zero active lanes.)
 5. **Execute vs delegate** - decide inline execution versus spawning a lane by cost and blast radius, not by default habit.
    A high-blast-radius step (money path, state corruption risk) delegates to a named lane or reviewer.
    A small, low-cost, low-risk step executes inline.
