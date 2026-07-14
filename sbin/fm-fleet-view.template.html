@@ -63,11 +63,13 @@
   };
 
   var FLEET_STATUS_META = {
-    working: { label: "working", dot: "fv-dot-working", tone: "success" },
-    tending: { label: "tending", dot: "fv-dot-tending", tone: "info" },
-    blocked: { label: "blocked", dot: "fv-dot-blocked", tone: "warning" },
-    free:    { label: "free",    dot: "fv-dot-free",    tone: "neutral" },
-    unknown: { label: "unknown", dot: "fv-dot-unknown", tone: "error" }
+    working:  { label: "working",  dot: "fv-dot-working",  tone: "success" },
+    tending:  { label: "tending",  dot: "fv-dot-tending",  tone: "info" },
+    blocked:  { label: "blocked",  dot: "fv-dot-blocked",  tone: "warning" },
+    free:     { label: "free",     dot: "fv-dot-free",     tone: "neutral" },
+    healthy:  { label: "healthy",  dot: "fv-dot-working",  tone: "success" },
+    degraded: { label: "degraded", dot: "fv-dot-blocked",  tone: "warning" },
+    unknown:  { label: "unknown",  dot: "fv-dot-unknown",  tone: "error" }
   };
 
   function normFleetStatus(s) {
@@ -174,10 +176,16 @@
     eachPane(root, function (pane, home) {
       total++;
       counts[normStatus(pane.agent_status)]++;
-      if (isOmp(pane) && !GOOD[normStatus(pane.agent_status)]) {
+      var supervisionStatus = pane.live_agent_status != null ? pane.live_agent_status : pane.agent_status;
+      if (isOmp(pane) && !GOOD[normStatus(supervisionStatus)]) {
         warnings.push({ pane: pane, home: home });
       }
     });
+    var other = root.otherLivePanes || [];
+    for (var o = 0; o < other.length; o++) {
+      total++;
+      counts[normStatus(other[o].status)]++;
+    }
     function countHomes(home) {
       eachPane(home, function () {});
       var reg = home.registered_secondmates || [];
@@ -297,12 +305,12 @@
 
   function paneNode(pane, depth) {
     var task = pane.task || {};
+    var idText = present(task.key) || present(task.id);
     var label = present(pane.label) || present(task.worker);
     var labelEl = label
       ? h("span", { class: "font-medium text-[0.95rem] leading-tight" }, label)
       : h("span", { class: "italic text-base-content/45 text-[0.95rem]", text: "unlabeled" });
 
-    var idText = present(task.id);
     var paneId = present(pane.id);
     var degraded = present(task.degraded);
 
@@ -450,6 +458,77 @@
     return container;
   }
 
+  // Project the shared snapshot's flat topology records into the existing tree view.
+  function snapshotTree(snap) {
+    var root = { home: snap.home || "", supervisor: "firstmate", role: "firstmate",
+      harness: "", availability: "running", fleet_status: (snap.health && snap.health.state) || "unknown",
+      workspaces: [], otherLivePanes: snap.otherLivePanes || [] };
+    var wsIndex = {};
+    (snap.agents || []).forEach(function (agent) {
+      var topo = agent.topology || {};
+      var hasPane = !!present(topo.pane);
+      var wsKey = topo.workspace || "state:" + (topo.home || "");
+      var ws = wsIndex[wsKey];
+      if (!ws) {
+        ws = { id: topo.workspace || "?", label: topo.workspaceLabel || wsKey,
+          status: topo.agentStatus || "unknown", tabs: [] };
+        wsIndex[wsKey] = ws;
+        root.workspaces.push(ws);
+      }
+      var tabKey = topo.tab || "state:" + (agent.key || agent.id);
+      var tab = ws.tabs.find(function (candidate) { return candidate.id === tabKey; });
+      if (!tab) {
+        tab = { id: topo.tab || "?", label: topo.tabLabel || tabKey,
+          status: topo.agentStatus || "unknown", panes: [] };
+        ws.tabs.push(tab);
+      }
+      tab.panes.push({
+        id: hasPane ? topo.pane : "",
+        label: agent.id,
+        agent_identity: hasPane ? "omp" : "",
+        agent_status: agent.status || topo.agentStatus || "unknown",
+        live_agent_status: topo.degraded ? "unknown" : (hasPane ? (topo.agentStatus || "unknown") : null),
+        cwd: topo.cwd || "",
+        task: {
+          key: agent.key || "",
+          id: agent.id,
+          owner: agent.owner || "",
+          kind: agent.kind || "agent",
+          mode: agent.mode || "",
+          worker: agent.worker || "",
+          domain: agent.domain || "",
+          project: agent.project || "",
+          home: agent.home || "",
+          degraded: topo.degraded || "",
+        },
+      });
+    });
+    return root;
+  }
+  function otherPanesNode(panes) {
+    if (!panes || !panes.length) return null;
+    var rows = panes.map(function (pane) {
+      var placement = [];
+      if (present(pane.workspace)) placement.push("workspace " + present(pane.workspace));
+      if (present(pane.tab)) placement.push("tab " + present(pane.tab));
+      if (present(pane.pane)) placement.push("pane " + present(pane.pane));
+      return h("div", { class: "fv-row px-3 py-2.5 flex items-start gap-2.5" },
+        statusDot(pane.status),
+        h("div", { class: "min-w-0 flex-1" },
+          h("div", { class: "font-medium text-[0.95rem] leading-tight", text: present(pane.name) || "unlabeled pane" }),
+          placement.length ? h("div", { class: "fv-mono text-xs text-base-content/45 mt-1", text: placement.join(" / ") }) : null,
+          present(pane.cwd) ? h("div", { class: "fv-mono text-xs text-base-content/40 fv-truncate mt-1", title: present(pane.cwd), text: present(pane.cwd) }) : null));
+    });
+    return h("section", { class: "card bg-base-100 border border-base-content/10" },
+      h("div", { class: "card-body p-3 sm:p-4 space-y-2" },
+        h("div", { class: "flex items-center gap-2 text-xs uppercase tracking-wider text-base-content/40 px-1" },
+          h("span", { class: "fv-dot fv-dot-unknown", style: "box-shadow:none" }),
+          h("span", { text: "other panes" }),
+          h("span", { class: "ml-auto", text: String(panes.length) })),
+        rows));
+  }
+
+
   // ---- boot --------------------------------------------------------------
 
   function render() {
@@ -463,6 +542,7 @@
       return;
     }
     var root = (payload && payload.fleet) || {};
+    if (root && root.schema === "fleet-snapshot/1") root = snapshotTree(root);
     var meta = payload || {};
     var sum = summarize(root);
 
@@ -471,6 +551,8 @@
     var banner = warningBanner(sum.warnings);
     if (banner) app.appendChild(banner);
     app.appendChild(homeNode(root, 0, false));
+    var others = otherPanesNode(root.otherLivePanes);
+    if (others) app.appendChild(others);
   }
 
   render();

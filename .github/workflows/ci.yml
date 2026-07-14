@@ -28,6 +28,8 @@ jobs:
           for test_script in tests/*.test.sh; do
             "$test_script"
           done
+      - name: FleetSnapshot and AXI tests
+        run: bun test tests/fm-fleet-snapshot.test.ts tests/fm-bridge.test.ts tests/fm-axi.test.mjs
 
   invariants:
     name: Repo invariants
