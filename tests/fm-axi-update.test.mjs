@@ -298,7 +298,7 @@ try {
   writeFileSync(join(wholeSeeded, ".fm-secondmate-home"), "whole\n");
   writeFileSync(join(wholeSeeded, "AGENTS.md"), "v2\n");
   writeFileSync(registry, JSON.stringify({ schema: "firstmate.capability-registry/v1", targets: [
-    { id: "whole-seeded", home: wholeSeeded, source_revision: newRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts"], required_probe_result: { activation: "ok" } },
+    { id: "whole-seeded", home: wholeSeeded, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts"], required_probe_result: { activation: "ok" } },
   ] }));
   writeFileSync(wholePanes, JSON.stringify({ result: { panes: [
     { pane_id: "w1:p5", cwd: wholeSeeded, agent: "omp", agent_status: "idle", agent_session_id: "session-whole" },
