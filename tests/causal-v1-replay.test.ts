@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { appendCausalEvent, readStudyLedger } from "../causal/v1/ledger";
+import { appendCausalEvent, readStudyLedger, studyLedgerPath } from "../causal/v1/ledger";
 import { replayEvents, replayStudyLedger } from "../causal/v1/replay";
 import {
 	CAUSAL_SCHEMA_VERSION,
@@ -26,6 +26,7 @@ import {
 
 const producerId = "producer_00000000-0000-4000-8000-000000000101" as ProducerId;
 const studyId = "study_00000000-0000-4000-8000-000000000102" as StudyId;
+const otherStudyId = "study_00000000-0000-4000-8000-000000000107" as StudyId;
 const taskId = "task_00000000-0000-4000-8000-000000000103" as TaskId;
 const episodeId = "episode_00000000-0000-4000-8000-000000000104" as EpisodeId;
 const supervisorId = "supervisor_00000000-0000-4000-8000-000000000105" as SupervisorId;
@@ -195,6 +196,33 @@ describe("causal-event/v1 deterministic replay fixtures", () => {
 		expect(corrupted.corruptions.join(" ")).toContain("conflicting hashes");
 	});
 
+	it("rejects cross-study ledger files and replay joins", () => {
+		const directory = mkdtempSync(join(tmpdir(), "causal-v1-study-binding-"));
+		temporaryDirectories.push(directory);
+		const source = fixtureEvent("task.opened", 1, undefined);
+		const { event_sha256: discardedHash, ...sourceBody } = source;
+		const foreign = createCausalEvent({ ...sourceBody, study_id: otherStudyId });
+		writeFileSync(studyLedgerPath(directory, studyId), `${JSON.stringify(foreign)}\n`);
+		expect(() => readStudyLedger(directory, studyId)).toThrow("expected");
+		expect(replayStudyLedger(directory, studyId).status).toBe("rejected");
+		expect(replayEvents([foreign], studyId).status).toBe("rejected");
+		const sidecarDirectory = mkdtempSync(join(tmpdir(), "causal-v1-sidecar-binding-"));
+		temporaryDirectories.push(sidecarDirectory);
+		writeFileSync(
+			join(sidecarDirectory, `${studyId}.watermarks.json`),
+			JSON.stringify({ schema_version: CAUSAL_SCHEMA_VERSION, study_id: otherStudyId, watermarks: [] }),
+		);
+		expect(() => readStudyLedger(sidecarDirectory, studyId)).toThrow("watermark sidecar is bound");
+
+		const continuation = fixtureEvent("episode.opened", 2, source);
+		const { event_sha256: discardedContinuationHash, ...continuationBody } = continuation;
+		const foreignContinuation = createCausalEvent({ ...continuationBody, study_id: otherStudyId });
+		expect(replayEvents([source, foreignContinuation]).status).toBe("rejected");
+		expect(replayEvents([source, foreignContinuation]).corruptions.join(" ")).toContain("study");
+		void discardedHash;
+		void discardedContinuationHash;
+	});
+
 	it("rejects producer sequence and previous-hash gaps", () => {
 		const first = fixtureEvent("task.opened", 1, undefined);
 		const sequenceGap = fixtureEvent("episode.opened", 3, first);
@@ -221,6 +249,98 @@ describe("causal-event/v1 deterministic replay fixtures", () => {
 		const ledger = readStudyLedger(directory, studyId);
 		expect(ledger.watermarks).toEqual([{ producer_id: producerId, producer_seq: 14, event_sha256: events[13].event_sha256 }]);
 		expect(replayStudyLedger(directory, studyId).episodes[0].status).toBe("complete");
+	});
+
+	it("repairs a missing watermark sidecar on an idempotent retry", () => {
+		const directory = mkdtempSync(join(tmpdir(), "causal-v1-watermark-retry-"));
+		temporaryDirectories.push(directory);
+		const event = fixtureEvent("task.opened", 1, undefined);
+		expect(appendCausalEvent(directory, event).disposition).toBe("appended");
+		const sidecar = join(directory, `${studyId}.watermarks.json`);
+		rmSync(sidecar);
+		writeFileSync(`${sidecar}.tmp`, "interrupted sidecar write");
+		const retry = appendCausalEvent(directory, event);
+		expect(retry.disposition).toBe("idempotent");
+		expect(retry.watermark).toEqual({ producer_id: producerId, producer_seq: 1, event_sha256: event.event_sha256 });
+		expect(JSON.parse(readFileSync(sidecar, "utf8")).watermarks).toEqual([retry.watermark]);
+	});
+
+	it("rejects a branching parent graph without one coherent root-to-outcome chain", () => {
+		const base = completeFixture();
+		const rebuilt: CausalEvent[] = [base[0]];
+		const branchTaskEventId = eventId(producerId, 15);
+		const { event_sha256: discardedEpisodeHash, ...episodeBody } = base[1];
+		rebuilt.push(
+			createCausalEvent({
+				...episodeBody,
+				lineage: { ...base[1].lineage, parent_event_id: present(branchTaskEventId) },
+			}),
+		);
+		for (let index = 2; index < base.length; index += 1) {
+			const { event_sha256: discardedHash, ...body } = base[index];
+			rebuilt.push(
+				createCausalEvent({
+					...body,
+					producer: { ...body.producer, previous_event_sha256: rebuilt.at(-1)!.event_sha256 },
+				}),
+			);
+			void discardedHash;
+		}
+		const { event_sha256: discardedTaskHash, ...taskBody } = base[0];
+		rebuilt.push(
+			createCausalEvent({
+				...taskBody,
+				event_id: branchTaskEventId,
+				producer: {
+					...taskBody.producer,
+					producer_seq: 15,
+					previous_event_sha256: rebuilt.at(-1)!.event_sha256,
+				},
+				lineage: {
+					...taskBody.lineage,
+					parent_event_id: present(eventId(producerId, 999)),
+				},
+			}),
+		);
+		void discardedEpisodeHash;
+		void discardedTaskHash;
+		const result = replayEvents(rebuilt);
+		expect(result.status).toBe("accepted");
+		expect(result.episodes[0].status).toBe("not_estimable");
+		expect(result.episodes[0].reasons.join(" ")).toContain("coherent root-to-outcome");
+	});
+
+	it("uses the acknowledgement from the accepted coherent branch", () => {
+		const base = completeFixture();
+		const coherentAcknowledgementId = eventId(producerId, 15);
+		const rebuilt: CausalEvent[] = [base[0]];
+		for (let index = 1; index < base.length; index += 1) {
+			const { event_sha256: discardedHash, ...body } = base[index];
+			rebuilt.push(
+				createCausalEvent({
+					...body,
+					producer: { ...body.producer, previous_event_sha256: rebuilt.at(-1)!.event_sha256 },
+					...(index === 7 ? { lineage: { ...body.lineage, parent_event_id: present(coherentAcknowledgementId) } } : {}),
+				}),
+			);
+			void discardedHash;
+		}
+		const { event_sha256: discardedAcknowledgementHash, ...acknowledgementBody } = base[6];
+		const coherentAcknowledgement = createCausalEvent({
+			...acknowledgementBody,
+			event_id: coherentAcknowledgementId,
+			producer: {
+				...acknowledgementBody.producer,
+				producer_seq: 15,
+				previous_event_sha256: rebuilt.at(-1)!.event_sha256,
+			},
+		});
+		rebuilt.push(coherentAcknowledgement);
+		void discardedAcknowledgementHash;
+		const result = replayEvents(rebuilt);
+		expect(result.status).toBe("accepted");
+		expect(result.episodes[0].status).toBe("complete");
+		expect(result.episodes[0].effective_exposure_event_id).toBe(coherentAcknowledgementId);
 	});
 
 	it("preserves candidate display metadata while refusing heuristic joins", () => {

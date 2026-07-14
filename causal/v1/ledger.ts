@@ -45,16 +45,43 @@ function watermarkPath(ledgerDirectory: string, studyId: StudyId): string {
 	return join(ledgerDirectory, `${studyId}.watermarks.json`);
 }
 
+function assertWatermarkSidecarStudy(ledgerDirectory: string, studyId: StudyId): void {
+	const path = watermarkPath(ledgerDirectory, studyId);
+	if (!existsSync(path)) return;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(path, "utf8"));
+	} catch (error) {
+		const message = error instanceof Error ? error.message : "unknown JSON parse failure";
+		throw new LedgerCorruptionError(`watermark sidecar is invalid JSON: ${message}`);
+	}
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new LedgerCorruptionError("watermark sidecar must be an object");
+	}
+	const sidecar = parsed as Record<string, unknown>;
+	if (sidecar.schema_version !== CAUSAL_SCHEMA_VERSION) {
+		throw new LedgerCorruptionError("watermark sidecar has an unsupported schema_version");
+	}
+	if (sidecar.study_id !== studyId) {
+		throw new LedgerCorruptionError(`watermark sidecar is bound to study ${String(sidecar.study_id)}, expected ${studyId}`);
+	}
+}
+
 function compareWatermarks(left: ProducerWatermark, right: ProducerWatermark): number {
 	return left.producer_id.localeCompare(right.producer_id);
 }
 
-export function validateLedgerEvents(events: readonly CausalEvent[]): LedgerRead {
+export function validateLedgerEvents(events: readonly CausalEvent[], requestedStudyId?: StudyId): LedgerRead {
 	const seenEventHashes = new Map<string, Sha256>();
 	const watermarks = new Map<ProducerId, ProducerWatermark>();
 	const accepted: CausalEvent[] = [];
+	let boundStudyId = requestedStudyId;
 	for (const event of events) {
 		assertCausalEvent(event);
+		if (boundStudyId === undefined) boundStudyId = event.study_id;
+		if (event.study_id !== boundStudyId) {
+			throw new LedgerCorruptionError(`event ${event.event_id} is bound to study ${event.study_id}, expected ${boundStudyId}`);
+		}
 		const existingHash = seenEventHashes.get(event.event_id);
 		if (existingHash !== undefined) {
 			if (existingHash !== event.event_sha256) throw new LedgerCorruptionError(`event ${event.event_id} has conflicting hashes`);
@@ -89,6 +116,7 @@ export function validateLedgerEvents(events: readonly CausalEvent[]): LedgerRead
 
 export function readStudyLedger(ledgerDirectory: string, studyId: StudyId): LedgerRead {
 	const path = studyLedgerPath(ledgerDirectory, studyId);
+	assertWatermarkSidecarStudy(ledgerDirectory, studyId);
 	if (!existsSync(path)) return Object.freeze({ events: Object.freeze([]), watermarks: Object.freeze([]) });
 	const events: CausalEvent[] = [];
 	const lines = readFileSync(path, "utf8").split("\n");
@@ -104,13 +132,16 @@ export function readStudyLedger(ledgerDirectory: string, studyId: StudyId): Ledg
 		}
 		try {
 			assertCausalEvent(parsed);
+			if (parsed.study_id !== studyId) {
+				throw new LedgerCorruptionError(`ledger line ${index + 1} is bound to study ${parsed.study_id}, expected ${studyId}`);
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "unknown schema failure";
 			throw new LedgerCorruptionError(`ledger line ${index + 1} is invalid: ${message}`);
 		}
 		events.push(parsed);
 	}
-	return validateLedgerEvents(events);
+	return validateLedgerEvents(events, studyId);
 }
 
 function persistWatermarks(ledgerDirectory: string, studyId: StudyId, watermarks: readonly ProducerWatermark[]): void {
@@ -140,7 +171,9 @@ export function appendCausalEvent(ledgerDirectory: string, event: CausalEvent): 
 	const ledgerPath = studyLedgerPath(ledgerDirectory, event.study_id);
 	if (matching !== undefined) {
 		if (matching.event_sha256 !== event.event_sha256) throw new LedgerCorruptionError(`event ${event.event_id} has conflicting hashes`);
-		return Object.freeze({ disposition: "idempotent", ledger_path: ledgerPath, watermark });
+		const persistedWatermark = prior.watermarks.find((item) => item.producer_id === event.producer.producer_id) ?? watermark;
+		persistWatermarks(ledgerDirectory, event.study_id, prior.watermarks);
+		return Object.freeze({ disposition: "idempotent", ledger_path: ledgerPath, watermark: persistedWatermark });
 	}
 	const producerWatermark = prior.watermarks.find((item) => item.producer_id === event.producer.producer_id);
 	const expectedSequence = producerWatermark === undefined ? 1 : producerWatermark.producer_seq + 1;

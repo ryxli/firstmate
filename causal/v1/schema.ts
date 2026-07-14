@@ -175,6 +175,10 @@ function assertEventIdentifier(value: unknown, path: string): void {
 	const match = /^ce1:(producer_[0-9a-f-]+):([1-9]\d*)$/.exec(value);
 	if (match === null) throw new CausalSchemaError(`${path} must be a ce1 producer event id`);
 	assertUuidV4OpaqueId(match[1], "producer_", `${path}.producer_id`);
+	const sequence = Number(match[2]);
+	if (!Number.isSafeInteger(sequence) || sequence < 1) {
+		throw new CausalSchemaError(`${path}.sequence must be a positive safe integer`);
+	}
 }
 
 function mintUuidV4OpaqueId<Prefix extends string>(prefix: Prefix): OpaqueId<Prefix> {
@@ -277,6 +281,7 @@ function assertClockTimestamp(value: unknown, path: string): void {
 function assertPrefixedBindingId(value: unknown, prefix: string, path: string): void {
 	assertNonEmptyString(value, path);
 	if (!value.startsWith(prefix)) throw new CausalSchemaError(`${path} must start with ${prefix}`);
+	if (value.length === prefix.length) throw new CausalSchemaError(`${path} must have a non-empty suffix after ${prefix}`);
 }
 
 const LINEAGE_VALUE_VALIDATORS: Readonly<Record<string, PresentValueValidator>> = {

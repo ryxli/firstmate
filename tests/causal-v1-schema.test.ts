@@ -85,6 +85,13 @@ describe("causal-event/v1 canonical JSON", () => {
 		expect(canonicalSha256({ a: 1, b: 2 })).toBe(canonicalSha256({ b: 2, a: 1 }));
 		expect(() => canonicalJson({ invalid: Number.NaN })).toThrow("finite number");
 	});
+
+	it("rejects sparse arrays before canonical hashing", () => {
+		const sparse: unknown[] = [];
+		sparse.length = 1;
+		expect(() => canonicalJson(sparse)).toThrow("sparse array");
+		expect(() => canonicalSha256({ sparse })).toThrow("sparse array");
+	});
 });
 
 describe("causal-event/v1 schema", () => {
@@ -140,6 +147,30 @@ describe("causal-event/v1 schema", () => {
 			lineage: { ...event.lineage, parent_event_id: present("ce1:producer_not-a-uuid:1" as never) },
 		};
 		expect(() => assertCausalEvent(invalidParentEvent)).toThrow("ce1 producer event id");
+	});
+
+	it("rejects empty binding suffixes and unsafe parent event sequences", () => {
+		const event = fixtureEvent();
+		for (const [field, value] of [
+			["session_id", "session_"],
+			["pane_id", "pane_"],
+			["workspace_id", "workspace_"],
+			["process_id", "process_"],
+		] as const) {
+			const invalidBinding: unknown = {
+				...event,
+				lineage: { ...event.lineage, [field]: present(value as never) },
+			};
+			expect(() => assertCausalEvent(invalidBinding)).toThrow("non-empty suffix");
+		}
+		const invalidParentSequence: unknown = {
+			...event,
+			lineage: {
+				...event.lineage,
+				parent_event_id: present(`ce1:${producerId}:9007199254740992` as never),
+			},
+		};
+		expect(() => assertCausalEvent(invalidParentSequence)).toThrow("safe integer");
 	});
 
 	it("enforces metadata-only payloads without raw content fields", () => {
