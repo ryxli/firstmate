@@ -738,3 +738,19 @@ A tracked-files fast-forward leaves the gitignored operational dirs untouched, s
 `sbin/fm-update.sh` does only the git mechanics and prints a summary plus two action lines, `reread-firstmate: yes|no` and `nudge-secondmates: <pane-targets...>|none`.
 The skill then performs the parts a script cannot: when the running firstmate's instruction surface changed it re-reads `AGENTS.md`, and for each updated live secondmate with metadata it sends a gentle one-line re-read nudge via `sbin/fm-send.sh <pane-target>` so the whole tree converges on the latest `sbin/` and instructions.
 This is a sanctioned self-write to the firstmate repo and its own worktrees only, exactly like the fleet sync, and never touches anything under `projects/`.
+
+## Whiteboard operator-view contract
+
+Every whiteboard begins with a captain-first band, before any agent detail; the board is not compliant without it.
+
+```
+## OPERATOR VIEW
+🟢|🟡|🔴|🔵 <one plain-language line per active lane>   (hard cap: 8 lines)
+⚠ Needs captain: <decision or "nothing">
+→ For supervisor: <handoff/ask or "nothing">
+```
+
+Rules for the operator view: plain language a non-reader can skim in ten seconds; one status glyph per line (🟢 healthy, 🟡 degraded/waiting, 🔴 broken/blocked, 🔵 in progress); no commit SHAs, file paths, or links unless a pending decision needs one; the "Needs captain" and "For supervisor" lines are mandatory even when the answer is "nothing".
+Everything below the operator view (Working / Evidence / Preserved / Reply sections, SHAs, evidence chains, exclusion rules) remains unconstrained agent detail - move precision down there, never delete it.
+The operator view is a verified deliverable: supervisors check it for presence, currency, and the line cap on their ticks and steer when it degrades, the same way artifact claims are verified.
+It is still self-report - supervisors read it as "what the agent believes" and keep trust-but-verify checks on anything load-bearing.
