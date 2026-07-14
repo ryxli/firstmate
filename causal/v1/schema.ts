@@ -82,10 +82,42 @@ export type PayloadReference =
 			readonly policy_reason: string;
 		};
 
-export type CausalPayload = {
-	readonly type: string;
-	readonly payload_ref: PayloadReference;
+export type AcceptanceEvaluator =
+	| { readonly supervisor: { readonly supervisor_id: SupervisorId } }
+	| { readonly agent: { readonly agent_id: AgentId } };
+
+export type AcceptanceDecision = {
+	readonly decision: "accepted" | "rejected";
+	readonly evaluator: AcceptanceEvaluator;
+	readonly decision_basis: "evidence_review" | "policy_review" | "automated_validation";
+	readonly evidence_event_ids: readonly EventId[];
 };
+
+export type OutcomeClosure = {
+	readonly valid_completion: "valid" | "invalid";
+	readonly milestone_result: "achieved" | "not_achieved" | "not_applicable";
+	readonly blocker_disposition: "no_blocker" | "resolved" | "unresolved" | "not_applicable";
+	readonly safety_disposition: "safe" | "unsafe" | "not_applicable";
+	readonly close_reason: "completed" | "rejected" | "blocked" | "safety_stopped" | "invalidated";
+};
+
+type GenericPayloadType = Exclude<(typeof payloadTypes)[EventType], "acceptance" | "outcome">;
+
+export type CausalPayload =
+	| {
+			readonly type: GenericPayloadType;
+			readonly payload_ref: PayloadReference;
+	  }
+	| {
+			readonly type: "acceptance";
+			readonly payload_ref: PayloadReference;
+			readonly acceptance: AcceptanceDecision;
+	  }
+	| {
+			readonly type: "outcome";
+			readonly payload_ref: PayloadReference;
+			readonly outcome: OutcomeClosure;
+	  };
 
 export type CausalEventBody = {
 	readonly schema_version: typeof CAUSAL_SCHEMA_VERSION;
@@ -137,7 +169,7 @@ export class CausalSchemaError extends Error {
 	}
 }
 
-const payloadTypes: Readonly<Record<EventType, string>> = {
+const payloadTypes = {
 	"task.opened": "task_shape",
 	"episode.opened": "episode",
 	"pre_state.snapshotted": "pre_state",
@@ -158,7 +190,7 @@ const payloadTypes: Readonly<Record<EventType, string>> = {
 	"replay.started": "replay",
 	"replay.completed": "replay",
 	"capture_gap.detected": "capture_gap",
-};
+} as const satisfies Readonly<Record<EventType, string>>;
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -299,34 +331,109 @@ const LINEAGE_VALUE_VALIDATORS: Readonly<Record<string, PresentValueValidator>> 
 	process_id: (value, path) => assertPrefixedBindingId(value, "process_", path),
 };
 
-function assertPayload(payload: unknown, eventType: EventType): void {
-	if (!isRecord(payload)) throw new CausalSchemaError("payload must be an object");
-	assertExactKeys(payload, ["type", "payload_ref"], "payload");
-	if (payload.type !== payloadTypes[eventType]) throw new CausalSchemaError(`payload.type must be ${payloadTypes[eventType]} for ${eventType}`);
-	if (!isRecord(payload.payload_ref)) throw new CausalSchemaError("payload.payload_ref must be an object");
-	const ref = payload.payload_ref;
-	if (ref.mode === "metadata_only") {
-		assertExactKeys(ref, ["mode", "reference", "fingerprint", "redaction_policy", "byte_count"], "payload.payload_ref");
-		assertUuidV4OpaqueId(ref.reference, "payload_", "payload.payload_ref.reference");
-		if (typeof ref.fingerprint !== "string" || !ref.fingerprint.startsWith("hmac-sha256:")) throw new CausalSchemaError("payload fingerprint must be HMAC-SHA-256");
-		assertNonEmptyString(ref.redaction_policy, "payload.payload_ref.redaction_policy");
-		if (ref.byte_count !== undefined && (!Number.isSafeInteger(ref.byte_count) || ref.byte_count < 0)) throw new CausalSchemaError("payload byte_count must be a non-negative safe integer");
+function assertAcceptanceDecision(value: unknown): void {
+	if (!isRecord(value)) throw new CausalSchemaError("payload.acceptance must be an object");
+	assertExactKeys(value, ["decision", "evaluator", "decision_basis", "evidence_event_ids"], "payload.acceptance");
+	if (value.decision !== "accepted" && value.decision !== "rejected") throw new CausalSchemaError("payload.acceptance.decision is not supported");
+	if (!isRecord(value.evaluator)) throw new CausalSchemaError("payload.acceptance.evaluator must be an object");
+	assertExactKeys(value.evaluator, ["supervisor", "agent"], "payload.acceptance.evaluator");
+	const hasSupervisor = Object.hasOwn(value.evaluator, "supervisor");
+	const hasAgent = Object.hasOwn(value.evaluator, "agent");
+	if (hasSupervisor === hasAgent) throw new CausalSchemaError("payload.acceptance.evaluator must contain exactly one of supervisor or agent");
+	if (hasSupervisor) {
+		if (!isRecord(value.evaluator.supervisor)) throw new CausalSchemaError("payload.acceptance.evaluator.supervisor must be an object");
+		assertExactKeys(value.evaluator.supervisor, ["supervisor_id"], "payload.acceptance.evaluator.supervisor");
+		assertUuidV4OpaqueId(value.evaluator.supervisor.supervisor_id, "supervisor_", "payload.acceptance.evaluator.supervisor.supervisor_id");
+	}
+	if (hasAgent) {
+		if (!isRecord(value.evaluator.agent)) throw new CausalSchemaError("payload.acceptance.evaluator.agent must be an object");
+		assertExactKeys(value.evaluator.agent, ["agent_id"], "payload.acceptance.evaluator.agent");
+		assertUuidV4OpaqueId(value.evaluator.agent.agent_id, "agent_", "payload.acceptance.evaluator.agent.agent_id");
+	}
+	if (!["evidence_review", "policy_review", "automated_validation"].includes(value.decision_basis as string)) {
+		throw new CausalSchemaError("payload.acceptance.decision_basis is not supported");
+	}
+	if (!Array.isArray(value.evidence_event_ids) || value.evidence_event_ids.length === 0) {
+		throw new CausalSchemaError("payload.acceptance.evidence_event_ids must be a non-empty array");
+	}
+	const evidenceEventIds = new Set<string>();
+	for (const [index, eventId] of value.evidence_event_ids.entries()) {
+		assertEventIdentifier(eventId, `payload.acceptance.evidence_event_ids[${index}]`);
+		if (evidenceEventIds.has(eventId)) throw new CausalSchemaError("payload.acceptance.evidence_event_ids must be unique");
+		evidenceEventIds.add(eventId);
+	}
+}
+
+function assertOutcomeClosure(value: unknown): void {
+	if (!isRecord(value)) throw new CausalSchemaError("payload.outcome must be an object");
+	assertExactKeys(value, ["valid_completion", "milestone_result", "blocker_disposition", "safety_disposition", "close_reason"], "payload.outcome");
+	if (value.valid_completion !== "valid" && value.valid_completion !== "invalid") throw new CausalSchemaError("payload.outcome.valid_completion is not supported");
+	if (!["achieved", "not_achieved", "not_applicable"].includes(value.milestone_result as string)) {
+		throw new CausalSchemaError("payload.outcome.milestone_result is not supported");
+	}
+	if (!["no_blocker", "resolved", "unresolved", "not_applicable"].includes(value.blocker_disposition as string)) {
+		throw new CausalSchemaError("payload.outcome.blocker_disposition is not supported");
+	}
+	if (!["safe", "unsafe", "not_applicable"].includes(value.safety_disposition as string)) {
+		throw new CausalSchemaError("payload.outcome.safety_disposition is not supported");
+	}
+	if (!["completed", "rejected", "blocked", "safety_stopped", "invalidated"].includes(value.close_reason as string)) {
+		throw new CausalSchemaError("payload.outcome.close_reason is not supported");
+	}
+	if (value.close_reason === "completed") {
+		if (value.valid_completion !== "valid" || value.milestone_result !== "achieved" || value.blocker_disposition !== "no_blocker" || value.safety_disposition !== "safe") {
+			throw new CausalSchemaError("completed outcomes must be valid, achieved, unblocked, and safe");
+		}
+	} else if (value.valid_completion !== "invalid") {
+		throw new CausalSchemaError("non-completed outcomes must be invalid");
+	}
+	if (value.close_reason === "blocked" && value.blocker_disposition !== "unresolved") {
+		throw new CausalSchemaError("blocked outcomes must have an unresolved blocker");
+	}
+	if (value.close_reason === "safety_stopped" && value.safety_disposition !== "unsafe") {
+		throw new CausalSchemaError("safety_stopped outcomes must be unsafe");
+	}
+}
+
+function assertPayloadReference(value: unknown): void {
+	if (!isRecord(value)) throw new CausalSchemaError("payload.payload_ref must be an object");
+	if (value.mode === "metadata_only") {
+		assertExactKeys(value, ["mode", "reference", "fingerprint", "redaction_policy", "byte_count"], "payload.payload_ref");
+		assertUuidV4OpaqueId(value.reference, "payload_", "payload.payload_ref.reference");
+		if (typeof value.fingerprint !== "string" || !value.fingerprint.startsWith("hmac-sha256:")) throw new CausalSchemaError("payload fingerprint must be HMAC-SHA-256");
+		assertNonEmptyString(value.redaction_policy, "payload.payload_ref.redaction_policy");
+		if (value.byte_count !== undefined && (!Number.isSafeInteger(value.byte_count) || value.byte_count < 0)) throw new CausalSchemaError("payload byte_count must be a non-negative safe integer");
 		return;
 	}
-	if (ref.mode === "sealed_local_ref") {
-		assertExactKeys(ref, ["mode", "reference", "access_policy", "expires_at"], "payload.payload_ref");
-		assertUuidV4OpaqueId(ref.reference, "payload_", "payload.payload_ref.reference");
-		assertNonEmptyString(ref.access_policy, "payload.payload_ref.access_policy");
-		assertClockTimestamp(ref.expires_at, "payload.payload_ref.expires_at");
+	if (value.mode === "sealed_local_ref") {
+		assertExactKeys(value, ["mode", "reference", "access_policy", "expires_at"], "payload.payload_ref");
+		assertUuidV4OpaqueId(value.reference, "payload_", "payload.payload_ref.reference");
+		assertNonEmptyString(value.access_policy, "payload.payload_ref.access_policy");
+		assertClockTimestamp(value.expires_at, "payload.payload_ref.expires_at");
 		return;
 	}
-	if (ref.mode === "withheld") {
-		assertExactKeys(ref, ["mode", "state", "policy_reason"], "payload.payload_ref");
-		if (ref.state !== "privacy_withheld") throw new CausalSchemaError("withheld payloads must state privacy_withheld");
-		assertNonEmptyString(ref.policy_reason, "payload.payload_ref.policy_reason");
+	if (value.mode === "withheld") {
+		assertExactKeys(value, ["mode", "state", "policy_reason"], "payload.payload_ref");
+		if (value.state !== "privacy_withheld") throw new CausalSchemaError("withheld payloads must state privacy_withheld");
+		assertNonEmptyString(value.policy_reason, "payload.payload_ref.policy_reason");
 		return;
 	}
 	throw new CausalSchemaError("payload_ref.mode is not permitted");
+}
+
+function assertPayload(payload: unknown, eventType: EventType): void {
+	if (!isRecord(payload)) throw new CausalSchemaError("payload must be an object");
+	if (payload.type !== payloadTypes[eventType]) throw new CausalSchemaError(`payload.type must be ${payloadTypes[eventType]} for ${eventType}`);
+	if (payload.type === "acceptance") {
+		assertExactKeys(payload, ["type", "payload_ref", "acceptance"], "payload");
+		assertAcceptanceDecision(payload.acceptance);
+	} else if (payload.type === "outcome") {
+		assertExactKeys(payload, ["type", "payload_ref", "outcome"], "payload");
+		assertOutcomeClosure(payload.outcome);
+	} else {
+		assertExactKeys(payload, ["type", "payload_ref"], "payload");
+	}
+	assertPayloadReference(payload.payload_ref);
 }
 
 export function assertCausalEvent(value: unknown): asserts value is CausalEvent {

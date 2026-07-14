@@ -107,6 +107,23 @@ function describeEpisode(events: readonly CausalEvent[], episodeId: EpisodeId): 
 		byType.set(event.event_type, collected);
 	}
 	const reasons: string[] = [];
+	const evidenceEventIds = new Set((byType.get("evidence.recorded") ?? []).map((event) => event.event_id));
+	const acceptedAcceptanceEventIds = new Set<EventId>();
+	for (const event of byType.get("acceptance.decided") ?? []) {
+		if (event.payload.type !== "acceptance") continue;
+		for (const evidenceEventId of event.payload.acceptance.evidence_event_ids) {
+			if (!evidenceEventIds.has(evidenceEventId)) reasons.push(`${event.event_id} references missing evidence event ${evidenceEventId}`);
+		}
+		if (event.payload.acceptance.decision === "accepted") acceptedAcceptanceEventIds.add(event.event_id);
+	}
+	if (acceptedAcceptanceEventIds.size === 0) reasons.push("no accepted acceptance.decided event");
+	for (const event of byType.get("outcome.closed") ?? []) {
+		if (event.payload.type !== "outcome" || event.payload.outcome.valid_completion !== "valid") continue;
+		const parentEventId = taggedValue(event.lineage.parent_event_id);
+		if (parentEventId === undefined || !acceptedAcceptanceEventIds.has(parentEventId)) {
+			reasons.push(`${event.event_id} valid outcome must directly reference an accepted acceptance.decided event`);
+		}
+	}
 	const displayMetadata: Readonly<Record<string, string>>[] = [];
 	let hasUnjoinableIdentity = false;
 	for (const event of episodeEvents) {

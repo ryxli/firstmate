@@ -195,4 +195,149 @@ describe("causal-event/v1 schema", () => {
 		expect(sealedPayload.event_sha256).not.toBe(event.event_sha256);
 		expect(sealedPayload.payload.payload_ref.mode).toBe("sealed_local_ref");
 	});
+
+	it("requires complete, exact acceptance decision metadata with unique evidence references", () => {
+		const event = fixtureEvent();
+		const acceptance = createCausalEvent({
+			...event,
+			event_type: "acceptance.decided",
+			payload: {
+				type: "acceptance",
+				payload_ref: {
+					mode: "metadata_only",
+					reference: "payload_00000000-0000-4000-8000-000000000009" as PayloadId,
+					fingerprint: "hmac-sha256:acceptance-fixture",
+					redaction_policy: "causal-payload-redaction/v1",
+				},
+				acceptance: {
+					decision: "accepted",
+					evaluator: { supervisor: { supervisor_id: supervisorId } },
+					decision_basis: "evidence_review",
+					evidence_event_ids: [event.event_id],
+				},
+			},
+		});
+		expect(() => assertCausalEvent(acceptance)).not.toThrow();
+		const duplicateEvidence: unknown = {
+			...acceptance,
+			payload: {
+				...acceptance.payload,
+				acceptance: {
+					decision: "accepted",
+					evaluator: { supervisor: { supervisor_id: supervisorId } },
+					decision_basis: "evidence_review",
+					evidence_event_ids: [event.event_id, event.event_id],
+				},
+			},
+		};
+		expect(() => assertCausalEvent(duplicateEvidence)).toThrow("unique");
+		const ambiguousEvaluator: unknown = {
+			...acceptance,
+			payload: {
+				...acceptance.payload,
+				acceptance: {
+					decision: "accepted",
+					evaluator: { supervisor: { supervisor_id: supervisorId }, agent: { agent_id: targetAgentId } },
+					decision_basis: "evidence_review",
+					evidence_event_ids: [event.event_id],
+				},
+			},
+		};
+		expect(() => assertCausalEvent(ambiguousEvaluator)).toThrow("exactly one");
+		const unexpectedAcceptanceField: unknown = {
+			...acceptance,
+			payload: {
+				...acceptance.payload,
+				acceptance: {
+					decision: "accepted",
+					evaluator: { supervisor: { supervisor_id: supervisorId } },
+					decision_basis: "evidence_review",
+					evidence_event_ids: [event.event_id],
+					note: "not part of the canonical contract",
+				},
+			},
+		};
+		expect(() => assertCausalEvent(unexpectedAcceptanceField)).toThrow("not permitted");
+	});
+
+	it("enforces exact outcome closure metadata and completion invariants", () => {
+		const event = fixtureEvent();
+		const outcome = createCausalEvent({
+			...event,
+			event_type: "outcome.closed",
+			payload: {
+				type: "outcome",
+				payload_ref: {
+					mode: "metadata_only",
+					reference: "payload_00000000-0000-4000-8000-000000000010" as PayloadId,
+					fingerprint: "hmac-sha256:outcome-fixture",
+					redaction_policy: "causal-payload-redaction/v1",
+				},
+				outcome: {
+					valid_completion: "valid",
+					milestone_result: "achieved",
+					blocker_disposition: "no_blocker",
+					safety_disposition: "safe",
+					close_reason: "completed",
+				},
+			},
+		});
+		expect(() => assertCausalEvent(outcome)).not.toThrow();
+		const incompleteCompleted: unknown = {
+			...outcome,
+			payload: {
+				...outcome.payload,
+				outcome: {
+					valid_completion: "valid",
+					milestone_result: "not_achieved",
+					blocker_disposition: "no_blocker",
+					safety_disposition: "safe",
+					close_reason: "completed",
+				},
+			},
+		};
+		expect(() => assertCausalEvent(incompleteCompleted)).toThrow("completed outcomes");
+		const unresolvedSafetyStop: unknown = {
+			...outcome,
+			payload: {
+				...outcome.payload,
+				outcome: {
+					valid_completion: "invalid",
+					milestone_result: "not_applicable",
+					blocker_disposition: "not_applicable",
+					safety_disposition: "safe",
+					close_reason: "safety_stopped",
+				},
+			},
+		};
+		expect(() => assertCausalEvent(unresolvedSafetyStop)).toThrow("safety_stopped outcomes");
+		const validRejectedOutcome: unknown = {
+			...outcome,
+			payload: {
+				...outcome.payload,
+				outcome: {
+					valid_completion: "valid",
+					milestone_result: "not_applicable",
+					blocker_disposition: "not_applicable",
+					safety_disposition: "not_applicable",
+					close_reason: "rejected",
+				},
+			},
+		};
+		expect(() => assertCausalEvent(validRejectedOutcome)).toThrow("non-completed outcomes");
+		const resolvedBlockedOutcome: unknown = {
+			...outcome,
+			payload: {
+				...outcome.payload,
+				outcome: {
+					valid_completion: "invalid",
+					milestone_result: "not_applicable",
+					blocker_disposition: "resolved",
+					safety_disposition: "not_applicable",
+					close_reason: "blocked",
+				},
+			},
+		};
+		expect(() => assertCausalEvent(resolvedBlockedOutcome)).toThrow("blocked outcomes");
+	});
 });

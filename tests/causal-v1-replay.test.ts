@@ -22,6 +22,7 @@ import {
 	CausalEvent,
 	Sha256,
 	PayloadId,
+	CausalPayload,
 } from "../causal/v1/schema";
 
 const producerId = "producer_00000000-0000-4000-8000-000000000101" as ProducerId;
@@ -117,16 +118,46 @@ function fixtureEvent(eventType: EventType, sequence: number, previousEvent: Cau
 			workspace_id: eventType === "session.bound" ? present(workspaceId) : missing("not_yet_bound"),
 			process_id: eventType === "session.bound" ? present(processId) : missing("not_yet_bound"),
 		},
-		payload: {
-			type: payloadType[eventType],
-			payload_ref: {
-				mode: "metadata_only",
-				reference: `payload_00000000-0000-4000-8000-${sequence.toString(16).padStart(12, "0")}` as PayloadId,
-				fingerprint: `hmac-sha256:fixture-${sequence}`,
-				redaction_policy: "causal-payload-redaction/v1",
-			},
-		},
+		payload: fixturePayload(eventType, sequence),
 	});
+}
+
+function fixturePayload(eventType: EventType, sequence: number): CausalPayload {
+	const payloadRef = {
+		mode: "metadata_only" as const,
+		reference: `payload_00000000-0000-4000-8000-${sequence.toString(16).padStart(12, "0")}` as PayloadId,
+		fingerprint: `hmac-sha256:fixture-${sequence}` as const,
+		redaction_policy: "causal-payload-redaction/v1",
+	};
+	if (eventType === "acceptance.decided") {
+		return {
+			type: "acceptance",
+			payload_ref: payloadRef,
+			acceptance: {
+				decision: "accepted",
+				evaluator: { supervisor: { supervisor_id: supervisorId } },
+				decision_basis: "evidence_review",
+				evidence_event_ids: [eventId(producerId, sequence - 1)],
+			},
+		};
+	}
+	if (eventType === "outcome.closed") {
+		return {
+			type: "outcome",
+			payload_ref: payloadRef,
+			outcome: {
+				valid_completion: "valid",
+				milestone_result: "achieved",
+				blocker_disposition: "no_blocker",
+				safety_disposition: "safe",
+				close_reason: "completed",
+			},
+		};
+	}
+	return {
+		type: payloadType[eventType] as Exclude<CausalPayload["type"], "acceptance" | "outcome">,
+		payload_ref: payloadRef,
+	};
 }
 
 function completeFixture(): CausalEvent[] {
@@ -175,6 +206,70 @@ describe("causal-event/v1 deterministic replay fixtures", () => {
 		resumed.push(fixtureEvent("delivery.acknowledged", 7, resumed.at(-1)));
 		for (const eventType of chain.slice(7)) resumed.push(fixtureEvent(eventType, resumed.length + 1, resumed.at(-1)));
 		expect(replayEvents(resumed).episodes[0].status).toBe("complete");
+	});
+
+	it("requires evidence_event_ids to resolve to same-episode evidence.recorded events and valid closures to reference accepted acceptance", () => {
+		const missingEvidence = completeFixture();
+		const acceptance = missingEvidence[11];
+		const { event_sha256: discardedAcceptanceHash, ...acceptanceBody } = acceptance;
+		missingEvidence[11] = createCausalEvent({
+			...acceptanceBody,
+			payload: {
+				type: "acceptance",
+				payload_ref: acceptance.payload.payload_ref,
+				acceptance: {
+					decision: "accepted",
+					evaluator: { supervisor: { supervisor_id: supervisorId } },
+					decision_basis: "evidence_review",
+					evidence_event_ids: [missingEvidence[9].event_id],
+				},
+			},
+		});
+		for (let index = 12; index < missingEvidence.length; index += 1) {
+			missingEvidence[index] = fixtureEvent(missingEvidence[index].event_type, index + 1, missingEvidence[index - 1]);
+		}
+		void discardedAcceptanceHash;
+		const missingEvidenceResult = replayEvents(missingEvidence).episodes[0];
+		expect(missingEvidenceResult.status).toBe("not_estimable");
+		expect(missingEvidenceResult.reasons.join(" ")).toContain("references missing evidence event");
+
+		const rejectedAcceptance = completeFixture();
+		const rejected = rejectedAcceptance[11];
+		const { event_sha256: discardedRejectedHash, ...rejectedBody } = rejected;
+		rejectedAcceptance[11] = createCausalEvent({
+			...rejectedBody,
+			payload: {
+				type: "acceptance",
+				payload_ref: rejected.payload.payload_ref,
+				acceptance: {
+					decision: "rejected",
+					evaluator: { agent: { agent_id: targetAgentId } },
+					decision_basis: "policy_review",
+					evidence_event_ids: [rejectedAcceptance[10].event_id],
+				},
+			},
+		});
+		for (let index = 12; index < rejectedAcceptance.length; index += 1) {
+			rejectedAcceptance[index] = fixtureEvent(rejectedAcceptance[index].event_type, index + 1, rejectedAcceptance[index - 1]);
+		}
+		void discardedRejectedHash;
+		const rejectedAcceptanceResult = replayEvents(rejectedAcceptance).episodes[0];
+		expect(rejectedAcceptanceResult.status).toBe("not_estimable");
+		expect(rejectedAcceptanceResult.reasons).toContain("no accepted acceptance.decided event");
+
+		const invalidClosure = completeFixture();
+		const outcome = invalidClosure[12];
+		const { event_sha256: discardedOutcomeHash, ...outcomeBody } = outcome;
+		invalidClosure[12] = createCausalEvent({
+			...outcomeBody,
+			lineage: { ...outcome.lineage, parent_event_id: present(invalidClosure[10].event_id) },
+			payload: outcome.payload,
+		});
+		invalidClosure[13] = fixtureEvent(invalidClosure[13].event_type, 14, invalidClosure[12]);
+		void discardedOutcomeHash;
+		const invalidClosureResult = replayEvents(invalidClosure).episodes[0];
+		expect(invalidClosureResult.status).toBe("not_estimable");
+		expect(invalidClosureResult.reasons.join(" ")).toContain("valid outcome must directly reference an accepted acceptance.decided event");
 	});
 
 	it("deduplicates same-id same-hash retries and rejects same-id different-hash corruption", () => {
