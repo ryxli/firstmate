@@ -17,9 +17,10 @@ function output(value: unknown): void {
 function commandHelp(command = "fm-axi"): Record<string, unknown> {
 	return {
 		command,
-		usage: "fm-axi fleet [--check] [tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics]",
+		usage: "fm-axi fleet [--check|--strict-check|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics]",
 		commands: [
 			{ command: "fleet", description: "Compact activation, health, attention, task, and agent overview." },
+			{ command: "fleet --strict-check", description: "Require operational health plus fresh, bound activation provenance." },
 			{ command: "fleet tasks", description: "Ranked task list, optionally filtered by state." },
 			{ command: "fleet task get <id>", description: "Full task record; bare ids must be unique." },
 			{ command: "fleet agent get <id>", description: "Full agent record; bare ids must be unique." },
@@ -91,14 +92,20 @@ async function main(argv: string[]): Promise<number> {
 		output(commandHelp("fm-axi fleet"));
 		return 0;
 	}
-	if (argv[1] === "--check") {
-		if (argv.length !== 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Use `fm-axi fleet --check` without additional arguments."]);
+	if (argv[1] === "--check" || argv[1] === "--strict-check") {
+		const strict = argv[1] === "--strict-check";
+		if (argv.length !== 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, [`Use \`fm-axi fleet ${argv[1]}\` without additional arguments.`]);
 		try {
 			const snapshot = await collectSnapshot();
 			output({ command: "fleet", result: snapshot });
-			return snapshot.activation?.state === "fresh" && snapshot.health?.state === "healthy" ? 0 : 1;
+			const operationalReady = snapshot.health?.state === "healthy";
+			const strictReady = operationalReady
+				&& snapshot.activation?.state === "fresh"
+				&& snapshot.identity?.state === "bound"
+				&& snapshot.topology?.state === "complete";
+			return strict ? (strictReady ? 0 : 1) : (operationalReady ? 0 : 1);
 		} catch (error) {
-			return operationalError("fleet --check", error);
+			return operationalError(`fleet ${argv[1]}`, error);
 		}
 	}
 

@@ -108,11 +108,13 @@ describe("canonical FleetSnapshot collector", () => {
 			const stale = await collectSnapshot("2026-07-13T00:00:02Z");
 			expect(stale.activation?.state).toBe("stale");
 			expect(stale.identity?.state).toBe("bound");
+			expect(stale.health?.state).toBe("healthy");
 
 			rmSync(receiptPath);
 			const missing = await collectSnapshot("2026-07-13T00:00:03Z");
 			expect(missing.activation?.state).toBe("unknown");
 			expect(missing.identity?.state).toBe("unknown");
+			expect(missing.health?.state).toBe("healthy");
 			const child = join(fixture.home, "plum");
 			mkdirSync(join(child, "data"), { recursive: true });
 			mkdirSync(join(child, "state"), { recursive: true });
@@ -156,9 +158,10 @@ describe("canonical FleetSnapshot collector", () => {
 			expect(linkedChild.topology).toMatchObject({ state: "complete", present: 3, missing: 0, incomplete: 0 });
 			expect(linkedChild.activation?.state).toBe("fresh");
 			expect(linkedChild.identity?.state).toBe("bound");
+			mkdirSync(join(child, "project"), { recursive: true });
 			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [
 				{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "session-1", agent: "omp" },
-				{ pane_id: "w1:p2", cwd: "/other-home", agent_status: "working", workspace_id: "w1", tab_id: "t2", agent_session_id: "other-session", agent: "omp" },
+				{ pane_id: "w1:p2", cwd: join(child, "project"), agent_status: "working", workspace_id: "w1", tab_id: "t2", agent_session_id: "stale-linked-session", agent: "omp" },
 				{ pane_id: "w1:p3", cwd: gauge, agent_status: "idle", workspace_id: "w1", tab_id: "t3", agent_session_id: "gauge-session", agent: "omp" },
 				{ pane_id: "w1:p4", cwd: child, agent_status: "idle", workspace_id: "w1", tab_id: "t4", agent_session_id: "child-session", agent: "omp" },
 			] } }));
@@ -171,10 +174,16 @@ describe("canonical FleetSnapshot collector", () => {
 			const staleChildReceipt = await collectSnapshot("2026-07-13T00:00:04.250Z");
 			expect(staleChildReceipt.topology).toMatchObject({ state: "complete", present: 3, missing: 0, incomplete: 0 });
 			expect(staleChildReceipt.mates.find(mate => mate.name === "plum")?.herdrStatus).toBe("idle");
+			expect(staleChildReceipt.activation?.state).toBe("fresh");
+			expect(staleChildReceipt.identity).toMatchObject({ state: "mismatch", bound: 2, mismatch: 1, unknown: 0 });
+			expect(staleChildReceipt.health?.state).toBe("healthy");
 			rmSync(join(child, "state", "activation-receipt.json"));
 			const missingChildReceipt = await collectSnapshot("2026-07-13T00:00:04.500Z");
 			expect(missingChildReceipt.topology).toMatchObject({ state: "complete", present: 3, missing: 0, incomplete: 0 });
 			expect(missingChildReceipt.mates.find(mate => mate.name === "plum")?.herdrStatus).toBe("idle");
+			expect(missingChildReceipt.activation?.state).toBe("unknown");
+			expect(missingChildReceipt.identity?.state).toBe("unknown");
+			expect(missingChildReceipt.health?.state).toBe("healthy");
 		} finally {
 			if (oldHome === undefined) delete process.env.FM_HOME;
 			else process.env.FM_HOME = oldHome;
@@ -376,7 +385,7 @@ describe("canonical FleetSnapshot collector", () => {
 			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
 			expect(snapshot.topology).toMatchObject({ state: "complete", present: 1, missing: 0, incomplete: 0 });
 			expect(snapshot.identity).toMatchObject({ state: "mismatch", bound: 0, mismatch: 1, unknown: 0 });
-			expect(snapshot.health?.state).toBe("degraded");
+			expect(snapshot.health?.state).toBe("healthy");
 		} finally {
 			if (oldHome === undefined) delete process.env.FM_HOME;
 			else process.env.FM_HOME = oldHome;

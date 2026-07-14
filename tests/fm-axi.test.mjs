@@ -95,17 +95,27 @@ try {
   console.log("ok - fleet itself returns compact TOON overview");
   if (existsSync(ompLog)) throw new Error("default overview called OMP statistics");
   const healthyGate = run(["fleet", "--check"]);
-  if (healthyGate.status !== 0) throw new Error(`healthy activation gate exited ${healthyGate.status}, expected 0: ${healthyGate.stderr}\n${healthyGate.stdout}`);
+  if (healthyGate.status !== 0) throw new Error(`healthy operational check exited ${healthyGate.status}, expected 0: ${healthyGate.stderr}\n${healthyGate.stdout}`);
   const healthy = decode(healthyGate.stdout, { expandPaths: "safe" });
-  if (healthy.result.activation.state !== "fresh" || healthy.result.identity.state !== "bound" || healthy.result.topology.state !== "complete" || healthy.result.health.state !== "healthy") throw new Error(`healthy gate state was not visible: ${healthyGate.stdout}`);
-  console.log("ok - healthy activation gate exits zero with bound OMP panes");
+  if (healthy.result.activation.state !== "fresh" || healthy.result.identity.state !== "bound" || healthy.result.topology.state !== "complete" || healthy.result.health.state !== "healthy") throw new Error(`healthy operational state was not visible: ${healthyGate.stdout}`);
+  const strictHealthyGate = run(["fleet", "--strict-check"]);
+  if (strictHealthyGate.status !== 0) throw new Error(`healthy strict check exited ${strictHealthyGate.status}, expected 0: ${strictHealthyGate.stderr}\n${strictHealthyGate.stdout}`);
+  console.log("ok - healthy operational and strict checks exit zero with bound OMP panes");
   rmSync(join(home, "state", "activation-receipt.json"));
   rmSync(join(secondmate, "state", "activation-receipt.json"));
-  const gate = run(["fleet", "--check"]);
-  if (gate.status !== 1) throw new Error(`degraded activation gate exited ${gate.status}, expected 1`);
-  const gated = decode(gate.stdout, { expandPaths: "safe" });
-  if (gated.result.activation.state !== "unknown" || gated.result.health.state !== "degraded") throw new Error(`degraded activation state was not visible: ${gate.stdout}`);
-  console.log("ok - activation gate preserves nonzero degraded result while emitting TOON");
+  writeFileSync(panes, JSON.stringify({ result: { panes: [
+    { pane_id: "w1:p1", cwd: home, agent_status: "idle", workspace_id: "w1", tab_id: "t1", agent_session_id: "home-session", agent: "omp" },
+    { pane_id: "w1:p2", cwd: secondmate, agent_status: "idle", workspace_id: "w1", tab_id: "t2", agent_session_id: "plum-session", agent: "omp" },
+  ] } }));
+  const operationalGate = run(["fleet", "--check"]);
+  if (operationalGate.status !== 0) throw new Error(`idle operational check exited ${operationalGate.status}, expected 0`);
+  const operational = decode(operationalGate.stdout, { expandPaths: "safe" });
+  if (operational.result.activation.state !== "unknown" || operational.result.identity.state !== "unknown" || operational.result.health.state !== "healthy") throw new Error(`missing receipt degraded operational health: ${operationalGate.stdout}`);
+  const strictGate = run(["fleet", "--strict-check"]);
+  if (strictGate.status !== 1) throw new Error(`missing receipt strict check exited ${strictGate.status}, expected 1`);
+  const strict = decode(strictGate.stdout, { expandPaths: "safe" });
+  if (strict.result.activation.state !== "unknown" || strict.result.identity.state !== "unknown" || strict.result.health.state !== "healthy") throw new Error(`strict readiness state was not visible: ${strictGate.stdout}`);
+  console.log("ok - idle supervisor stays operationally healthy while strict freshness fails");
 
   const tasks = toon(run(["fleet", "tasks", "--state", "in-flight"]), "in-flight tasks");
   if (tasks.command !== "fleet tasks" || tasks.result.length !== 2 || !tasks.result.every(task => task.key)) throw new Error(`ranked task list was wrong: ${JSON.stringify(tasks)}`);
@@ -127,8 +137,9 @@ try {
   if (metrics.command !== "fleet metrics" || metrics.result.tasks_in_flight !== 2 || metrics.result.tasks_queued !== 1 || metrics.result.tasks_landed !== 1) throw new Error(`metrics did not use shared inventory: ${JSON.stringify(metrics)}`);
   console.log("ok - metrics counts derive from shared inventory");
 
-  const help = toon(run(["fleet", "--help"]), "help");
-  if (help.command !== "fm-axi fleet" || help.commands.length !== 5) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
+  const helpResult = run(["fleet", "--help"]);
+  const help = toon(helpResult, "help");
+  if (help.command !== "fm-axi fleet" || help.commands.length !== 6 || !help.commands.some(row => row.command === "fleet --strict-check")) throw new Error(`help contract changed: ${helpResult.stdout}`);
   const old = run(["fleet", "focus"]);
   if (old.status !== 2) throw new Error(`removed compatibility command accepted: ${old.status}`);
   console.log("ok - help and compatibility validation are TOON");

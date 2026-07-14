@@ -815,9 +815,19 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 	base.identity = activationCheck.identity;
 	base.topology = topologyForFleet(homePaths, live.panes, homes, main, live.ok);
 	const missingHomes = notes.filter(note => note.startsWith("secondmate home not found:")).length;
-	const boundedDegradation = notes.some(note => note.includes("limit reached") || note.startsWith("activation manifest degraded"));
+	const discoveryBounded = notes.some(note => note.includes("limit reached"));
+	const supervisor = main ? paneForHome(main, homes, live.panes) : undefined;
+	const operationalHealthy = Boolean(
+		main
+		&& live.ok
+		&& missingHomes === 0
+		&& !discoveryBounded
+		&& base.topology.state === "complete"
+		&& supervisor
+		&& (supervisor.agent_status === "working" || supervisor.agent_status === "idle"),
+	);
 	base.health = {
-		state: !main ? "unknown" : live.ok && missingHomes === 0 && !boundedDegradation && base.activation.state === "fresh" && base.topology.state === "complete" && base.identity.state !== "mismatch" ? "healthy" : "degraded",
+		state: !main || !live.ok ? "unknown" : operationalHealthy ? "healthy" : "degraded",
 		herdr: live.ok ? "ok" : "unavailable",
 		homes: homePaths.length,
 		missingHomes,

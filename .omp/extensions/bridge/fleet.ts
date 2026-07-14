@@ -518,11 +518,13 @@ function paneForAgent(home: ParsedHome, meta: Meta | undefined, herdrByPane: Map
 	return paneMatchesHome(pane, target) ? pane : undefined;
 }
 
-/** Resolve a home pane from canonical linked metadata, receipt, then cwd. */
+/** Resolve a home pane from authoritative live cwd, then static bindings. */
 export function resolveHomePane(home: ParsedHome, homes: ParsedHome[], herdrByPane: Map<string, HerdrAgent>, herdrAll: HerdrAgent[]): HerdrAgent | undefined {
 	const targetKey = homePathKey(home);
-	// The main-home secondmate meta is the durable link. Prefer it over a
-	// child receipt: receipts can be stale while the linked pane remains live.
+	const exact = herdrAll.filter(agent => paneMatchesHome(agent, targetKey));
+	if (exact.length === 1) return exact[0];
+	// Links and receipts are historical hints. A unique live pane at the home is
+	// newer truth than either, which may outlive a supervisor restart.
 	const linkedPanes = homes.flatMap(parent => parent.agents)
 		.filter(agent => agent.meta.kind === "secondmate" && metaHomePathKey(agent.meta) === targetKey && agent.meta.pane)
 		.map(agent => agent.meta.pane as string);
@@ -534,9 +536,6 @@ export function resolveHomePane(home: ParsedHome, homes: ParsedHome[], herdrByPa
 		const receiptPane = herdrByPane.get(home.activationPane);
 		if (paneMatchesHome(receiptPane, targetKey, true)) return receiptPane;
 	}
-	const exact = herdrAll.filter(agent => paneMatchesHome(agent, targetKey));
-	if (exact.length === 1) return exact[0];
-	if (exact.length > 1) return undefined;
 	const candidates = herdrAll.filter(agent => paneMatchesHome(agent, targetKey, true));
 	return candidates.length === 1 ? candidates[0] : undefined;
 }
