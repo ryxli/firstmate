@@ -67,6 +67,9 @@ export interface HerdrAgent {
 	tab_label?: string;
 	label?: string;
 	agent?: string;
+	agent_session_path?: string;
+	agent_session_id?: string;
+	agent_session?: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +337,19 @@ export interface ActivationSummary {
 	stale: number;
 	unknown: number;
 }
+export interface IdentitySummary {
+	state: "bound" | "mismatch" | "unknown";
+	bound: number;
+	mismatch: number;
+	unknown: number;
+}
+export interface TopologySummary {
+	state: "complete" | "incomplete" | "unknown";
+	present: number;
+	missing: number;
+	incomplete: number;
+	reason: string;
+}
 
 export interface HealthSummary {
 	state: "healthy" | "degraded" | "unknown";
@@ -395,6 +411,8 @@ function topologyFor(home: ParsedHome, meta: Meta | undefined, herdr: HerdrAgent
 }
 export interface FleetSnapshot {
 	schema?: "fleet-snapshot/1";
+	identity?: IdentitySummary;
+	topology?: TopologySummary;
 	generatedAt: string;
 	home?: string | null;
 	activation?: ActivationSummary;
@@ -435,9 +453,11 @@ export function resolveOwnerByHome(homes: ParsedHome[]): Map<string, string> {
 	owners.set(normalizeHomePath(main.path), main.label);
 	const secondmateHomes = homes.filter(home => !home.isMain);
 	const homeByPath = new Map(secondmateHomes.map(home => [normalizeHomePath(home.path), home]));
-	for (const agent of main.agents) {
-		if (agent.meta.kind !== "secondmate" || !agent.meta.home) continue;
-		if (homeByPath.has(normalizeHomePath(agent.meta.home))) owners.set(normalizeHomePath(agent.meta.home), agent.id);
+	for (const parent of homes) {
+		for (const agent of parent.agents) {
+			if (agent.meta.kind !== "secondmate" || !agent.meta.home) continue;
+			if (homeByPath.has(normalizeHomePath(agent.meta.home))) owners.set(normalizeHomePath(agent.meta.home), agent.id);
+		}
 	}
 	for (const home of homes) if (!owners.has(normalizeHomePath(home.path))) owners.set(normalizeHomePath(home.path), basename(home.path));
 	return owners;

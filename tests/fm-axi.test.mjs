@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +42,11 @@ function toon(result, context) {
   }
 }
 
+function manifestHash(content) {
+  const digest = createHash("sha256").update(content).digest("hex");
+  return createHash("sha256").update(`AGENTS.md\0${digest}\0`).digest("hex");
+}
+
 try {
   for (const path of [join(home, "data"), join(home, "state"), join(home, "config"), join(home, "sbin"), join(secondmate, "data"), join(secondmate, "state"), join(secondmate, "config")]) mkdirSync(path, { recursive: true });
   mkdirSync(fakebin, { recursive: true });
@@ -57,11 +63,30 @@ try {
   ].join("\n"));
   writeFileSync(join(secondmate, "data", "backlog.md"), "## In flight\n- **self** - plum work (repo: app)\n");
   writeFileSync(join(home, "data", "secondmates.md"), `- plum - persistent mate (home: ${secondmate}; scope: tests)\n`);
+  const homeManifest = "axi home manifest\n";
+  const secondmateManifest = "axi secondmate manifest\n";
+  writeFileSync(join(home, "AGENTS.md"), homeManifest);
+  writeFileSync(join(secondmate, "AGENTS.md"), secondmateManifest);
+  writeFileSync(join(home, "state", "activation-receipt.json"), JSON.stringify({
+    schema: "firstmate.activation-receipt/v1",
+    manifest_sha256: manifestHash(homeManifest),
+    pane_id: "w1:p1",
+    session_id: "home-session",
+  }));
+  writeFileSync(join(secondmate, "state", "activation-receipt.json"), JSON.stringify({
+    schema: "firstmate.activation-receipt/v1",
+    manifest_sha256: manifestHash(secondmateManifest),
+    pane_id: "w1:p2",
+    session_id: "plum-session",
+  }));
   writeFileSync(join(home, "state", "self.meta"), "pane=w1:p1\nkind=ship\nworker=self\n");
   writeFileSync(join(home, "state", "self.status"), "working: active\n");
-  writeFileSync(join(home, "state", "plum.meta"), `kind=secondmate\nhome=${secondmate}\n`);
+  writeFileSync(join(home, "state", "plum.meta"), `kind=secondmate\nhome=${secondmate}\npane=w1:p2\n`);
   writeFileSync(join(secondmate, "state", "self.meta"), "kind=ship\nworker=self\n");
-  writeFileSync(panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: home, agent_status: "working", workspace_id: "w1", tab_id: "t1" }] } }));
+  writeFileSync(panes, JSON.stringify({ result: { panes: [
+    { pane_id: "w1:p1", cwd: home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "home-session", agent: "omp" },
+    { pane_id: "w1:p2", cwd: join(secondmate, "project"), agent_status: "idle", workspace_id: "w1", tab_id: "t2", agent_session_id: "plum-session", agent: "omp" },
+  ] } }));
   writeFileSync(stats, JSON.stringify({ byFolder: [] }));
 
   const overview = toon(run(["fleet"]), "fleet overview");
@@ -69,6 +94,13 @@ try {
   if (!overview.result.tasks.some(task => task.key === "home/self")) throw new Error("overview omitted canonical task key");
   console.log("ok - fleet itself returns compact TOON overview");
   if (existsSync(ompLog)) throw new Error("default overview called OMP statistics");
+  const healthyGate = run(["fleet", "--check"]);
+  if (healthyGate.status !== 0) throw new Error(`healthy activation gate exited ${healthyGate.status}, expected 0: ${healthyGate.stderr}\n${healthyGate.stdout}`);
+  const healthy = decode(healthyGate.stdout, { expandPaths: "safe" });
+  if (healthy.result.activation.state !== "fresh" || healthy.result.identity.state !== "bound" || healthy.result.topology.state !== "complete" || healthy.result.health.state !== "healthy") throw new Error(`healthy gate state was not visible: ${healthyGate.stdout}`);
+  console.log("ok - healthy activation gate exits zero with bound OMP panes");
+  rmSync(join(home, "state", "activation-receipt.json"));
+  rmSync(join(secondmate, "state", "activation-receipt.json"));
   const gate = run(["fleet", "--check"]);
   if (gate.status !== 1) throw new Error(`degraded activation gate exited ${gate.status}, expected 1`);
   const gated = decode(gate.stdout, { expandPaths: "safe" });

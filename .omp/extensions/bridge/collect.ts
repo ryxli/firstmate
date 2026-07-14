@@ -22,12 +22,14 @@ import {
 	type BridgeView,
 	type FleetMetrics,
 	type FleetSnapshot,
+	type IdentitySummary,
 	type HerdrAgent,
 	type ParsedHome,
 	type PendingItem,
 	type RawHome,
 	type TaskRow,
 	type Topology,
+	type TopologySummary,
 	parseHome,
 	parseSecondmateHomes,
 	render,
@@ -140,6 +142,11 @@ function paneFromRecord(value: unknown): HerdrAgent | null {
 	const record = objectRecord(value);
 	if (!record) return null;
 	const text = (key: string): string | undefined => stringValue(record[key]);
+	const legacy = objectRecord(record.agent_session);
+	const legacyValue = stringValue(legacy?.value);
+	const legacyKind = stringValue(legacy?.kind);
+	const legacyPath = legacyValue && (legacyKind === "path" || legacyKind === "session_path" || legacyKind === "file" || (!legacyKind && legacyValue.startsWith("/"))) ? legacyValue : undefined;
+	const legacyId = legacyValue && (legacyKind === "id" || legacyKind === "session_id") ? legacyValue : undefined;
 	return {
 		pane_id: text("pane_id") ?? text("id"),
 		agent_status: text("agent_status") ?? text("status"),
@@ -151,6 +158,9 @@ function paneFromRecord(value: unknown): HerdrAgent | null {
 		tab_label: text("tab_label"),
 		label: text("label"),
 		agent: text("agent"),
+		agent_session_path: text("agent_session_path") ?? legacyPath,
+		agent_session_id: text("agent_session_id") ?? legacyId,
+		agent_session: record.agent_session,
 	};
 }
 
@@ -228,6 +238,7 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 	return agents.sort((a, b) => a.key.localeCompare(b.key));
 }
 
+
 function attentionFor(agents: AgentRow[]): PendingItem[] {
 	const rows: PendingItem[] = [];
 	for (const agent of agents) {
@@ -252,32 +263,83 @@ function attentionFor(agents: AgentRow[]): PendingItem[] {
 	}
 	return rows.sort((a, b) => b.clsRank - a.clsRank || (a.key ?? "").localeCompare(b.key ?? ""));
 }
-
-function activationFor(homePaths: string[], panes: HerdrAgent[], main: string | null): ActivationSummary {
-	const states: ActivationSummary = { state: "unknown", total: homePaths.length, fresh: 0, stale: 0, unknown: 0 };
-	for (const home of homePaths) {
-		const pane = panes.find(candidate => normalizeHomePath(candidate.cwd) === normalizeHomePath(home));
-		let state: "fresh" | "stale" | "unknown" = "unknown";
-		const receipt = parseJson(readFileOrNull(join(home, "state", "activation-receipt.json")) ?? "");
-		const receiptRecord = objectRecord(receipt);
-		if (pane && receiptRecord?.schema === "firstmate.activation-receipt/v1") {
-			const manifest = stringValue(receiptRecord.manifest_sha256);
-			const current = manifestHash(home);
-			if (manifest && current) state = manifest === current ? "fresh" : "stale";
-		}
-		states[state] += 1;
-	}
-	if (states.total === 0 || !main) states.state = "unknown";
-	else if (states.stale > 0) states.state = "stale";
-	else if (states.unknown > 0) states.state = "unknown";
-	else states.state = "fresh";
-	return states;
+function paneForHome(home: string, homes: ParsedHome[], panes: HerdrAgent[]): HerdrAgent | undefined {
+	const direct = panes.find(candidate => normalizeHomePath(candidate.cwd) === normalizeHomePath(home));
+	if (direct) return direct;
+	const link = homes.flatMap(parent => parent.agents).find(agent => agent.meta.kind === "secondmate" && agent.meta.home && normalizeHomePath(agent.meta.home) === normalizeHomePath(home) && agent.meta.pane);
+	return link?.meta.pane ? panes.find(candidate => candidate.pane_id === link.meta.pane) : undefined;
 }
 
+function topologyForFleet(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null, herdrOk: boolean): TopologySummary {
+	const summary: TopologySummary = { state: "unknown", present: 0, missing: 0, incomplete: 0, reason: "herdr-unavailable" };
+	for (const home of homePaths) {
+		const pane = paneForHome(home, homes, panes);
+		if (!pane) summary.missing += 1;
+		else if (pane.agent !== "omp") summary.incomplete += 1;
+		else summary.present += 1;
+	}
+	if (!herdrOk) return summary;
+	if (!main) {
+		summary.reason = "missing-main-home";
+		return summary;
+	}
+	if (!paneForHome(main, homes, panes)) {
+		summary.reason = "missing-current-pane";
+		return summary;
+	}
+	if (summary.incomplete > 0) {
+		summary.state = "incomplete";
+		summary.reason = "expected-pane-not-omp";
+	} else if (summary.missing > 0) {
+		summary.state = "incomplete";
+		summary.reason = "expected-pane-unavailable";
+	} else {
+		summary.state = "complete";
+		summary.reason = "expected-omp-panes-present";
+	}
+	return summary;
+}
+
+
+function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null): { activation: ActivationSummary; identity: IdentitySummary } {
+	const activation: ActivationSummary = { state: "unknown", total: homePaths.length, fresh: 0, stale: 0, unknown: 0 };
+	const identity: IdentitySummary = { state: "unknown", bound: 0, mismatch: 0, unknown: 0 };
+	for (const home of homePaths) {
+		const pane = paneForHome(home, homes, panes);
+		let activationState: "fresh" | "stale" | "unknown" = "unknown";
+		let identityState: "bound" | "mismatch" | "unknown" = "unknown";
+		const receiptRecord = objectRecord(parseJson(readFileOrNull(join(home, "state", "activation-receipt.json")) ?? ""));
+		if (pane && receiptRecord?.schema === "firstmate.activation-receipt/v1") {
+			const current = manifestHash(home);
+			const manifest = stringValue(receiptRecord.manifest_sha256);
+			const sessionPath = pane.agent_session_path;
+			const sessionId = pane.agent_session_id;
+			const receiptPath = stringValue(receiptRecord.session_path);
+			const receiptId = stringValue(receiptRecord.session_id);
+			if (sessionPath || sessionId) {
+				const paneMatches = !receiptRecord.pane_id || receiptRecord.pane_id === pane.pane_id;
+				const pathMatches = !sessionPath || sessionPath === receiptPath;
+				const idMatches = !sessionId || sessionId === receiptId;
+				identityState = paneMatches && pathMatches && idMatches ? "bound" : "mismatch";
+			}
+			if (current && manifest && current === manifest) activationState = "fresh";
+			else if (current && manifest) activationState = "stale";
+		}
+		activation[activationState] += 1;
+		identity[identityState] += 1;
+	}
+	if (activation.total === 0 || !main) activation.state = "unknown";
+	else if (activation.stale > 0) activation.state = "stale";
+	else if (activation.unknown > 0) activation.state = "unknown";
+	else activation.state = "fresh";
+	if (identity.bound + identity.mismatch + identity.unknown === 0 || !main) identity.state = "unknown";
+	else if (identity.mismatch > 0) identity.state = "mismatch";
+	else if (identity.unknown > 0) identity.state = "unknown";
+	else identity.state = "bound";
+	return { activation, identity };
+}
 function manifestHash(home: string): string | undefined {
-	const paths: string[] = [];
-	const agents = join(home, "AGENTS.md");
-	if (existsSync(agents)) paths.push(agents);
+	const paths: string[] = ["AGENTS.md"];
 	const extensions = join(home, ".omp", "extensions");
 	const walk = (dir: string): void => {
 		let entries: string[];
@@ -289,24 +351,30 @@ function manifestHash(home: string): string | undefined {
 		for (const entry of entries) {
 			const path = join(dir, entry);
 			try {
-				if (readFileSync(path)) paths.push(path);
+				readFileSync(path);
+				paths.push(path.slice(home.length + 1));
 			} catch {
 				walk(path);
 			}
 		}
 	};
 	walk(extensions);
-	if (!paths.length) return undefined;
-	const hash = createHash("sha256");
-	for (const path of paths.sort()) {
+	const entries: { path: string; sha256: string }[] = [];
+	for (const relativePath of paths.sort()) {
 		try {
-			hash.update(path.slice(home.length + 1));
-			hash.update("\0");
-			hash.update(readFileSync(path));
-			hash.update("\0");
+			const digest = createHash("sha256").update(readFileSync(join(home, relativePath))).digest("hex");
+			entries.push({ path: relativePath, sha256: digest });
 		} catch {
 			return undefined;
 		}
+	}
+	if (!entries.length || entries.length !== paths.length) return undefined;
+	const hash = createHash("sha256");
+	for (const entry of entries) {
+		hash.update(entry.path);
+		hash.update("\0");
+		hash.update(entry.sha256);
+		hash.update("\0");
 	}
 	return hash.digest("hex");
 }
@@ -402,17 +470,33 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 	if (!main) {
 		notes.push("could not locate the firstmate home");
 	} else {
-		rawHomes.push(readRawHome(main, true));
-		homePaths.push(main);
-		const secondmatesText = readFileOrNull(join(main, "data", "secondmates.md"));
-		if (secondmatesText) {
-			for (const homePath of parseSecondmateHomes(secondmatesText)) {
-				homePaths.push(homePath);
-				if (existsSync(homePath)) rawHomes.push(readRawHome(homePath, false));
-				else notes.push(`secondmate home not found: ${homePath}`);
+		const queue: Array<{ path: string; isMain: boolean }> = [{ path: main, isMain: true }];
+		const seenHomes = new Set<string>();
+		while (queue.length) {
+			const current = queue.shift()!;
+			const normalized = normalizeHomePath(current.path);
+			if (seenHomes.has(normalized)) continue;
+			seenHomes.add(normalized);
+			homePaths.push(current.path);
+			if (!existsSync(current.path)) {
+				notes.push(`secondmate home not found: ${current.path}`);
+				continue;
 			}
-		} else {
-			notes.push("data/secondmates.md missing - only the main home is shown");
+			rawHomes.push(readRawHome(current.path, current.isMain));
+			const secondmatesText = readFileOrNull(join(current.path, "data", "secondmates.md"));
+			if (!secondmatesText) {
+				if (current.isMain) notes.push("data/secondmates.md missing - only the main home is shown");
+				continue;
+			}
+			for (const childPath of parseSecondmateHomes(secondmatesText)) {
+				if (seenHomes.has(normalizeHomePath(childPath))) continue;
+				if (existsSync(childPath)) queue.push({ path: childPath, isMain: false });
+				else {
+					seenHomes.add(normalizeHomePath(childPath));
+					homePaths.push(childPath);
+					notes.push(`secondmate home not found: ${childPath}`);
+				}
+			}
 		}
 	}
 	const homes = rawHomes.map(parseHome);
@@ -430,10 +514,13 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 	base.agents = agents;
 	base.attention = attention;
 	base.pending = attention;
-	base.activation = activationFor(homePaths, live.panes, main);
+	const activationCheck = activationFor(homePaths, live.panes, homes, main);
+	base.activation = activationCheck.activation;
+	base.identity = activationCheck.identity;
+	base.topology = topologyForFleet(homePaths, live.panes, homes, main, live.ok);
 	const missingHomes = notes.filter(note => note.startsWith("secondmate home not found:")).length;
 	base.health = {
-		state: !main ? "unknown" : live.ok && missingHomes === 0 && base.activation.state === "fresh" ? "healthy" : "degraded",
+		state: !main ? "unknown" : live.ok && missingHomes === 0 && base.activation.state === "fresh" && base.topology.state === "complete" && base.identity.state !== "mismatch" ? "healthy" : "degraded",
 		herdr: live.ok ? "ok" : "unavailable",
 		homes: homePaths.length,
 		missingHomes,
