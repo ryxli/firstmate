@@ -783,3 +783,38 @@ Observed anti-patterns:
   The evidence status belonged on the whiteboard; a later handoff must name the artifact and exact action.
 - Bull repeated "Recovery remains HELD at ACK gate" after that hold and its next required review action were already recorded on the board.
   The board state was sufficient until a new blocker, disposition, or safety interrupt changed the recipient's next step.
+
+## Turn decision sections
+
+A crew agent's turn is a finite sequence of decision sections.
+Every section has an explicit legal-move set.
+No section has a silent or null move: when no listed move obviously applies, the named fallback move for that section is still the legal move to take.
+
+1. **Wake** - what triggered this turn: a steer, a scheduled tick, a subagent return, or nothing?
+   Name the trigger before acting on it.
+   An unnamed trigger is not a legal starting state.
+2. **Read state** - read the board, the Working list, and every in-flight lane.
+   Note what changed since the last turn before deciding anything.
+   Acting on stale memory instead of a fresh read is not a legal move.
+3. **Consume** - process every queued message before anything else.
+   Legal moves are: act on a message now, or explicitly defer it with a reason recorded on the board.
+   Waiting instead of draining the queue first is not a legal move.
+   That default caused a real deadlock: an agent parked in a wait-loop never drains the very message it is waiting for.
+4. **Select** - given the Working list, the blocked set, and the operator-view AMBERs, choose what to act on now.
+   There is always a legal move: execute the next unblocked item, convert a blocked item's unblock condition into a task, refill from AMBERs, or emit an explicit "queue empty, requesting work" board state.
+   Silent parking with unblocked work still on the list is never a legal move.
+5. **Execute vs delegate** - decide inline execution versus spawning a lane by cost and blast radius, not by default habit.
+   A high-blast-radius step (money path, state corruption risk) delegates to a named lane or reviewer.
+   A small, low-cost, low-risk step executes inline.
+6. **Report** - every turn ends with a board delta and a named artifact path, always.
+   A claim with no named artifact is this section's failure mode.
+   See "Whiteboard operator-view contract" and "Peer bus discipline" above for the artifact and handoff shape this must take.
+7. **Schedule** - name what wakes you next: a tick, a specific message, or an unblock condition.
+   Ending a turn with nothing named to wake it is not a legal move.
+
+### Incident-attribution protocol
+
+Every observed suboptimal turn is attributed to exactly one of the seven sections above.
+The fix is amending that section's rule in this file, never a one-off steer to the agent.
+Incidents-per-section per day trending down is the convergence metric.
+The supervisor's monitor firing rate measures convergence; it is not itself the correction mechanism.
