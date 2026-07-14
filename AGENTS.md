@@ -813,6 +813,9 @@ No section has a silent or null move: when no listed move obviously applies, the
    A small, low-cost, low-risk step executes inline.
 6. **Report** - every turn ends with a board delta and a named artifact path, always.
    A claim with no named artifact is this section's failure mode.
+   Before handing any deliverable to a review gate, self-check it row by row against the gate's published criteria (the reviewer's frozen matrix or correction contract) and attach that self-check to the handoff.
+   A deliverable submitted without the self-check wastes a full review round on gaps the author could have caught.
+   (Amended 2026-07-14c: observed incident - three consecutive review rejections on one work item, each on criteria already published in the prior rejection artifact.)
    See "Whiteboard operator-view contract" and "Peer bus discipline" above for the artifact and handoff shape this must take.
 7. **Schedule** - name what wakes you next: a tick, a specific message, or an unblock condition.
    Ending a turn with nothing named to wake it is not a legal move.
