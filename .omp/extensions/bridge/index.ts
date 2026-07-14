@@ -7,14 +7,11 @@
 // `/bridge` = NEEDS YOU + the crew roster; `/bridge tasks` = the task board; `/bridge all` = both.
 //
 // DESIGN (locked): on-demand LIVE read, no maintained store and no hooks. The
-// fleet files ARE the persistent mutating state; reading them live each time is
-// always-fresh and robust to crashes/restarts. The command writes NOTHING - it
-// only reads fleet files and runs read-only `gh`/`herdr`.
+// shared FleetSnapshot collector reads fleet files plus one bounded herdr pane
+// inventory and renders the board. It does not call GitHub or OMP statistics.
 //
-// Sources (all best-effort, degrade to notes): per home data/backlog.md,
-// state/*.meta, latest state/*.status; live `gh pr view` PR/CI state; live
-// `herdr agent list` agent status. Homes enumerated from data/secondmates.md.
-//
+// Sources: per-home data/backlog.md, state/*.meta, latest state/*.status,
+// registered secondmate homes, and one live herdr pane inventory.
 // Layout follows the textguard / agent-effectiveness convention: only this
 // index.ts is auto-discovered as an extension; fleet.ts (pure) + collect.ts (IO)
 // load via imports. To disable: add `extension-module:bridge` to

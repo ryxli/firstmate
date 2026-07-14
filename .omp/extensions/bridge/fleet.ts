@@ -55,13 +55,18 @@ export interface PrInfo {
 	checks: "passing" | "failing" | "pending" | "none" | "unknown";
 }
 
-/** A live herdr agent (subset of `herdr agent list` output we use). */
+/** A live herdr pane (subset of `herdr pane list` output). */
 export interface HerdrAgent {
 	pane_id?: string;
 	agent_status?: string;
 	name?: string;
 	cwd?: string;
 	workspace_id?: string;
+	workspace_label?: string;
+	tab_id?: string;
+	tab_label?: string;
+	label?: string;
+	agent?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,11 +180,12 @@ export function parseStatus(text: string): StatusLine | undefined {
 	return { state: "unknown", text: last };
 }
 
-/** id is the leading token after the `- [ ]`/`- [x]` checkbox, up to ` - `. */
+/** Parse the task id and description from a backlog bullet. */
 function parseItemId(body: string): { id: string; desc: string } {
-	const sep = body.indexOf(" - ");
-	if (sep >= 0) return { id: body.slice(0, sep).trim(), desc: body.slice(sep + 3).trim() };
-	return { id: body.trim(), desc: "" };
+	const clean = body.replace(/^\*\*([^*]+)\*\*(?=\s|$)/, "$1").trim();
+	const sep = clean.indexOf(" - ");
+	if (sep >= 0) return { id: clean.slice(0, sep).trim(), desc: clean.slice(sep + 3).trim() };
+	return { id: clean, desc: "" };
 }
 
 /** Parse a backlog.md file into its In flight / Queued / Done sections. */
@@ -198,9 +204,9 @@ export function parseBacklog(text: string | null): Backlog {
 			else section = null;
 			continue;
 		}
-		const item = /^- \[[ xX]\]\s+(.*)$/.exec(line);
+		const item = /^- (?:\[[ xX]\]\s+|\*\*([^*]+)\*\*\s*)?(.*)$/.exec(line);
 		if (!item || section === null) continue;
-		const body = item[1];
+		const body = item[1] ? `${item[1].trim()}${item[2] ? ` - ${item[2].trim()}` : ""}` : item[2].trim();
 		const { id, desc } = parseItemId(body);
 		if (!id) continue;
 		const prM = PR_URL_RE.exec(body);
@@ -254,63 +260,154 @@ export function prUrlsToFetch(homes: ParsedHome[]): string[] {
 // Snapshot
 // ---------------------------------------------------------------------------
 
-/**
- * One ranked "needs the captain" row. NOT classified here - it is produced by
- * fm-focus (the single ranking authority) so /bridge and `fm-focus` agree exactly.
- */
+/** A ranked row in the overview attention queue. */
 export interface PendingItem {
-	/** fm-focus class name, e.g. "CAPTAIN-BLOCKED", "REVIEW-READY". */
+	/** Stable task/agent key, owner-qualified when available. */
+	key?: string;
+	/** Attention class, e.g. "CAPTAIN-BLOCKED" or "REVIEW-READY". */
 	cls: string;
-	/** numeric class (4 highest) for color/grouping in the render. */
+	/** Numeric class (4 highest) for ordering. */
 	clsRank: number;
 	home: string;
 	id: string;
-	/** fm-focus reason() - the glanceable "why", optionally PR/CI-enriched. */
 	reason: string;
+}
+
+/** Topology attached to every task and agent record. */
+export interface Topology {
+	home: string;
+	pane?: string;
+	tab?: string;
+	tabLabel?: string;
+	workspace?: string;
+	workspaceLabel?: string;
+	cwd?: string;
+	agentStatus?: string;
+	degraded?: string;
 }
 
 /** A persistent named mate in the roster: the firstmate or a secondmate. */
 export interface MateRow {
-	/** Display name: the firstmate label, or the secondmate id. */
 	name: string;
 	role: "firstmate" | "secondmate";
-	/** Live herdr agent_status (presence: idle/working/...). */
 	herdrStatus?: string;
-	/** In-flight tasks this mate owns (its home backlog in-flight count). */
 	load: number;
 }
 
-/** One task in the ledger, tagged with its owner, project, and (in-flight) worker. */
+/** One task in the ledger, tagged with owner, project, worker, and topology. */
 export interface TaskRow {
+	/** Canonical owner-qualified identifier, `${owner}/${id}`. */
+	key?: string;
 	id: string;
-	state: BacklogSection; // "inflight" | "queued" | "done"
-	/** The mate that owns it (firstmate or a secondmate). */
+	state: BacklogSection;
 	owner: string;
-	/** Project/repo, parsed from the backlog line when present. */
 	project?: string;
-	/** Live worker status (in-flight only): the crewmate running it, for the glyph. */
 	workerState?: string;
-	/** Glanceable detail: worker note (in-flight) / blocked-by or ready (queued) / merge state (done). */
 	note: string;
 	pr?: string;
 	merged?: boolean;
+	topology?: Topology;
+}
+
+/** Full state/meta record for an agent or supervisor pane. */
+export interface AgentRow {
+	/** Canonical owner-qualified identifier, `${owner}/${id}`. */
+	key: string;
+	id: string;
+	owner: string;
+	kind?: string;
+	status?: string;
+	statusText?: string;
+	pane?: string;
+	worker?: string;
+	domain?: string;
+	project?: string;
+	mode?: string;
+	home: string;
+	topology: Topology;
+}
+
+export interface ActivationSummary {
+	state: "fresh" | "stale" | "unknown";
+	total: number;
+	fresh: number;
+	stale: number;
+	unknown: number;
+}
+
+export interface HealthSummary {
+	state: "healthy" | "degraded" | "unknown";
+	herdr: "ok" | "unavailable";
+	homes: number;
+	missingHomes: number;
+	livePanes: number;
+}
+
+export interface FleetMetrics {
+	schema: "fm-kpi/1";
+	workspace: string;
+	generated: string;
+	source: string;
+	window: string;
+	cost_usd_productive: number;
+	tokens_productive: number;
+	cache_hit_rate: number;
+	error_rate: number;
+	supervisor_overhead_cost: number | null;
+	supervisor_overhead_tokens: number | null;
+	tasks_landed: number;
+	tasks_in_flight: number;
+	tasks_queued: number;
+	cost_per_landed_usd: number | null;
+	tokens_per_landed: number | null;
+	by_role: Record<string, number>;
+	by_folder: Record<string, unknown>[];
+	by_agent_type: Record<string, unknown>[];
+	gaps: string[];
 }
 
 export interface LivePane {
 	name: string;
 	status: string;
 	cwd: string;
+	pane?: string;
+	workspace?: string;
+	tab?: string;
 }
 
+/** Canonical owner-qualified key used by every task list and lookup. */
+export function canonicalTaskKey(owner: string, id: string): string {
+	return `${owner}/${id}`;
+}
+
+function topologyFor(home: ParsedHome, meta: Meta | undefined, herdr: HerdrAgent | undefined): Topology {
+	return {
+		home: home.path,
+		pane: meta?.pane,
+		tab: herdr?.tab_id ?? meta?.raw.tab,
+		tabLabel: herdr?.tab_label,
+		workspace: herdr?.workspace_id ?? meta?.raw.workspace,
+		workspaceLabel: herdr?.workspace_label,
+		cwd: herdr?.cwd,
+		agentStatus: herdr?.agent_status,
+		degraded: meta?.pane && herdr?.pane_id ? undefined : meta?.pane ? "missing-pane" : "state-only",
+	};
+}
 export interface FleetSnapshot {
+	schema?: "fleet-snapshot/1";
 	generatedAt: string;
+	home?: string | null;
+	activation?: ActivationSummary;
+	health?: HealthSummary;
+	attention?: PendingItem[];
 	pending: PendingItem[];
-	/** Persistent roster (firstmate first, then secondmates); empty only when the main home cannot be located. */
 	mates: MateRow[];
-	/** Every task across all homes, flat, tagged owner/project/state/worker. */
 	tasks: TaskRow[];
+	agents?: AgentRow[];
+	homePaths?: string[];
 	otherLivePanes: LivePane[];
 	notes: string[];
+	metrics?: FleetMetrics;
 }
 
 /** Extract "(repo: X)" -> "X" from a backlog line, if present. */
@@ -325,13 +422,32 @@ function blockedNote(desc: string): string {
 	return m ? `blocked-by ${m[1].trim()}` : "ready";
 }
 
+/** Normalize the POSIX home paths used by metadata and registry records. */
+export function normalizeHomePath(path?: string): string {
+	return (path ?? "").replace(/\/+$/, "");
+}
+
+/** Resolve the one owner name used by both task and agent identifiers. */
+export function resolveOwnerByHome(homes: ParsedHome[]): Map<string, string> {
+	const owners = new Map<string, string>();
+	const main = homes.find(home => home.isMain);
+	if (!main) return owners;
+	owners.set(normalizeHomePath(main.path), main.label);
+	const secondmateHomes = homes.filter(home => !home.isMain);
+	const homeByPath = new Map(secondmateHomes.map(home => [normalizeHomePath(home.path), home]));
+	for (const agent of main.agents) {
+		if (agent.meta.kind !== "secondmate" || !agent.meta.home) continue;
+		if (homeByPath.has(normalizeHomePath(agent.meta.home))) owners.set(normalizeHomePath(agent.meta.home), agent.id);
+	}
+	for (const home of homes) if (!owners.has(normalizeHomePath(home.path))) owners.set(normalizeHomePath(home.path), basename(home.path));
+	return owners;
+}
+
 /**
  * Fold parsed homes + live signals into the render-ready snapshot via TWO lenses:
  * MATES (the persistent roster - firstmate + secondmates, with presence + load) and
- * TASKS (every backlog item across homes, tagged owner/project/state/worker). The
- * PENDING ranking is NOT computed here - fm-focus owns it and it is passed in, so
- * /bridge and `fm-focus` never disagree. A crewmate is the live worker of an
- * in-flight task and surfaces on the TASK lens, never as a roster person.
+ * TASKS (every backlog item across homes, tagged owner/project/state/worker).
+ * A crewmate is the live worker of an in-flight task and surfaces on TASKS.
  */
 export function buildSnapshot(
 	homes: ParsedHome[],
@@ -342,13 +458,13 @@ export function buildSnapshot(
 	now: string,
 	notes: string[] = [],
 ): FleetSnapshot {
-	const normPath = (p?: string): string => (p ?? "").replace(/\/+$/, "");
+	const normPath = normalizeHomePath;
 	const secondmateHomes = homes.filter(h => !h.isMain);
 	const homeByPath = new Map<string, ParsedHome>();
 	for (const h of secondmateHomes) homeByPath.set(normPath(h.path), h);
 
 	const usedPanes = new Set<string>();
-	const ownerByHome = new Map<string, string>(); // home path -> owning mate name
+	const ownerByHome = resolveOwnerByHome(homes);
 	const consumedHomes = new Set<string>();
 	const mates: MateRow[] = [];
 	const mainHome = homes.find(h => h.isMain) ?? null;
@@ -357,7 +473,6 @@ export function buildSnapshot(
 		// The firstmate: its own supervisor pane sits at the main-home cwd.
 		const ownPane = herdrAll.find(h => normPath(h.cwd) === normPath(mainHome.path));
 		if (ownPane?.pane_id) usedPanes.add(ownPane.pane_id);
-		ownerByHome.set(normPath(mainHome.path), mainHome.label);
 		mates.push({ name: mainHome.label, role: "firstmate", herdrStatus: ownPane?.agent_status, load: mainHome.backlog.inflight.length });
 
 		// Secondmates are kind=secondmate metas in the MAIN home, linked to their own homes.
@@ -366,7 +481,6 @@ export function buildSnapshot(
 			const smHome = a.meta.home ? homeByPath.get(normPath(a.meta.home)) : undefined;
 			if (smHome) {
 				consumedHomes.add(normPath(smHome.path));
-				ownerByHome.set(normPath(smHome.path), a.id);
 			}
 			const herdr = a.meta.pane ? herdrByPane.get(a.meta.pane) : undefined;
 			mates.push({ name: a.id, role: "secondmate", herdrStatus: herdr?.agent_status, load: smHome ? smHome.backlog.inflight.length : 0 });
@@ -377,7 +491,6 @@ export function buildSnapshot(
 			if (consumedHomes.has(normPath(smHome.path))) continue;
 			const own = herdrAll.find(h => normPath(h.cwd) === normPath(smHome.path));
 			if (own?.pane_id) usedPanes.add(own.pane_id);
-			ownerByHome.set(normPath(smHome.path), basename(smHome.path));
 			mates.push({ name: basename(smHome.path), role: "secondmate", herdrStatus: own?.agent_status, load: smHome.backlog.inflight.length });
 		}
 	}
@@ -394,14 +507,45 @@ export function buildSnapshot(
 		for (const it of home.backlog.inflight) {
 			const w = workerById.get(it.id);
 			const herdr = w?.meta.pane ? herdrByPane.get(w.meta.pane) : undefined;
-			tasks.push({ id: it.id, state: "inflight", owner, project: parseProject(it.desc), workerState: w?.status?.state ?? herdr?.agent_status, note: w?.status?.text ?? "" });
+			tasks.push({
+				key: canonicalTaskKey(owner, it.id),
+				id: it.id,
+				state: "inflight",
+				owner,
+				project: parseProject(it.desc),
+				workerState: w?.status?.state ?? herdr?.agent_status,
+				note: w?.status?.text ?? "",
+				topology: topologyFor(home, w?.meta, herdr),
+			});
 		}
 		for (const it of home.backlog.queued) {
-			tasks.push({ id: it.id, state: "queued", owner, project: parseProject(it.desc), note: blockedNote(it.desc) });
+			const w = workerById.get(it.id);
+			const herdr = w?.meta.pane ? herdrByPane.get(w.meta.pane) : undefined;
+			tasks.push({
+				key: canonicalTaskKey(owner, it.id),
+				id: it.id,
+				state: "queued",
+				owner,
+				project: parseProject(it.desc),
+				note: blockedNote(it.desc),
+				topology: topologyFor(home, w?.meta, herdr),
+			});
 		}
 		for (const it of home.backlog.done) {
 			const merged = it.resolved || (it.pr ? prByUrl.get(it.pr)?.state === "MERGED" : false);
-			tasks.push({ id: it.id, state: "done", owner, project: parseProject(it.desc), note: merged ? "merged" : it.pr ? "open PR" : "done", pr: it.pr, merged });
+			const w = workerById.get(it.id);
+			const herdr = w?.meta.pane ? herdrByPane.get(w.meta.pane) : undefined;
+			tasks.push({
+				key: canonicalTaskKey(owner, it.id),
+				id: it.id,
+				state: "done",
+				owner,
+				project: parseProject(it.desc),
+				note: merged ? "merged" : it.pr ? "open PR" : "done",
+				pr: it.pr,
+				merged,
+				topology: topologyFor(home, w?.meta, herdr),
+			});
 		}
 	}
 
@@ -487,7 +631,7 @@ function emitHeader(out: string[], snap: FleetSnapshot): void {
 	out.push(RULE.repeat(BOARD_WIDTH));
 }
 
-/** NEEDS YOU: fm-focus's ranked attention list (the urgent cross-cut, in every view). */
+/** NEEDS YOU: the snapshot's ranked attention list, shared with the overview. */
 function emitNeedsYou(out: string[], snap: FleetSnapshot): void {
 	out.push("");
 	out.push("NEEDS YOU");
@@ -523,7 +667,8 @@ function emitRoster(out: string[], snap: FleetSnapshot): void {
 function emitTaskRow(out: string[], t: TaskRow): void {
 	const g = t.state === "inflight" ? statusGlyph(t.workerState) : t.state === "done" ? GLYPH.done : GLYPH.none;
 	const project = t.project && t.project !== t.owner ? truncate(t.project, 12) : "";
-	const head = `${gutter(g)}${truncate(t.id, 20).padEnd(20)} ${project.padEnd(12)} ${truncate(t.owner, 10).padEnd(10)} `;
+	const taskIdentity = t.key ?? canonicalTaskKey(t.owner, t.id);
+	const head = `${gutter(g)}${truncate(taskIdentity, 20).padEnd(20)} ${project.padEnd(12)} ${truncate(t.owner, 10).padEnd(10)} `;
 	const avail = BOARD_WIDTH - [...head].length;
 	out.push(head + (t.note && avail >= 8 ? truncate(t.note, avail) : ""));
 }

@@ -1,120 +1,167 @@
 #!/usr/bin/env bun
-// fm-axi - TOON-native agent interface for read-only firstmate primitives.
-//
-// Internal fleet programs retain JSON where other programs compose them.
-// This command is the sole agent-facing boundary and encodes every response
-// with the official @toon-format/toon package.
+// fm-axi - TOON-native agent interface for the shared FleetSnapshot collector.
 
-import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { encode } from "@toon-format/toon";
+import {
+	collectSnapshot,
+	findAgent,
+	findTask,
+	normalizeTaskState,
+} from "../.omp/extensions/bridge/collect";
+import type { AgentRow, FleetSnapshot, TaskRow } from "../.omp/extensions/bridge/fleet";
 
-const scriptDir = dirname(realpathSync(fileURLToPath(import.meta.url)));
-const root = realpathSync(join(scriptDir, ".."));
-
-const fleetCommands = {
-  updated: {
-    description: "Report activation freshness, identity binding, and topology.",
-    run: () => runJson(
-      "bash",
-      [join(root, "sbin/fm-fleet-updated.sh"), "--json"],
-      { allowResultOnFailure: true },
-    ),
-  },
-  focus: {
-    description: "Rank current fleet attention items.",
-    run: () => runJson(process.execPath, [join(root, "sbin/fm-focus.mjs"), "--json", "--no-color"]),
-  },
-  kpi: {
-    description: "Report fleet productivity and outcome metrics.",
-    run: () => runJson("bash", [join(root, "sbin/fm-kpi.sh"), "--json"]),
-  },
-  lineage: {
-    description: "Report the current firstmate workspace and task lineage.",
-    run: () => runJson("bash", [join(root, "sbin/fm-lineage.sh"), "--json"]),
-  },
-};
-
-function output(value) {
-  process.stdout.write(encode(value, { keyFolding: "safe" }) + "\n");
+function output(value: unknown): void {
+	process.stdout.write(`${encode(value, { keyFolding: "safe" })}\n`);
 }
 
-function commandHelp(command = "fm-axi") {
-  return {
-    command,
-    usage: "fm-axi fleet <updated|focus|kpi|lineage>",
-    commands: Object.entries(fleetCommands).map(([name, { description }]) => ({
-      command: `fleet ${name}`,
-      description,
-    })),
-  };
+function commandHelp(command = "fm-axi"): Record<string, unknown> {
+	return {
+		command,
+		usage: "fm-axi fleet [--check] [tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics]",
+		commands: [
+			{ command: "fleet", description: "Compact activation, health, attention, task, and agent overview." },
+			{ command: "fleet tasks", description: "Ranked task list, optionally filtered by state." },
+			{ command: "fleet task get <id>", description: "Full task record; bare ids must be unique." },
+			{ command: "fleet agent get <id>", description: "Full agent record; bare ids must be unique." },
+			{ command: "fleet metrics", description: "Optional cost and productivity metrics." },
+		],
+	};
 }
 
-function validationError(error, help) {
-  output({ error, code: "VALIDATION_ERROR", help: [help] });
-  return 2;
+function validationError(error: string, help: string[], code = "VALIDATION_ERROR", extra: Record<string, unknown> = {}): number {
+	output({ error, code, help, ...extra });
+	return 2;
 }
 
-function operationalError(command, error) {
-  output({
-    error: `${command} failed: ${error || "no JSON result"}`,
-    code: "OPERATIONAL_ERROR",
-    help: ["Check the local fleet prerequisites, then retry the command."],
-  });
-  return 1;
+function operationalError(command: string, error: unknown): number {
+	output({
+		error: `${command} failed: ${error instanceof Error ? error.message : String(error)}`,
+		code: "OPERATIONAL_ERROR",
+		help: ["Check the local fleet prerequisites, then retry the command."],
+	});
+	return 1;
 }
 
-function runJson(command, args, { allowResultOnFailure = false } = {}) {
-  const result = spawnSync(command, args, {
-    cwd: root,
-    encoding: "utf8",
-    env: process.env,
-  });
-  const text = result.stdout?.trim() || "";
-  if (result.error) return { error: result.error.message };
-  try {
-    const value = JSON.parse(text);
-    if (result.status === 0 || allowResultOnFailure) return { value };
-  } catch {
-    // Fall through to the structured operational error below.
-  }
-  return { error: result.stderr.trim() || `exit ${result.status ?? "unknown"}` };
+function taskKey(task: TaskRow): string {
+	return task.key ?? `${task.owner}/${task.id}`;
 }
 
-function main(argv) {
-  if (!argv.length || argv[0] === "--help" || argv[0] === "-h") {
-    output(commandHelp());
-    return 0;
-  }
-  if (argv[0] !== "fleet") {
-    return validationError(`Unknown command: ${argv[0]}`, "Run `fm-axi --help` to see available commands.");
-  }
-  if (argv.length === 1 || argv[1] === "--help" || argv[1] === "-h") {
-    output(commandHelp("fm-axi fleet"));
-    return 0;
-  }
-  const name = argv[1];
-  const entry = fleetCommands[name];
-  if (!entry) {
-    return validationError(`Unknown fleet command: ${name}`, "Run `fm-axi fleet --help` to see available commands.");
-  }
-  if (argv.length > 2 && (argv[2] === "--help" || argv[2] === "-h") && argv.length === 3) {
-    output({
-      command: `fm-axi fleet ${name}`,
-      usage: `fm-axi fleet ${name}`,
-      description: entry.description,
-    });
-    return 0;
-  }
-  if (argv.length > 2) {
-    return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, `Run \`fm-axi fleet ${name} --help\` for usage.`);
-  }
-  const result = entry.run();
-  if (result.error) return operationalError(`fleet ${name}`, result.error);
-  output({ command: `fleet ${name}`, result: result.value });
-  return 0;
+function rankedTasks(snapshot: FleetSnapshot, state?: TaskRow["state"]): TaskRow[] {
+	const attention = new Map((snapshot.attention ?? snapshot.pending).map((row, index) => [row.key ?? `${row.home}/${row.id}`, { rank: row.clsRank, index }]));
+	const stateRank: Record<TaskRow["state"], number> = { inflight: 3, queued: 2, done: 1 };
+	return snapshot.tasks
+		.filter(task => !state || task.state === state)
+		.slice()
+		.sort((a, b) => {
+			const aa = attention.get(taskKey(a));
+			const bb = attention.get(taskKey(b));
+			return (bb?.rank ?? stateRank[b.state]) - (aa?.rank ?? stateRank[a.state]) || (aa?.index ?? 9999) - (bb?.index ?? 9999) || taskKey(a).localeCompare(taskKey(b));
+		});
 }
 
-process.exit(main(process.argv.slice(2)));
+function ambiguous(kind: string, id: string, candidates: string[]): number {
+	return validationError(
+		`Ambiguous ${kind} identifier: ${id}`,
+		["Use the canonical owner-qualified key."],
+		"AMBIGUOUS_IDENTIFIER",
+		{ candidates },
+	);
+}
+
+function missing(kind: string, id: string): number {
+	return validationError(`${kind} not found: ${id}`, ["Run the fleet list command and retry."], "NOT_FOUND");
+}
+
+async function main(argv: string[]): Promise<number> {
+	if (!argv.length || argv[0] === "--help" || argv[0] === "-h") {
+		output(commandHelp());
+		return 0;
+	}
+	if (argv[0] !== "fleet") return validationError(`Unknown command: ${argv[0]}`, ["Run `fm-axi --help` for available commands."]);
+	if (argv.length === 1) {
+		try {
+			const snapshot = await collectSnapshot();
+			output({ command: "fleet", result: snapshot });
+			return 0;
+		} catch (error) {
+			return operationalError("fleet", error);
+		}
+	}
+	if (argv[1] === "--help" || argv[1] === "-h") {
+		output(commandHelp("fm-axi fleet"));
+		return 0;
+	}
+	if (argv[1] === "--check") {
+		if (argv.length !== 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Use `fm-axi fleet --check` without additional arguments."]);
+		try {
+			const snapshot = await collectSnapshot();
+			output({ command: "fleet", result: snapshot });
+			return snapshot.activation?.state === "fresh" && snapshot.health?.state === "healthy" ? 0 : 1;
+		} catch (error) {
+			return operationalError("fleet --check", error);
+		}
+	}
+
+	const command = argv[1];
+	try {
+		if (command === "tasks") {
+			let state: TaskRow["state"] | undefined;
+			if (argv.length === 3 && argv[2] === "--help") {
+				output({ command: "fleet tasks", usage: "fm-axi fleet tasks [--state <in-flight|queued|done>]", description: "Ranked task list." });
+				return 0;
+			}
+			if (argv.length === 3 || argv.length > 4 || (argv.length === 2 && argv[2])) {
+				return validationError("Invalid fleet tasks arguments", ["Use `fm-axi fleet tasks [--state <in-flight|queued|done>]`."]);
+			}
+			if (argv.length === 4) {
+				if (argv[2] !== "--state") return validationError(`Unexpected argument: ${argv[2]}`, ["Use `--state` to filter tasks."]);
+				state = normalizeTaskState(argv[3]);
+				if (!state) return validationError(`Invalid task state: ${argv[3]}`, ["Choose in-flight, queued, or done."]);
+			}
+			const snapshot = await collectSnapshot();
+			output({ command: "fleet tasks", result: rankedTasks(snapshot, state) });
+			return 0;
+		}
+		if (command === "task" || command === "agent") {
+			if (argv[2] === "--help" || argv[2] === "-h") {
+				output({ command: `fleet ${command} get`, usage: `fm-axi fleet ${command} get <id>`, description: `Full ${command} record.` });
+				return 0;
+			}
+			if (argv.length !== 4 || argv[2] !== "get" || !argv[3]) return validationError(`Usage: fm-axi fleet ${command} get <id>`, ["Provide one canonical owner-qualified key or a unique bare id."]);
+			const snapshot = await collectSnapshot();
+			if (command === "task") {
+				const found = findTask(snapshot, argv[3]);
+				if (found.candidates.length > 1) return ambiguous("task", argv[3], found.candidates);
+				if (!found.task) return missing("task", argv[3]);
+				output({ command: "fleet task get", result: found.task });
+				return 0;
+			}
+			const found = findAgent(snapshot, argv[3]);
+			if (found.candidates.length > 1) return ambiguous("agent", argv[3], found.candidates);
+			if (!found.agent) return missing("agent", argv[3]);
+			output({ command: "fleet agent get", result: found.agent });
+			return 0;
+		}
+		if (command === "metrics") {
+			if (argv.length > 2 && (argv[2] === "--help" || argv[2] === "-h")) {
+				output({ command: "fleet metrics", usage: "fm-axi fleet metrics", description: "Optional cost and productivity metrics." });
+				return 0;
+			}
+			if (argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Use `fm-axi fleet metrics` without arguments."]);
+			const snapshot = await collectSnapshot(new Date().toISOString(), undefined, { includeMetrics: true });
+			output({ command: "fleet metrics", result: snapshot.metrics ?? null });
+			return 0;
+		}
+		if (!["fleet", "tasks", "task", "agent", "metrics"].includes(command)) {
+			return validationError(`Unknown fleet command: ${command}`, ["Run `fm-axi fleet --help` for available commands."]);
+		}
+		if (command !== "fleet" || argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Run `fm-axi fleet --help` for available commands."]);
+		const snapshot = await collectSnapshot();
+		output({ command: "fleet", result: snapshot });
+		return 0;
+	} catch (error) {
+		return operationalError(`fleet ${command}`, error);
+	}
+}
+
+process.exit(await main(process.argv.slice(2)));

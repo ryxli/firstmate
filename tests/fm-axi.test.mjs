@@ -1,19 +1,20 @@
 #!/usr/bin/env bun
-import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { decode } from "@toon-format/toon";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cli = join(root, "sbin", "fm-axi");
 const temp = mkdtempSync(join(tmpdir(), "fm-axi-test-"));
 const home = join(temp, "home");
-
-function fail(message) {
-  throw new Error(message);
-}
+const secondmate = join(temp, "plum");
+const panes = join(temp, "panes.json");
+const stats = join(temp, "stats.json");
+const fakebin = join(temp, "bin");
+const ompLog = join(temp, "omp.log");
 
 function run(args, extra = {}) {
   return spawnSync(process.execPath, [cli, ...args], {
@@ -22,127 +23,83 @@ function run(args, extra = {}) {
     env: {
       ...process.env,
       FM_HOME: home,
+      FM_FLEET_PANES_FILE: panes,
+      PATH: `${fakebin}:${process.env.PATH}`,
+      FM_FLEET_STATS_FILE: stats,
       FM_ROOT_OVERRIDE: root,
-      FM_FOCUS_NO_HERDR: "1",
       ...extra,
     },
   });
 }
 
 function toon(result, context) {
-  if (result.status !== 0) fail(`${context} exited ${result.status}: ${result.stderr}`);
+  if (result.status !== 0) throw new Error(`${context} exited ${result.status}: ${result.stderr}`);
   try {
     return decode(result.stdout, { expandPaths: "safe" });
   } catch (error) {
-    fail(`${context} did not emit TOON: ${error.message}\n${result.stdout}`);
+    throw new Error(`${context} did not emit TOON: ${error.message}\n${result.stdout}`);
   }
 }
 
 try {
-  mkdirSync(join(home, "state"), { recursive: true });
-  mkdirSync(join(home, "data"), { recursive: true });
-  mkdirSync(join(home, "config"), { recursive: true });
-  writeFileSync(join(home, "state", "review.meta"), "pane=w1:p1\nkind=ship\nworker=reviewer\n");
-  writeFileSync(join(home, "state", "review.status"), "needs-decision: choose rollout\n");
+  for (const path of [join(home, "data"), join(home, "state"), join(home, "config"), join(home, "sbin"), join(secondmate, "data"), join(secondmate, "state"), join(secondmate, "config")]) mkdirSync(path, { recursive: true });
+  mkdirSync(fakebin, { recursive: true });
+  writeFileSync(join(fakebin, "omp"), `#!/bin/sh\nprintf 'omp called\\n' >> '${ompLog}'\nexit 99\n`);
+  chmodSync(join(fakebin, "omp"), 0o755);
+  writeFileSync(join(home, "sbin", "fm-spawn.sh"), "");
+  writeFileSync(join(home, "data", "backlog.md"), [
+    "## In flight",
+    "- **self** - active work (repo: app)",
+    "## Queued",
+    "- [ ] **queued** - waiting (repo: app)",
+    "## Done",
+    "- [x] **done** - landed (repo: app)",
+  ].join("\n"));
+  writeFileSync(join(secondmate, "data", "backlog.md"), "## In flight\n- **self** - plum work (repo: app)\n");
+  writeFileSync(join(home, "data", "secondmates.md"), `- plum - persistent mate (home: ${secondmate}; scope: tests)\n`);
+  writeFileSync(join(home, "state", "self.meta"), "pane=w1:p1\nkind=ship\nworker=self\n");
+  writeFileSync(join(home, "state", "self.status"), "working: active\n");
+  writeFileSync(join(home, "state", "plum.meta"), `kind=secondmate\nhome=${secondmate}\n`);
+  writeFileSync(join(secondmate, "state", "self.meta"), "kind=ship\nworker=self\n");
+  writeFileSync(panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: home, agent_status: "working", workspace_id: "w1", tab_id: "t1" }] } }));
+  writeFileSync(stats, JSON.stringify({ byFolder: [] }));
 
-  const populated = toon(run(["fleet", "focus"]), "populated focus");
-  if (populated.command !== "fleet focus" || populated.result.length !== 1) {
-    fail(`populated focus result was not preserved: ${JSON.stringify(populated)}`);
-  }
-  if (populated.result[0].id !== "review" || populated.result[0].class !== "CAPTAIN-BLOCKED") {
-    fail(`populated focus ranking was not preserved: ${JSON.stringify(populated.result[0])}`);
-  }
-  console.log("ok - populated fleet result is TOON");
+  const overview = toon(run(["fleet"]), "fleet overview");
+  if (overview.command !== "fleet" || overview.result.schema !== "fleet-snapshot/1") throw new Error(`overview was not the canonical snapshot: ${JSON.stringify(overview)}`);
+  if (!overview.result.tasks.some(task => task.key === "home/self")) throw new Error("overview omitted canonical task key");
+  console.log("ok - fleet itself returns compact TOON overview");
+  if (existsSync(ompLog)) throw new Error("default overview called OMP statistics");
+  const gate = run(["fleet", "--check"]);
+  if (gate.status !== 1) throw new Error(`degraded activation gate exited ${gate.status}, expected 1`);
+  const gated = decode(gate.stdout, { expandPaths: "safe" });
+  if (gated.result.activation.state !== "unknown" || gated.result.health.state !== "degraded") throw new Error(`degraded activation state was not visible: ${gate.stdout}`);
+  console.log("ok - activation gate preserves nonzero degraded result while emitting TOON");
 
-  rmSync(join(home, "state", "review.meta"));
-  rmSync(join(home, "state", "review.status"));
-  const empty = toon(run(["fleet", "focus"]), "empty focus");
-  if (empty.command !== "fleet focus" || !Array.isArray(empty.result) || empty.result.length !== 0) {
-    fail(`empty fleet result was not preserved: ${JSON.stringify(empty)}`);
-  }
-  console.log("ok - empty fleet result is TOON");
+  const tasks = toon(run(["fleet", "tasks", "--state", "in-flight"]), "in-flight tasks");
+  if (tasks.command !== "fleet tasks" || tasks.result.length !== 2 || !tasks.result.every(task => task.key)) throw new Error(`ranked task list was wrong: ${JSON.stringify(tasks)}`);
+  console.log("ok - task list is ranked and owner-qualified");
 
-  const stale = toon(run(["fleet", "updated"]), "non-fresh updated");
-  if (stale.command !== "fleet updated" || stale.result.state !== "unknown") {
-    fail(`non-fresh fleet state was not returned successfully: ${JSON.stringify(stale)}`);
-  }
-  console.log("ok - non-fresh fleet result exits successfully as TOON");
+  const targeted = toon(run(["fleet", "task", "get", "home/self"]), "targeted task");
+  if (targeted.result.key !== "home/self" || targeted.result.topology.home !== home) throw new Error(`targeted task lost topology: ${JSON.stringify(targeted)}`);
+  const agent = toon(run(["fleet", "agent", "get", "home/self"]), "targeted agent");
+  if (agent.result.key !== "home/self" || agent.result.topology.home !== home) throw new Error(`targeted agent lost topology: ${JSON.stringify(agent)}`);
+  console.log("ok - targeted task and agent records include topology");
 
-  const kpi = toon(run(["fleet", "kpi"]), "kpi");
-  if (kpi.command !== "fleet kpi" || kpi.result.schema !== "fm-kpi/1") {
-    fail(`kpi dispatcher did not preserve the result: ${JSON.stringify(kpi)}`);
-  }
-  const lineage = toon(run(["fleet", "lineage"]), "lineage");
-  if (lineage.command !== "fleet lineage" || lineage.result.home !== home) {
-    fail(`lineage dispatcher did not preserve the result: ${JSON.stringify(lineage)}`);
-  }
-  console.log("ok - kpi and lineage dispatcher commands are TOON");
+  const ambiguous = run(["fleet", "task", "get", "self"]);
+  if (ambiguous.status !== 2) throw new Error(`ambiguous task unexpectedly exited ${ambiguous.status}`);
+  const ambiguity = decode(ambiguous.stdout, { expandPaths: "safe" });
+  if (ambiguity.code !== "AMBIGUOUS_IDENTIFIER" || ambiguity.candidates.join(",") !== "home/self,plum/self") throw new Error(`ambiguity error was not structured: ${ambiguous.stdout}`);
+  console.log("ok - duplicate bare ids require canonical candidates");
+
+  const metrics = toon(run(["fleet", "metrics"]), "metrics");
+  if (metrics.command !== "fleet metrics" || metrics.result.tasks_in_flight !== 2 || metrics.result.tasks_queued !== 1 || metrics.result.tasks_landed !== 1) throw new Error(`metrics did not use shared inventory: ${JSON.stringify(metrics)}`);
+  console.log("ok - metrics counts derive from shared inventory");
 
   const help = toon(run(["fleet", "--help"]), "help");
-  if (help.command !== "fm-axi fleet" || help.commands.length !== 4) {
-    fail(`help was not structured TOON: ${JSON.stringify(help)}`);
-  }
-  console.log("ok - help is TOON");
-
-  const invalid = run(["fleet", "missing"]);
-  if (invalid.status !== 2) fail(`validation error exited ${invalid.status}, expected 2`);
-  const error = decode(invalid.stdout, { expandPaths: "safe" });
-  if (error.code !== "VALIDATION_ERROR" || !error.error || !Array.isArray(error.help)) {
-    fail(`validation error was not AXI-shaped TOON: ${invalid.stdout}`);
-  }
-  console.log("ok - validation error is AXI-shaped TOON");
-
-  const seeded = join(temp, "seeded");
-  const linkedHome = join(temp, "linked-home");
-  const fakebin = join(temp, "fakebin");
-  mkdirSync(seeded);
-  mkdirSync(linkedHome);
-  mkdirSync(fakebin);
-  for (const path of ["AGENTS.md", "package.json", "bun.lock"]) cpSync(join(root, path), join(seeded, path));
-  cpSync(join(root, "sbin"), join(seeded, "sbin"), { recursive: true });
-  for (const directory of ["config", "data", "projects", "state"]) {
-    mkdirSync(join(seeded, directory));
-    mkdirSync(join(linkedHome, directory));
-  }
-  symlinkSync(join(seeded, "sbin"), join(linkedHome, "sbin"), "dir");
-  const fakeTool = join(fakebin, "tool");
-  writeFileSync(fakeTool, "#!/bin/sh\nif [ \"${1:-}\" = status ]; then printf '%s\\n' 'status: running'; fi\nexit 0\n");
-  chmodSync(fakeTool, 0o755);
-  for (const name of ["herdr", "node", "gh", "gh-axi", "chrome-devtools-axi", "lavish-axi"]) {
-    cpSync(fakeTool, join(fakebin, name));
-  }
-  const fakeBun = join(fakebin, "bun");
-  const bunLog = join(temp, "bun.log");
-  writeFileSync(fakeBun, `#!/bin/sh\nif [ -n "\${FM_TEST_BUN_LOG:-}" ]; then printf '%s\n' "$PWD" >> "$FM_TEST_BUN_LOG"; fi\nexec ${JSON.stringify(process.execPath)} "$@"\n`);
-  chmodSync(fakeBun, 0o755);
-  const seededEnv = {
-    HOME: linkedHome,
-    FM_HOME: linkedHome,
-    FM_TEST_BUN_LOG: bunLog,
-    PATH: `${fakebin}:${process.env.PATH}`,
-  };
-  const startup = spawnSync("bash", [join(linkedHome, "sbin", "fm-bootstrap.sh")], {
-    cwd: linkedHome,
-    encoding: "utf8",
-    env: seededEnv,
-  });
-  if (startup.status !== 0) fail(`seeded bootstrap exited ${startup.status}: ${startup.stderr}`);
-  const installedFrom = readFileSync(bunLog, "utf8").trim();
-  if (installedFrom !== realpathSync(seeded)) {
-    fail(`symlinked-home bootstrap ran the locked Bun install from ${installedFrom}, expected ${realpathSync(seeded)}`);
-  }
-  if (!existsSync(join(seeded, "node_modules", "@toon-format", "toon", "package.json"))) {
-    fail("symlinked-home bootstrap did not install the locked TOON dependency at fm-axi's code root");
-  }
-  const seededHelp = spawnSync(join(linkedHome, "sbin", "fm-axi"), ["--help"], {
-    cwd: linkedHome,
-    encoding: "utf8",
-    env: seededEnv,
-  });
-  if (seededHelp.status !== 0 || decode(seededHelp.stdout).command !== "fm-axi") {
-    fail(`symlinked home could not run fm-axi after bootstrap: ${seededHelp.stderr}`);
-  }
-  console.log("ok - normal symlinked-home bootstrap installs TOON at fm-axi's physical root");
+  if (help.command !== "fm-axi fleet" || help.commands.length !== 5) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
+  const old = run(["fleet", "focus"]);
+  if (old.status !== 2) throw new Error(`removed compatibility command accepted: ${old.status}`);
+  console.log("ok - help and compatibility validation are TOON");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

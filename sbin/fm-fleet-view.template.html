@@ -450,6 +450,38 @@
     return container;
   }
 
+  // Project the shared snapshot's flat topology records into the existing tree view.
+  function snapshotTree(snap) {
+    var root = { home: snap.home || "", supervisor: "firstmate", role: "firstmate",
+      harness: "", availability: "running", fleet_status: (snap.health && snap.health.state) || "unknown",
+      workspaces: [] };
+    var wsIndex = {};
+    (snap.agents || []).forEach(function (agent) {
+      var topo = agent.topology || {};
+      var wsKey = topo.workspace || "state:" + (topo.home || "");
+      var ws = wsIndex[wsKey];
+      if (!ws) {
+        ws = { id: topo.workspace || "?", label: topo.workspaceLabel || wsKey,
+          status: topo.agentStatus || "unknown", tabs: [] };
+        wsIndex[wsKey] = ws;
+        root.workspaces.push(ws);
+      }
+      var tabKey = topo.tab || "state:" + agent.key;
+      var tab = ws.tabs.find(function (candidate) { return candidate.id === tabKey; });
+      if (!tab) {
+        tab = { id: topo.tab || "?", label: topo.tabLabel || tabKey,
+          status: topo.agentStatus || "unknown", panes: [] };
+        ws.tabs.push(tab);
+      }
+      tab.panes.push({ id: topo.pane || agent.key, label: agent.id,
+        agent_identity: "omp", agent_status: agent.status || topo.agentStatus || "unknown",
+        cwd: topo.cwd || "", task: { id: agent.id, kind: agent.kind || "agent",
+          mode: agent.mode || "", worker: agent.worker || "", domain: agent.domain || "",
+          project: agent.project || "", home: agent.home || "" } });
+    });
+    return root;
+  }
+
   // ---- boot --------------------------------------------------------------
 
   function render() {
@@ -463,6 +495,7 @@
       return;
     }
     var root = (payload && payload.fleet) || {};
+    if (root && root.schema === "fleet-snapshot/1") root = snapshotTree(root);
     var meta = payload || {};
     var sum = summarize(root);
 
