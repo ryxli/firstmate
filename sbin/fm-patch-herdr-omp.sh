@@ -8,12 +8,15 @@
 # therefore seize lifecycle publication, while a resumed interactive root can
 # remain unbound long enough for Herdr to report false Idle.
 #
-# The fix stores the exact interactive root {session file, session id} tuple on
-# globalThis under a process-wide symbol. That claim survives extension module
-# reloads but dies with the OMP process. Every lifecycle publication validates
-# the live tuple against the claim. Only interactive startup/new/resume/fork
-# events can establish or replace it; reload, session_init, agentKind=sub, and
-# headless contexts cannot mint or overwrite authority.
+# The fix stores the interactive root identity {session id, optional session
+# file} on globalThis under a process-wide symbol. An explicit lifecycle
+# handoff may use the stable ID to preserve authority when a session file moves,
+# while stale heartbeats and publish validation require exact identity. The
+# claim also supports interactive in-memory sessions that have no file and
+# survives extension module reloads but dies with the OMP process. Only
+# interactive startup/new/resume/fork/handoff events can establish or replace it;
+# reload, session_init, agentKind=sub, and headless contexts cannot mint or
+# overwrite authority.
 #
 # herdr owns this file ("reinstalling or updating overwrites this file"), so we
 # cannot fix it upstream and cannot expect edits to survive an update. This
@@ -48,7 +51,7 @@ set -u
 
 MARKER="fm-resync-heartbeat"
 PATCH_MARKER="fm-resync-heartbeat-lifecycle-invariant"
-ROOT_CLAIM_MARKER="fm-exact-root-session-claim-v1"
+ROOT_CLAIM_MARKER="fm-exact-root-session-claim-v2"
 RESYNC_MS="${FM_HERDR_RESYNC_MS:-15000}"
 
 TARGET="$HOME/.omp/agent/extensions/herdr-omp-agent-state.ts"
@@ -95,16 +98,35 @@ import io, re, sys
 path, resync_ms, marker, patch_marker, root_claim_marker, mode = sys.argv[1:7]
 src = io.open(path, encoding="utf-8").read()
 
+publish_state_re = re.compile(
+    r'  function publishState\(force = false\)(?:: [^{]+)? \{\n'
+)
+publish_guard = "    if (!rootSession || !validateRootSession(undefined, latestCtx)) return;\n"
+
+def has_publish_guard(text: str) -> bool:
+    match = publish_state_re.search(text)
+    return match is not None and text.startswith(publish_guard, match.end())
+
 def is_patched(text: str) -> bool:
     required = [
         patch_marker,
         root_claim_marker,
         'Symbol.for("herdr:omp:root-session-claim:v1")',
+        'Symbol.for("herdr:omp:root-session-claim-owner:v1")',
+        "const rootSessionReporterToken = {};",
+        "function ownsRootSessionClaim(): boolean",
+        "function setRootSessionClaim(claim: RootSessionClaim): void",
         'Symbol.for("herdr:omp:root-session-reporter-loaded:v1")',
         "function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined",
+        "rootSessionFile?: string;",
+        "const tuple: RootSessionClaim =",
+        "left.rootSessionId === right.rootSessionId",
         "function hasRootChildMarker(event: any, ctx: any): boolean",
-        "function validateRootSession(event: any, ctx: any): boolean",
-        "allowedRootStartReasons.has(effectiveSessionStartSource)",
+        "function validateRootSession(",
+        "allowOwnerTransfer = false",
+        "sameRootSessionClaim(claim, tuple, allowStableId || claimOwned)",
+        'allowedRootStartReasons = new Set(["startup", "new", "resume", "fork", "handoff"])',
+        "claimOwned || allowOwnerTransfer",
         "ctx?.hasUI !== true ||",
         "let latestCtx: any | undefined;",
         "function restoreAgentActiveFromCtx(ctx: any = latestCtx): void",
@@ -112,12 +134,12 @@ def is_patched(text: str) -> bool:
         'activateRootSession(event, ctx, event?.reason || "startup", true)',
         'activateRootSession(event, ctx, event?.reason || "resume", true)',
         "if (!validateRootSession(undefined, ctx))",
-        "if (!validateRootSession(undefined, latestCtx)) return;",
         "restoreAgentActiveFromCtx();\n        }\n        publishState(true);",
     ]
     is_patched.missing = [item for item in required if item not in text]
+    if not has_publish_guard(text):
+        is_patched.missing.append("publishState guard")
     return not is_patched.missing
-
 if mode == "check":
     sys.exit(0 if is_patched(src) else 1)
 
@@ -139,6 +161,12 @@ src = heartbeat_re.sub("", src)
 # modules inside one process, while in-process child sessions load the same
 # integration. A Symbol.for key gives reload continuity without crossing a
 # process boundary.
+root_helper_re = re.compile(
+    r'// fm-exact-root-session-claim-v(?:1|2): process-local exact root authority\.\n'
+    r'.*?(?=export default function)',
+    re.S,
+)
+src = root_helper_re.sub("", src)
 if root_claim_marker not in src:
     global_anchor = "export default function"
     if global_anchor not in src:
@@ -146,30 +174,34 @@ if root_claim_marker not in src:
         sys.exit(3)
     global_helper = f'''// {root_claim_marker}: process-local exact root authority.
 type RootSessionClaim = {{
-  rootSessionFile: string;
+  rootSessionFile?: string;
   rootSessionId: string;
 }};
 
 const rootSessionClaimKey = Symbol.for("herdr:omp:root-session-claim:v1");
+const rootSessionClaimOwnerKey = Symbol.for("herdr:omp:root-session-claim-owner:v1");
+const rootSessionReporterToken = {{}};
 const rootSessionReporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
 const rootSessionModuleReload =
   (globalThis as any)[rootSessionReporterLoadKey] === true;
 (globalThis as any)[rootSessionReporterLoadKey] = true;
-const allowedRootStartReasons = new Set(["startup", "new", "resume", "fork"]);
+const allowedRootStartReasons = new Set(["startup", "new", "resume", "fork", "handoff"]);
 
 function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined {{
   try {{
     const rootSessionFile = ctx?.sessionManager?.getSessionFile?.();
     const rootSessionId = ctx?.sessionManager?.getSessionId?.();
     if (
-      typeof rootSessionFile !== "string" ||
-      rootSessionFile.length === 0 ||
       typeof rootSessionId !== "string" ||
       rootSessionId.length === 0
     ) {{
       return undefined;
     }}
-    return {{ rootSessionFile, rootSessionId }};
+    const tuple: RootSessionClaim =
+      typeof rootSessionFile === "string" && rootSessionFile.length > 0
+        ? {{ rootSessionFile, rootSessionId }}
+        : {{ rootSessionId }};
+    return tuple;
   }} catch {{
     return undefined;
   }}
@@ -190,24 +222,38 @@ function hasRootChildMarker(event: any, ctx: any): boolean {{
 function processRootSessionClaim(): RootSessionClaim | undefined {{
   const claim = (globalThis as any)[rootSessionClaimKey];
   if (
-    typeof claim?.rootSessionFile !== "string" ||
-    typeof claim?.rootSessionId !== "string"
+    typeof claim?.rootSessionId !== "string" ||
+    claim.rootSessionId.length === 0 ||
+    (claim.rootSessionFile !== undefined &&
+      (typeof claim.rootSessionFile !== "string" ||
+        claim.rootSessionFile.length === 0))
   ) {{
     return undefined;
   }}
   return claim;
 }}
 
+function ownsRootSessionClaim(): boolean {{
+  return (globalThis as any)[rootSessionClaimOwnerKey] === rootSessionReporterToken;
+}}
+
+function setRootSessionClaim(claim: RootSessionClaim): void {{
+  (globalThis as any)[rootSessionClaimKey] = claim;
+  (globalThis as any)[rootSessionClaimOwnerKey] = rootSessionReporterToken;
+}}
+
 function sameRootSessionClaim(
   left: RootSessionClaim | undefined,
   right: RootSessionClaim | undefined,
+  allowStableId = false,
 ): boolean {{
-  return (
-    left !== undefined &&
-    right !== undefined &&
-    left.rootSessionFile === right.rootSessionFile &&
-    left.rootSessionId === right.rootSessionId
-  );
+  if (left === undefined || right === undefined) {{
+    return false;
+  }}
+  const exact =
+    left.rootSessionId === right.rootSessionId &&
+    left.rootSessionFile === right.rootSessionFile;
+  return exact || (allowStableId && left.rootSessionId === right.rootSessionId);
 }}
 
 '''
@@ -249,14 +295,23 @@ activation_re = re.compile(
     r'  function activateRootSession\(.*?^  \}',
     re.S | re.M,
 )
-activation = '''  function validateRootSession(event: any, ctx: any): boolean {
+activation = '''  function validateRootSession(
+    event: any,
+    ctx: any,
+    allowStableId = false,
+    allowOwnerTransfer = false,
+  ): boolean {
     stashLatestCtx(ctx);
     const tuple = exactRootSessionTuple(ctx);
+    const claim = processRootSessionClaim();
+    const claimOwned = ownsRootSessionClaim();
     const valid =
       !hasRootChildMarker(event, ctx) &&
-      sameRootSessionClaim(processRootSessionClaim(), tuple);
+      sameRootSessionClaim(claim, tuple, allowStableId || claimOwned) &&
+      (claimOwned || allowOwnerTransfer);
     rootSession = valid;
     if (valid) {
+      setRootSessionClaim(tuple);
       updateSessionRef(ctx);
     }
     return valid;
@@ -272,7 +327,18 @@ activation = '''  function validateRootSession(event: any, ctx: any): boolean {
       sessionStartSource === "startup" && rootSessionModuleReload
         ? "reload"
         : sessionStartSource;
-    if (validateRootSession(event, ctx)) {
+    const allowStableId =
+      mayClaim &&
+      allowedRootStartReasons.has(effectiveSessionStartSource);
+    const allowOwnerTransfer = mayClaim;
+    if (
+      validateRootSession(
+        event,
+        ctx,
+        allowStableId,
+        allowOwnerTransfer,
+      )
+    ) {
       void reportSession(effectiveSessionStartSource);
       return true;
     }
@@ -293,7 +359,7 @@ activation = '''  function validateRootSession(event: any, ctx: any): boolean {
       return false;
     }
 
-    (globalThis as any)[rootSessionClaimKey] = tuple;
+    setRootSessionClaim(tuple);
     rootSession = true;
     updateSessionRef(ctx);
     void reportSession(effectiveSessionStartSource);
@@ -385,13 +451,9 @@ if legacy_activation_gate not in src and "if (!validateRootSession(undefined, ct
     sys.exit(3)
 src = src.replace(legacy_activation_gate, "if (!validateRootSession(undefined, ctx))")
 
-publish_re = re.compile(
-    r'(  function publishState\(force = false\)(?:: [^{]+)? \{\n)'
-)
-publish_guard = "    if (!rootSession || !validateRootSession(undefined, latestCtx)) return;\n"
-if publish_guard not in src:
-    src, publish_count = publish_re.subn(
-        lambda match: match.group(1) + publish_guard,
+if not has_publish_guard(src):
+    src, publish_count = publish_state_re.subn(
+        lambda match: match.group(0) + publish_guard,
         src,
         count=1,
     )
@@ -418,11 +480,13 @@ block = (
     f"  // {patch_marker}: exact-claim heartbeat force-publishes retained lifecycle state;\n"
     "  // ctx.isIdle() is consulted only when an already-claimed root runtime reloads.\n"
     "  // The inherited HERDR_* environment and ctx.hasUI are not root identity.\n"
-    "  // Every tick validates the live session file+id against the process-global\n"
-    "  // claim before publishing. This lets a reloaded root resume while preventing\n"
-    "  // in-process task/ACP children from claiming or overwriting pane authority.\n"
+    "  // Stable-ID matching is allowed only during an explicit lifecycle handoff.\n"
+    "  // Heartbeats and publish validation require exact identity, so an old\n"
+    "  // module cannot reclaim a moved session's former file. This lets a\n"
+    "  // lifecycle handoff refresh the optional file without stale intervals\n"
+    "  // claiming or overwriting pane authority.\n"
     "  // ctx.isIdle() is sampled only when this module-local runtime first recovers\n"
-    "  // the exact persisted claim; lifecycle hooks own agentActive after that.\n"
+    "  // the persisted claim; lifecycle hooks own agentActive after that.\n"
     "  try {\n"
     f"    const __fmResyncMs = {int(resync_ms)};\n"
     "    const __fmResync = setInterval(() => {\n"
