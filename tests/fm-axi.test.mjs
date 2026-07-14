@@ -27,6 +27,7 @@ function run(args, extra = {}) {
       FM_FLEET_PANES_FILE: panes,
       PATH: `${fakebin}:${process.env.PATH}`,
       FM_FLEET_STATS_FILE: stats,
+      FM_FLEET_SOURCE_HOME: home,
       FM_ROOT_OVERRIDE: root,
       ...extra,
     },
@@ -135,7 +136,7 @@ try {
   console.log("ok - metrics counts derive from shared inventory");
 
   const help = toon(run(["fleet", "--help"]), "help");
-  if (help.command !== "fm-axi fleet" || help.commands.length !== 5) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
+  if (help.command !== "fm-axi fleet" || help.commands.length !== 6) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
   const old = run(["fleet", "focus"]);
   if (old.status !== 2) throw new Error(`removed compatibility command accepted: ${old.status}`);
   console.log("ok - help and compatibility validation are TOON");

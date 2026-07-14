@@ -571,7 +571,36 @@ interface ManifestHashResult {
 	reason?: string;
 }
 
-function manifestHash(home: string): ManifestHashResult {
+export function sourceRootForHome(home: string): string | undefined {
+	const configured = process.env.FM_FLEET_SOURCE_HOME?.trim() || process.env.FM_ROOT_OVERRIDE?.trim() || process.env.FM_ROOT?.trim();
+	if (configured) return resolve(configured);
+	const configuredHome = process.env.FM_HOME?.trim();
+	if (configuredHome && existsSync(join(configuredHome, ".git")) && existsSync(join(configuredHome, ".omp", "fleet-capabilities.json"))) return resolve(configuredHome);
+	const extensions = join(home, ".omp", "extensions");
+	let entries: string[];
+	try {
+		entries = readdirSync(extensions);
+	} catch {
+		return undefined;
+	}
+	for (const entry of entries.sort()) {
+		let cursor: string;
+		try {
+			cursor = realpathSync(join(extensions, entry));
+		} catch {
+			continue;
+		}
+		while (cursor !== dirname(cursor)) {
+			if (cursor.endsWith("/.omp/extensions") && existsSync(join(dirname(dirname(cursor)), ".omp", "fleet-capabilities.json"))) {
+				return dirname(dirname(cursor));
+			}
+			cursor = dirname(cursor);
+		}
+	}
+	return undefined;
+}
+
+export function manifestHash(home: string): ManifestHashResult {
 	const paths: string[] = ["AGENTS.md"];
 	const sizes = new Map<string, number>();
 	let totalBytes = 0;
@@ -590,12 +619,19 @@ function manifestHash(home: string): ManifestHashResult {
 		totalBytes += size;
 		return true;
 	};
+	const registryRoot = sourceRootForHome(home) ?? home;
+	try {
+		const registry = statSync(join(registryRoot, ".omp", "fleet-capabilities.json"));
+		if (registry.isFile()) addPath(".omp/fleet-capabilities.json", registry.size);
+	} catch {
+		// A missing source registry is reported by the update controller.
+	}
 	try {
 		const agents = statSync(join(home, "AGENTS.md"));
 		if (!agents.isFile()) return { reason: "AGENTS.md is not a regular file" };
-		if (agents.size > MAX_MANIFEST_BYTES) return { reason: "byte-count limit reached" };
+		if (totalBytes + agents.size > MAX_MANIFEST_BYTES) return { reason: "byte-count limit reached" };
 		sizes.set("AGENTS.md", agents.size);
-		totalBytes = agents.size;
+		totalBytes += agents.size;
 	} catch {
 		return { reason: "AGENTS.md is unreadable" };
 	}
@@ -649,7 +685,8 @@ function manifestHash(home: string): ManifestHashResult {
 	for (const relativePath of paths.sort()) {
 		try {
 			const expectedSize = sizes.get(relativePath);
-			const bytes = readFileSync(join(home, relativePath));
+			const readRoot = relativePath === ".omp/fleet-capabilities.json" ? registryRoot : home;
+			const bytes = readFileSync(join(readRoot, relativePath));
 			if (expectedSize !== undefined && bytes.byteLength !== expectedSize) return { reason: "manifest entry changed during read" };
 			entries.push({ path: relativePath, sha256: createHash("sha256").update(bytes).digest("hex") });
 		} catch {

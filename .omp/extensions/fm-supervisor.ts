@@ -97,9 +97,11 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, unwatchFile, watchFile } from "node:fs";
-import { appendFile, mkdir, readdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { capabilityForHome, readCapabilityRegistry, readSourceRevision } from "./bridge/update";
+import { sourceRootForHome } from "./bridge/collect";
 import { connect, type Socket } from "node:net";
 
 // ============================== PURE SEAM ==============================
@@ -353,6 +355,8 @@ export interface ActivationReceipt {
 	started_at: string;
 	manifest_sha256: string;
 	manifest: ActivationManifestEntry[];
+	source_revision?: string;
+	required_probe_result?: unknown;
 }
 
 interface ActivationIdentity {
@@ -379,23 +383,40 @@ function sameIdentity(a: ActivationIdentity, b: ActivationIdentity): boolean {
 	);
 }
 
-async function collectExtensionPaths(root: string, relative: string, paths: string[]): Promise<void> {
-	const entries = await readdir(join(root, relative), { withFileTypes: true });
+async function collectExtensionPaths(root: string, relative: string, paths: string[], visited = new Set<string>()): Promise<void> {
+	const directory = join(root, relative);
+	const canonical = await realpath(directory);
+	if (visited.has(canonical)) return;
+	visited.add(canonical);
+	const entries = await readdir(directory, { withFileTypes: true });
 	for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
 		const path = `${relative}/${entry.name}`;
-		if (entry.isDirectory()) await collectExtensionPaths(root, path, paths);
+		const target = await stat(join(root, path));
+		if (target.isDirectory()) await collectExtensionPaths(root, path, paths, visited);
 		else paths.push(path);
 	}
 }
 
-async function loadOnceManifest(ctx: ExtensionContext): Promise<ActivationManifestEntry[]> {
-	let root = process.env.FM_ROOT_OVERRIDE || process.env.FM_ROOT || join(import.meta.dir, "../..");
+async function loadOnceManifest(ctx: ExtensionContext, sourceRoot?: string, registryRoot?: string): Promise<ActivationManifestEntry[]> {
+	let root = sourceRoot || process.env.FM_ROOT_OVERRIDE || process.env.FM_ROOT || join(import.meta.dir, "../..");
+	let canonicalRegistryRoot = registryRoot || root;
 	try {
 		root = await realpath(root);
 	} catch {
 		// An unavailable source tree remains non-green through its incomplete manifest.
 	}
+	try {
+		canonicalRegistryRoot = await realpath(canonicalRegistryRoot);
+	} catch {
+		// A missing canonical registry is handled as a failed capability lookup.
+	}
 	const paths = ["AGENTS.md"];
+	try {
+		const registry = await stat(join(canonicalRegistryRoot, ".omp", "fleet-capabilities.json"));
+		if (registry.isFile()) paths.push(".omp/fleet-capabilities.json");
+	} catch {
+		// Missing registry is handled as a failed capability lookup.
+	}
 	try {
 		await collectExtensionPaths(root, ".omp/extensions", paths);
 	} catch {
@@ -406,7 +427,8 @@ async function loadOnceManifest(ctx: ExtensionContext): Promise<ActivationManife
 	const entries: ActivationManifestEntry[] = [];
 	for (const path of paths) {
 		try {
-			const bytes = await readFile(join(root, path));
+			const readRoot = path === ".omp/fleet-capabilities.json" ? canonicalRegistryRoot : root;
+			const bytes = await readFile(join(readRoot, path));
 			entries.push({ path, sha256: createHash("sha256").update(bytes).digest("hex") });
 		} catch {
 			// Omit unreadable sources; the resulting manifest remains non-matching.
@@ -453,7 +475,12 @@ async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 		logWarn(sup, "fm-supervisor: activation receipt unavailable (missing pane or session identity)");
 		return;
 	}
-	const manifest = await loadOnceManifest(sup.ctx);
+	const operationalHome = process.env.FM_HOME || sup.ctx.cwd;
+	const sourceHome = process.env.FM_FLEET_SOURCE_HOME || process.env.FM_ROOT_OVERRIDE || process.env.FM_ROOT || sourceRootForHome(operationalHome) || operationalHome;
+	const manifest = await loadOnceManifest(sup.ctx, operationalHome, sourceHome);
+	const source = readSourceRevision(sourceHome);
+	const capability = capabilityForHome(readCapabilityRegistry(sourceHome).registry, operationalHome);
+	const observedProbe = { activation: manifest.length > 0 ? "ok" : "unknown" };
 	const receipt: ActivationReceipt = {
 		schema: "firstmate.activation-receipt/v1",
 		...identity,
@@ -461,6 +488,8 @@ async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 		started_at: new Date().toISOString(),
 		manifest_sha256: manifestDigest(manifest),
 		manifest,
+		...(source.revision ? { source_revision: source.revision } : {}),
+		...(capability?.requiredProbe !== undefined ? { required_probe_result: observedProbe } : {}),
 	};
 	const path = activationReceiptPath(sup.ctx);
 	const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
