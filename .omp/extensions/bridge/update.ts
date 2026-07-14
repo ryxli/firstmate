@@ -754,9 +754,12 @@ export async function updateFleet(options: UpdateOptions = {}): Promise<FleetUpd
 		const inventoryBefore = inventory;
 		const paneBefore = inventoryBefore.available ? targetPane(target, receiptBefore, inventoryBefore) : undefined;
 		const nonGitSeeded = isNonGitSeededHome(target.home);
+		const seededSourceHome = nonGitSeeded ? sourceRootForHome(target.home) ?? sourceHome : sourceHome;
 		const linkedRevision = nonGitSeeded ? linkedSourceRevision(target, receiptBefore, transaction) : undefined;
+		const canonicalRevision = nonGitSeeded ? readSourceRevision(seededSourceHome).revision : undefined;
+		const seededRevision = linkedRevision ?? canonicalRevision;
 		const currentRevision = nonGitSeeded
-			? (linkedRevision ? { ok: true, stdout: linkedRevision } : { ok: false, stdout: "" })
+			? (seededRevision ? { ok: true, stdout: seededRevision } : { ok: false, stdout: "" })
 			: git(target.home, ["rev-parse", "HEAD"]);
 		if (!currentRevision.ok) {
 			record(targetResult(target, "pending", "none", proofFor(source.revision, manifestBefore, receiptBefore), nonGitSeeded ? "home source revision unavailable" : "home revision unavailable"));
@@ -839,7 +842,7 @@ export async function updateFleet(options: UpdateOptions = {}): Promise<FleetUpd
 			record(targetResult(target, "pending", action, proofFor(source.revision, manifest, receipt), "receipt incomplete"));
 			continue;
 		}
-		if (nonGitSeeded && !surfacesMatchSource(target, sourceHome, target.surfaces)) {
+		if (nonGitSeeded && !surfacesMatchSource(target, seededSourceHome, target.surfaces)) {
 			record(targetResult(target, "pending", action, proofFor(source.revision, manifest, receipt), "registered surface diverged from canonical source"));
 			continue;
 		}
