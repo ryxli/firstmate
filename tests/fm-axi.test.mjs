@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,12 +93,18 @@ try {
   console.log("ok - validation error is AXI-shaped TOON");
 
   const seeded = join(temp, "seeded");
+  const linkedHome = join(temp, "linked-home");
   const fakebin = join(temp, "fakebin");
   mkdirSync(seeded);
+  mkdirSync(linkedHome);
   mkdirSync(fakebin);
   for (const path of ["AGENTS.md", "package.json", "bun.lock"]) cpSync(join(root, path), join(seeded, path));
   cpSync(join(root, "sbin"), join(seeded, "sbin"), { recursive: true });
-  for (const directory of ["config", "data", "projects", "state"]) mkdirSync(join(seeded, directory));
+  for (const directory of ["config", "data", "projects", "state"]) {
+    mkdirSync(join(seeded, directory));
+    mkdirSync(join(linkedHome, directory));
+  }
+  symlinkSync(join(seeded, "sbin"), join(linkedHome, "sbin"), "dir");
   const fakeTool = join(fakebin, "tool");
   writeFileSync(fakeTool, "#!/bin/sh\nif [ \"${1:-}\" = status ]; then printf '%s\\n' 'status: running'; fi\nexit 0\n");
   chmodSync(fakeTool, 0o755);
@@ -110,33 +116,33 @@ try {
   writeFileSync(fakeBun, `#!/bin/sh\nif [ -n "\${FM_TEST_BUN_LOG:-}" ]; then printf '%s\n' "$PWD" >> "$FM_TEST_BUN_LOG"; fi\nexec ${JSON.stringify(process.execPath)} "$@"\n`);
   chmodSync(fakeBun, 0o755);
   const seededEnv = {
-    ...process.env,
-    HOME: seeded,
-    FM_HOME: seeded,
+    HOME: linkedHome,
+    FM_HOME: linkedHome,
     FM_TEST_BUN_LOG: bunLog,
     PATH: `${fakebin}:${process.env.PATH}`,
   };
-  const startup = spawnSync("bash", [join(seeded, "sbin", "fm-bootstrap.sh")], {
-    cwd: seeded,
+  const startup = spawnSync("bash", [join(linkedHome, "sbin", "fm-bootstrap.sh")], {
+    cwd: linkedHome,
     encoding: "utf8",
     env: seededEnv,
   });
   if (startup.status !== 0) fail(`seeded bootstrap exited ${startup.status}: ${startup.stderr}`);
-  if (readFileSync(bunLog, "utf8").trim() !== seeded) {
-    fail("normal seeded-home bootstrap did not run the locked Bun install from the home root");
+  const installedFrom = readFileSync(bunLog, "utf8").trim();
+  if (installedFrom !== realpathSync(seeded)) {
+    fail(`symlinked-home bootstrap ran the locked Bun install from ${installedFrom}, expected ${realpathSync(seeded)}`);
   }
   if (!existsSync(join(seeded, "node_modules", "@toon-format", "toon", "package.json"))) {
-    fail("normal seeded-home bootstrap did not install the locked TOON dependency");
+    fail("symlinked-home bootstrap did not install the locked TOON dependency at fm-axi's code root");
   }
-  const seededHelp = spawnSync(join(seeded, "sbin", "fm-axi"), ["--help"], {
-    cwd: seeded,
+  const seededHelp = spawnSync(join(linkedHome, "sbin", "fm-axi"), ["--help"], {
+    cwd: linkedHome,
     encoding: "utf8",
     env: seededEnv,
   });
   if (seededHelp.status !== 0 || decode(seededHelp.stdout).command !== "fm-axi") {
-    fail(`seeded home could not run fm-axi after bootstrap: ${seededHelp.stderr}`);
+    fail(`symlinked home could not run fm-axi after bootstrap: ${seededHelp.stderr}`);
   }
-  console.log("ok - normal seeded-home bootstrap installs the locked TOON dependency");
+  console.log("ok - normal symlinked-home bootstrap installs TOON at fm-axi's physical root");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

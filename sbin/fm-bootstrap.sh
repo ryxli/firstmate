@@ -108,16 +108,18 @@ install_cmd() {
 }
 
 locked_dependency_sync() {
-  [ -f "$FM_ROOT/package.json" ] && [ -f "$FM_ROOT/bun.lock" ] || return 0
+  local code_root
+  code_root=$(cd -P "$FM_ROOT/sbin/.." 2>/dev/null && pwd) || return 0
+  [ -f "$code_root/package.json" ] && [ -f "$code_root/bun.lock" ] || return 0
   command -v bun >/dev/null 2>&1 || return 0
-  if (cd "$FM_ROOT" && bun install --frozen-lockfile >/dev/null 2>&1); then
+  if (cd "$code_root" && bun install --frozen-lockfile >/dev/null 2>&1); then
     return 0
   fi
-  echo "BUN_DEPENDENCY: locked install failed in $FM_ROOT"
+  echo "BUN_DEPENDENCY: locked install failed in $code_root"
 }
 
 # herdr is the terminal/agent substrate and also manages secondmate home worktrees.
-TOOLS="herdr bun node gh gh-axi chrome-devtools-axi lavish-axi"
+TOOLS="herdr node gh gh-axi chrome-devtools-axi lavish-axi"
 
 herdr_server_running() {
   herdr status 2>/dev/null | grep -q 'status: running'
