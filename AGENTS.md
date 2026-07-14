@@ -207,7 +207,7 @@ Bootstrap's fleet refresh is bounded by `FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT` second
 
 After bootstrap, run `sbin/fm-identity-migrate.sh check` and resolve any `UNRESOLVED` named-home identity before routing work.
 Run `sbin/fm-home-link.sh <home> --check` for every registered home, including nested secondmate registries; use `--repair` only for an observed link drift.
-Run `sbin/fm-fleet-updated.sh`; a stale, unknown, or unobservable result is not success.
+Run `sbin/fm-axi fleet updated`; an activation state other than fresh, or incomplete or unknown topology, is not success.
 When a load-once source changed, restart affected OMP sessions before trusting the new extension or instructions.
 If bootstrap reports that the Herdr reporter patch needs a restart, restart OMP panes first, then rerun bootstrap to verify activation.
 
