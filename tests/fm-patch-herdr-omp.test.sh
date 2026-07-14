@@ -268,7 +268,7 @@ PY
   "$PATCHER" --file "$buggy" || fail "upgrade apply over the prior buggy heartbeat must succeed"
   "$PATCHER" --check --file "$buggy" || fail "--check must report patched after the upgrade apply"
 
-  diff "$fresh" "$buggy" >/dev/null \
+  diff -u "$fresh" "$buggy" \
     || fail "upgrading a prior-buggy-patched file must converge to the same content as a fresh apply"
 
   pass "a file carrying the prior buggy heartbeat is detected as unpatched and upgrades to the corrected shape"
@@ -326,7 +326,17 @@ if (!heartbeatFn) {
 }
 
 let idle = false;
-const ctx = { hasUI: true, isIdle: () => idle };
+const rootSessionFile = "/tmp/root-session.jsonl";
+const rootSessionId = "root-session-id";
+const ctx = {
+  hasUI: true,
+  isIdle: () => idle,
+  sessionManager: {
+    getSessionFile: () => rootSessionFile,
+    getSessionId: () => rootSessionId,
+    getBranch: () => [],
+  },
+};
 
 // Establish a genuinely active turn: session_start then agent_start, ctx
 // currently NOT idle (actively processing).
@@ -370,9 +380,331 @@ MJS
   pass "an active turn waiting on a background job stays Working across 2 heartbeat ticks (>15s) even though ctx.isIdle() reads true"
 }
 
+test_exact_session_root_claim_lifecycle() {
+  command -v bun >/dev/null 2>&1 \
+    || fail "bun is required for the exact-session root-claim regression"
+
+  local fixture="$TMP_ROOT/root-claim-runtime.ts"
+  local harness="$TMP_ROOT/root-claim-harness.mjs"
+  write_pristine_fixture "$fixture"
+  "$PATCHER" --file "$fixture" || fail "apply for the exact-session root-claim fixture failed"
+
+  cat >"$TMP_ROOT/root-claim-headless-only.mjs" <<'MJS'
+const fixturePath = process.argv[2];
+const handlers = new Map();
+const pi = { on(event, fn) { handlers.set(event, fn); return pi; } };
+const originalSetInterval = globalThis.setInterval;
+globalThis.setInterval = () => ({ unref() {} });
+const mod = await import(`${fixturePath}?headless-only`);
+mod.default(pi);
+globalThis.setInterval = originalSetInterval;
+const ctx = {
+  hasUI: false,
+  agentKind: "main",
+  isIdle: () => false,
+  sessionManager: {
+    getSessionFile: () => "/sessions/headless-only.jsonl",
+    getSessionId: () => "headless-only",
+    getBranch: () => [],
+  },
+};
+handlers.get("session_start")?.({ reason: "startup" }, ctx);
+const claim = globalThis[Symbol.for("herdr:omp:root-session-claim:v1")];
+if (claim !== undefined || pi.__test.getLog().length !== 0) {
+  console.error(`FAIL: fresh headless process claimed or published root state: ${JSON.stringify(claim)}`);
+  process.exit(1);
+}
+console.log("PASS: fresh top-level headless process cannot claim root authority");
+MJS
+  local headless_out
+  headless_out=$(bun run "$TMP_ROOT/root-claim-headless-only.mjs" "$fixture" 2>&1)
+  local headless_rc=$?
+  [ "$headless_rc" -eq 0 ] || fail "fresh headless root-claim veto regressed: $headless_out"
+  printf '%s' "$headless_out" | grep -q "^PASS" || fail "fresh headless harness did not report PASS: $headless_out"
+
+  cat >"$harness" <<'MJS'
+const fixturePath = process.argv[2];
+const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
+
+function exactClaim() {
+  return globalThis[claimKey];
+}
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(`FAIL: ${message}`);
+    process.exit(1);
+  }
+}
+
+function ctx(file, id, { hasUI = true, agentKind = "main", sessionInit = false, idle = false } = {}) {
+  return {
+    hasUI,
+    agentKind,
+    isIdle: () => idle,
+    sessionManager: {
+      getSessionFile: () => file,
+      getSessionId: () => id,
+      getBranch: () => sessionInit ? [{ type: "session_init" }] : [],
+    },
+  };
+}
+
+let runtimeSerial = 0;
+async function loadRuntime() {
+  const handlers = new Map();
+  let heartbeat = null;
+  const pi = {
+    on(event, fn) {
+      handlers.set(event, fn);
+      return pi;
+    },
+  };
+  const originalSetInterval = globalThis.setInterval;
+  globalThis.setInterval = (fn, ms) => {
+    if (ms === 15000) heartbeat = fn;
+    return { unref() {} };
+  };
+  const mod = await import(`${fixturePath}?runtime=${++runtimeSerial}`);
+  mod.default(pi);
+  globalThis.setInterval = originalSetInterval;
+  return { handlers, pi, heartbeat };
+}
+
+delete globalThis[claimKey];
+
+// A fresh interactive root establishes the exact file+id tuple.
+const root = await loadRuntime();
+const rootCtx = ctx("/sessions/root.jsonl", "root-id");
+root.handlers.get("session_start")?.({ reason: "startup" }, rootCtx);
+assert(
+  JSON.stringify(exactClaim()) === JSON.stringify({
+    rootSessionFile: "/sessions/root.jsonl",
+    rootSessionId: "root-id",
+  }),
+  `fresh interactive root did not claim the exact tuple: ${JSON.stringify(exactClaim())}`,
+);
+assert(root.pi.__test.getLog().length > 0, "fresh interactive root did not publish");
+
+// A top-level but headless session has no exact authority to claim the pane.
+const headless = await loadRuntime();
+headless.handlers.get("session_start")?.(
+  { reason: "startup" },
+  ctx("/sessions/headless.jsonl", "headless", { hasUI: false }),
+);
+assert(exactClaim().rootSessionId === "root-id", "headless session overwrote the root claim");
+assert(headless.pi.__test.getLog().length === 0, "headless session published without an exact claim");
+
+// Reloaded extension modules share only the process-global exact claim. Missing
+// or explicitly false hasUI must not matter when the live tuple still matches.
+let reloadIndex = 0;
+for (const hasUI of [undefined, false, undefined, false]) {
+  const reloaded = await loadRuntime();
+  const reloadCtx = ctx("/sessions/root.jsonl", "root-id", { hasUI });
+  if (reloadIndex < 2) {
+    reloaded.handlers.get("session_start")?.({ reason: "reload" }, reloadCtx);
+  } else {
+    reloaded.handlers.get("session_switch")?.(
+      { reason: "resume", previousSessionFile: "/sessions/root.jsonl" },
+      reloadCtx,
+    );
+  }
+  reloadIndex += 1;
+  assert(reloaded.pi.__test.getLog().length > 0, `same-session reload with hasUI=${hasUI} lost root publication`);
+  assert(exactClaim().rootSessionId === "root-id", "same-session reload mutated the claim");
+  reloaded.heartbeat?.();
+  assert(reloaded.pi.__test.getLog().length > 1, "reloaded heartbeat did not preserve publication");
+}
+
+// An interactive replacement may move authority, but only for the approved
+// startup/new/resume/fork reasons and only to its exact tuple.
+let previousFile = "/sessions/root.jsonl";
+for (const reason of ["fork", "new", "resume"]) {
+  const replacement = await loadRuntime();
+  const replacementFile = `/sessions/${reason}.jsonl`;
+  const replacementId = `${reason}-id`;
+  replacement.handlers.get("session_start")?.(
+    { reason, previousSessionFile: previousFile },
+    ctx(replacementFile, replacementId),
+  );
+  assert(
+    exactClaim().rootSessionFile === replacementFile && exactClaim().rootSessionId === replacementId,
+    `interactive ${reason} did not replace the exact root claim`,
+  );
+  previousFile = replacementFile;
+}
+
+const established = { ...exactClaim() };
+
+// Both child signals are independent hard vetoes. Neither an in-process task
+// session nor an ACP/subagent session may publish or overwrite pane authority.
+const sessionInitChild = await loadRuntime();
+sessionInitChild.handlers.get("session_start")?.(
+  { reason: "startup" },
+  ctx("/sessions/task-child.jsonl", "task-child", { sessionInit: true }),
+);
+assert(JSON.stringify(exactClaim()) === JSON.stringify(established), "session_init child overwrote the root claim");
+assert(sessionInitChild.pi.__test.getLog().length === 0, "session_init child published root state");
+
+const agentKindChild = await loadRuntime();
+agentKindChild.handlers.get("session_start")?.(
+  { reason: "startup", agentKind: "sub" },
+  ctx("/sessions/acp-child.jsonl", "acp-child", { agentKind: "sub" }),
+);
+assert(JSON.stringify(exactClaim()) === JSON.stringify(established), "agentKind=sub child overwrote the root claim");
+assert(agentKindChild.pi.__test.getLog().length === 0, "agentKind=sub child published root state");
+
+// A reload with a different tuple has no authority even when hasUI is true.
+const unclaimedReload = await loadRuntime();
+unclaimedReload.handlers.get("session_start")?.(
+  { reason: "reload" },
+  ctx("/sessions/unclaimed-reload.jsonl", "unclaimed-reload"),
+);
+assert(JSON.stringify(exactClaim()) === JSON.stringify(established), "reload minted a replacement claim");
+assert(unclaimedReload.pi.__test.getLog().length === 0, "unclaimed reload published root state");
+
+console.log("PASS: exact-session process-global root claim survived reloads, replaced only on approved interactive starts, and vetoed child/headless sessions");
+MJS
+
+  local out
+  out=$(bun run "$harness" "$fixture" 2>&1)
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "exact-session root-claim lifecycle regressed: $out"
+  printf '%s' "$out" | grep -q "^PASS" || fail "exact-session runtime harness did not report PASS: $out"
+
+  cat >"$TMP_ROOT/root-claim-fresh-process.mjs" <<'MJS'
+const claim = globalThis[Symbol.for("herdr:omp:root-session-claim:v1")];
+if (claim !== undefined) {
+  console.error(`FAIL: process-global root claim survived process exit: ${JSON.stringify(claim)}`);
+  process.exit(1);
+}
+console.log("PASS: root claim is absent in a fresh OMP-equivalent process");
+MJS
+  local fresh_out
+  fresh_out=$(bun run "$TMP_ROOT/root-claim-fresh-process.mjs" 2>&1)
+  local fresh_rc=$?
+  [ "$fresh_rc" -eq 0 ] || fail "stale root claim survived process exit: $fresh_out"
+  printf '%s' "$fresh_out" | grep -q "^PASS" || fail "fresh-process claim check did not report PASS: $fresh_out"
+  pass "exact-session root claim is process-global, reload-safe, replaceable, and child-safe"
+}
+
+test_live_resumed_root_heartbeat_proof() {
+  command -v bun >/dev/null 2>&1 \
+    || fail "bun is required for the live resumed-root heartbeat proof"
+
+  local fixture="$TMP_ROOT/live-root-runtime.ts"
+  local harness="$TMP_ROOT/live-root-harness.mjs"
+  write_pristine_fixture "$fixture"
+  "$PATCHER" --file "$fixture" || fail "apply for the live resumed-root proof failed"
+
+  cat >"$harness" <<'MJS'
+const fixturePath = process.argv[2];
+const rootSessionFile = "/sessions/live-resumed-root.jsonl";
+const rootSessionId = "live-resumed-root-id";
+const reason = "resume";
+let idle = false;
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(`FAIL: ${message}`);
+    process.exit(1);
+  }
+}
+
+function makeRuntime(label) {
+  const handlers = new Map();
+  const pi = {
+    on(event, fn) {
+      handlers.set(event, fn);
+      return pi;
+    },
+  };
+  return import(`${fixturePath}?live=${label}`).then((mod) => {
+    mod.default(pi);
+    return { handlers, pi };
+  });
+}
+
+function makeCtx(hasUI) {
+  return {
+    hasUI,
+    agentKind: "main",
+    isIdle: () => idle,
+    sessionManager: {
+      getSessionFile: () => rootSessionFile,
+      getSessionId: () => rootSessionId,
+      getBranch: () => [],
+    },
+  };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const root = await makeRuntime("root");
+root.handlers.get("session_start")?.({ reason: "startup" }, makeCtx(true));
+
+// Fresh module instance, same OMP process: only the exact process-global claim
+// survives. The resumed session deliberately lacks hasUI authority.
+const resumed = await makeRuntime("resumed");
+const resumedCtx = makeCtx(false);
+resumed.handlers.get("session_start")?.({ reason }, resumedCtx);
+resumed.handlers.get("agent_start")?.({}, resumedCtx);
+resumed.handlers.get("tool_execution_start")?.({ toolName: "bash" }, resumedCtx);
+idle = true;
+
+const proof = [];
+function sample(label, elapsedSeconds) {
+  const log = resumed.pi.__test.getLog();
+  const latest = log[log.length - 1];
+  const claim = globalThis[Symbol.for("herdr:omp:root-session-claim:v1")];
+  const record = {
+    sample: label,
+    elapsed_seconds: elapsedSeconds,
+    "session_start.reason": reason,
+    rootSessionFile: claim?.rootSessionFile,
+    rootSessionId: claim?.rootSessionId,
+    agent_session: rootSessionFile,
+    agent_status: latest?.agentActive ? "working" : "idle",
+    focused: true,
+    publish_count: log.length,
+  };
+  assert(record.agent_status !== "idle", `${label} reported Idle during foreground tool execution`);
+  assert(record.rootSessionFile === rootSessionFile, `${label} lost the exact root session file`);
+  assert(record.rootSessionId === rootSessionId, `${label} lost the exact root session id`);
+  proof.push(record);
+}
+
+sample("within-one-heartbeat", 0);
+let previousPublishCount = resumed.pi.__test.getLog().length;
+for (let heartbeat = 1; heartbeat <= 3; heartbeat += 1) {
+  await sleep(15050);
+  sample(`heartbeat-${heartbeat}`, heartbeat * 15);
+  const publishCount = resumed.pi.__test.getLog().length;
+  assert(publishCount > previousPublishCount, `heartbeat-${heartbeat} did not force-publish`);
+  previousPublishCount = publishCount;
+}
+
+console.log(`LIVE_PROOF ${JSON.stringify(proof)}`);
+console.log("PASS: resumed root reached non-Idle within one heartbeat and remained non-Idle across three 15-second samples");
+MJS
+
+  local out
+  out=$(bun run "$harness" "$fixture" 2>&1)
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "live resumed-root heartbeat proof failed: $out"
+  printf '%s\n' "$out"
+  printf '%s' "$out" | grep -q "^LIVE_PROOF " || fail "live proof did not capture the required root/status/focus fields"
+  printf '%s' "$out" | grep -q "^PASS" || fail "live resumed-root harness did not report PASS"
+  pass "live resumed root stays non-Idle through three real 15-second heartbeat samples"
+}
+
 test_pristine_check_reports_unpatched
 test_apply_enforces_invariant
 test_apply_is_idempotent
 test_upgrade_from_prior_buggy_heartbeat_converges
 test_missing_target_skips_cleanly
 test_active_turn_survives_background_job_wait_across_heartbeat
+test_exact_session_root_claim_lifecycle
+test_live_resumed_root_heartbeat_proof

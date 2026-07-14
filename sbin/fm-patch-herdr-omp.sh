@@ -2,27 +2,22 @@
 # fm-patch-herdr-omp.sh - patch the herdr-managed omp status integration to
 # self-heal a stuck agent_status.
 #
-# ROOT CAUSE: the reporter enables ALL status reporting only after
-# activateRootSession() sees ctx.hasUI === true (it sets rootSession=true; every
-# working/idle publish and the turn/tool hooks are gated on rootSession). A
-# long-lived omp session auto-compacts and reloads constantly (measured: one mate
-# had 477 compact + 380 reload events in a single session). A reload REPLACES this
-# extension runtime, and the re-fired session_start/session_switch does not
-# reliably carry hasUI, so activateRootSession() returns early, rootSession stays
-# false, and the fresh runtime NEVER reports again. herdr then falls back to idle
-# (agent explain: default_known_agent_idle_fallback) for the rest of the session
-# while the agent is actively working. A fresh pane works only because it has not
-# compacted yet - which is why the bug never reproduces on short test panes.
+# ROOT CAUSE: extension reload replaces module-local rootSession state. Recovering
+# it from ctx.hasUI or inherited HERDR_* environment variables is unsafe because
+# nested task/ACP sessions share the pane and inherit those values. A child can
+# therefore seize lifecycle publication, while a resumed interactive root can
+# remain unbound long enough for Herdr to report false Idle.
+#
+# The fix stores the exact interactive root {session file, session id} tuple on
+# globalThis under a process-wide symbol. That claim survives extension module
+# reloads but dies with the OMP process. Every lifecycle publication validates
+# the live tuple against the claim. Only interactive startup/new/resume/fork
+# events can establish or replace it; reload, session_init, agentKind=sub, and
+# headless contexts cannot mint or overwrite authority.
 #
 # herdr owns this file ("reinstalling or updating overwrites this file"), so we
-# cannot fix it upstream and cannot expect edits to survive an update. Fix: when
-# enabled() proves this is a real herdr-managed pane (HERDR_ENV + pane id + socket
-# all present), re-establish rootSession, re-report the session ref so herdr
-# rebinds the source, and force-publish the true state.
-# The patch also stashes the latest ctx from lifecycle/tool hooks so a reload
-# recovery (heartbeat or session_switch finding rootSession=false) can seed
-# agentActive from ctx.isIdle() before any agent_start/agent_end has run on
-# the fresh runtime. Self-contained, version-agnostic; run after any herdr
+# cannot fix it upstream and cannot expect edits to survive an update. This
+# patch is self-contained and version-shape checked; run it after any herdr
 # update to re-apply it.
 #
 # REGRESSION FIXED HERE: the recovery heartbeat used to re-sample
@@ -53,6 +48,7 @@ set -u
 
 MARKER="fm-resync-heartbeat"
 PATCH_MARKER="fm-resync-heartbeat-lifecycle-invariant"
+ROOT_CLAIM_MARKER="fm-exact-root-session-claim-v1"
 RESYNC_MS="${FM_HERDR_RESYNC_MS:-15000}"
 
 TARGET="$HOME/.omp/agent/extensions/herdr-omp-agent-state.ts"
@@ -93,26 +89,34 @@ if [ ! -f "$TARGET" ]; then
   exit 0
 fi
 
-python3 - "$TARGET" "$RESYNC_MS" "$MARKER" "$PATCH_MARKER" "$MODE" <<'PY'
+python3 - "$TARGET" "$RESYNC_MS" "$MARKER" "$PATCH_MARKER" "$ROOT_CLAIM_MARKER" "$MODE" <<'PY'
 import io, re, sys
 
-path, resync_ms, marker, patch_marker, mode = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+path, resync_ms, marker, patch_marker, root_claim_marker, mode = sys.argv[1:7]
 src = io.open(path, encoding="utf-8").read()
 
 def is_patched(text: str) -> bool:
     required = [
         patch_marker,
-        "ctx?.hasUI !== true && !enabled()",
+        root_claim_marker,
+        'Symbol.for("herdr:omp:root-session-claim:v1")',
+        'Symbol.for("herdr:omp:root-session-reporter-loaded:v1")',
+        "function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined",
+        "function hasRootChildMarker(event: any, ctx: any): boolean",
+        "function validateRootSession(event: any, ctx: any): boolean",
+        "allowedRootStartReasons.has(effectiveSessionStartSource)",
+        "ctx?.hasUI !== true ||",
         "let latestCtx: any | undefined;",
-        "function stashLatestCtx(ctx: any): void",
         "function restoreAgentActiveFromCtx(ctx: any = latestCtx): void",
         'pi.on?.("before_agent_start"',
-        "resetSessionState();\n    restoreAgentActiveFromCtx(ctx);\n    publishState(true);",
-        "if (latestCtx) updateSessionRef(latestCtx);",
+        'activateRootSession(event, ctx, event?.reason || "startup", true)',
+        'activateRootSession(event, ctx, event?.reason || "resume", true)',
+        "if (!validateRootSession(undefined, ctx))",
+        "if (!validateRootSession(undefined, latestCtx)) return;",
         "restoreAgentActiveFromCtx();\n        }\n        publishState(true);",
-        "stashLatestCtx(ctx);\n    if (!rootSession && !activateRootSession(ctx))",
     ]
-    return all(item in text for item in required)
+    is_patched.missing = [item for item in required if item not in text]
+    return not is_patched.missing
 
 if mode == "check":
     sys.exit(0 if is_patched(src) else 1)
@@ -131,32 +135,83 @@ heartbeat_re = re.compile(
 )
 src = heartbeat_re.sub("", src)
 
-# Root fix: on a reload the re-fired session_start does not reliably carry
-# hasUI. A real herdr-managed pane is proven by enabled() (HERDR_ENV + pane id +
-# socket), so recover on enabled() too.
-gate_old = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
-            '    if (ctx?.hasUI !== true) {')
-gate_new = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
-            '    stashLatestCtx(ctx);\n'
-            '    // fm-resync-heartbeat: enabled() proves this is the real herdr pane, so a\n'
-            '    // reload that re-fires session_start without hasUI still recovers turn state.\n'
-            '    if (ctx?.hasUI !== true && !enabled()) {')
-gate_old_with_comment = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
-                         '    // fm-resync-heartbeat: enabled() proves this is the real herdr pane, so a\n'
-                         '    // reload that re-fires session_start without hasUI still recovers turn state.\n'
-                         '    if (ctx?.hasUI !== true && !enabled()) {')
-gate_new_with_comment = ('function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {\n'
-                         '    stashLatestCtx(ctx);\n'
-                         '    // fm-resync-heartbeat: enabled() proves this is the real herdr pane, so a\n'
-                         '    // reload that re-fires session_start without hasUI still recovers turn state.\n'
-                         '    if (ctx?.hasUI !== true && !enabled()) {')
-if gate_old in src:
-    src = src.replace(gate_old, gate_new, 1)
-elif gate_old_with_comment in src:
-    src = src.replace(gate_old_with_comment, gate_new_with_comment, 1)
-elif "ctx?.hasUI !== true && !enabled()" not in src or "stashLatestCtx(ctx);" not in src:
-    sys.stderr.write("error: activateRootSession hasUI gate not found; integration shape changed\n")
-    sys.exit(3)
+# Persist the root identity outside the extension module. OMP reloads extension
+# modules inside one process, while in-process child sessions load the same
+# integration. A Symbol.for key gives reload continuity without crossing a
+# process boundary.
+if root_claim_marker not in src:
+    global_anchor = "export default function"
+    if global_anchor not in src:
+        sys.stderr.write("error: extension factory not found; integration shape changed\n")
+        sys.exit(3)
+    global_helper = f'''// {root_claim_marker}: process-local exact root authority.
+type RootSessionClaim = {{
+  rootSessionFile: string;
+  rootSessionId: string;
+}};
+
+const rootSessionClaimKey = Symbol.for("herdr:omp:root-session-claim:v1");
+const rootSessionReporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
+const rootSessionModuleReload =
+  (globalThis as any)[rootSessionReporterLoadKey] === true;
+(globalThis as any)[rootSessionReporterLoadKey] = true;
+const allowedRootStartReasons = new Set(["startup", "new", "resume", "fork"]);
+
+function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined {{
+  try {{
+    const rootSessionFile = ctx?.sessionManager?.getSessionFile?.();
+    const rootSessionId = ctx?.sessionManager?.getSessionId?.();
+    if (
+      typeof rootSessionFile !== "string" ||
+      rootSessionFile.length === 0 ||
+      typeof rootSessionId !== "string" ||
+      rootSessionId.length === 0
+    ) {{
+      return undefined;
+    }}
+    return {{ rootSessionFile, rootSessionId }};
+  }} catch {{
+    return undefined;
+  }}
+}}
+
+function hasRootChildMarker(event: any, ctx: any): boolean {{
+  if (event?.agentKind === "sub" || ctx?.agentKind === "sub") {{
+    return true;
+  }}
+  try {{
+    const branch = ctx?.sessionManager?.getBranch?.();
+    return !Array.isArray(branch) || branch.some((entry: any) => entry?.type === "session_init");
+  }} catch {{
+    return true;
+  }}
+}}
+
+function processRootSessionClaim(): RootSessionClaim | undefined {{
+  const claim = (globalThis as any)[rootSessionClaimKey];
+  if (
+    typeof claim?.rootSessionFile !== "string" ||
+    typeof claim?.rootSessionId !== "string"
+  ) {{
+    return undefined;
+  }}
+  return claim;
+}}
+
+function sameRootSessionClaim(
+  left: RootSessionClaim | undefined,
+  right: RootSessionClaim | undefined,
+): boolean {{
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.rootSessionFile === right.rootSessionFile &&
+    left.rootSessionId === right.rootSessionId
+  );
+}}
+
+'''
+    src = src.replace(global_anchor, global_helper + global_anchor, 1)
 
 helper_anchor = "  let rootSession = false;\n"
 helper = (
@@ -190,111 +245,158 @@ if "let latestCtx: any | undefined;" not in src:
         sys.exit(3)
     src = src.replace(helper_anchor, helper, 1)
 
-session_start_old = '''  pi.on("session_start", (_event, ctx) => {
-    if (!activateRootSession(ctx)) {
-      return;
-    }
-    // A reload can replace this extension mid-run without emitting another agent_start.
-    agentActive = ctx?.isIdle?.() === false;
-    publishState(true);
-  });'''
-session_start_new = '''  pi.on("session_start", (_event, ctx) => {
+activation_re = re.compile(
+    r'  function activateRootSession\(.*?^  \}',
+    re.S | re.M,
+)
+activation = '''  function validateRootSession(event: any, ctx: any): boolean {
     stashLatestCtx(ctx);
-    if (!activateRootSession(ctx)) {
+    const tuple = exactRootSessionTuple(ctx);
+    const valid =
+      !hasRootChildMarker(event, ctx) &&
+      sameRootSessionClaim(processRootSessionClaim(), tuple);
+    rootSession = valid;
+    if (valid) {
+      updateSessionRef(ctx);
+    }
+    return valid;
+  }
+
+  function activateRootSession(
+    event: any,
+    ctx: any,
+    sessionStartSource = "startup",
+    mayClaim = false,
+  ): boolean {
+    const effectiveSessionStartSource =
+      sessionStartSource === "startup" && rootSessionModuleReload
+        ? "reload"
+        : sessionStartSource;
+    if (validateRootSession(event, ctx)) {
+      void reportSession(effectiveSessionStartSource);
+      return true;
+    }
+
+    const tuple = exactRootSessionTuple(ctx);
+    const isSameSessionReload =
+      effectiveSessionStartSource === "reload" ||
+      (effectiveSessionStartSource === "resume" &&
+        event?.previousSessionFile === tuple?.rootSessionFile);
+    if (
+      !mayClaim ||
+      !tuple ||
+      hasRootChildMarker(event, ctx) ||
+      !allowedRootStartReasons.has(effectiveSessionStartSource) ||
+      ctx?.hasUI !== true ||
+      isSameSessionReload
+    ) {
+      return false;
+    }
+
+    (globalThis as any)[rootSessionClaimKey] = tuple;
+    rootSession = true;
+    updateSessionRef(ctx);
+    void reportSession(effectiveSessionStartSource);
+    return true;
+  }'''
+activation_start = src.find("  function validateRootSession(")
+if activation_start == -1:
+    activation_start = src.find("  function activateRootSession(")
+activation_match = activation_re.search(src, max(activation_start, 0))
+if activation_start == -1 or activation_match is None:
+    sys.stderr.write("error: activateRootSession function not found; integration shape changed\n")
+    sys.exit(3)
+src = src[:activation_start] + activation + src[activation_match.end():]
+
+session_start_re = re.compile(
+    r'  pi\.on\("session_start", .*?^  \}\);',
+    re.S | re.M,
+)
+session_start_new = '''  pi.on("session_start", (event, ctx) => {
+    stashLatestCtx(ctx);
+    if (!activateRootSession(event, ctx, event?.reason || "startup", true)) {
       return;
     }
     // A reload can replace this extension mid-run without emitting another agent_start.
     restoreAgentActiveFromCtx(ctx);
     publishState(true);
   });'''
-if session_start_old in src:
-    src = src.replace(session_start_old, session_start_new, 1)
-elif session_start_new not in src:
+src, session_start_count = session_start_re.subn(session_start_new, src, count=1)
+if session_start_count != 1:
     sys.stderr.write("error: session_start handler not found; integration shape changed\n")
     sys.exit(3)
 
-session_switch_old = '''  pi.on("session_switch", (event, ctx) => {
-    if (!activateRootSession(ctx, event?.reason || "resume")) {
-      return;
-    }
-    resetSessionState();
-    publishState(true);
-  });'''
+session_switch_re = re.compile(
+    r'  pi\.on\("session_switch", .*?^  \}\);',
+    re.S | re.M,
+)
 session_switch_new = '''  pi.on("session_switch", (event, ctx) => {
     stashLatestCtx(ctx);
-    if (!activateRootSession(ctx, event?.reason || "resume")) {
+    if (!activateRootSession(event, ctx, event?.reason || "resume", true)) {
       return;
     }
     resetSessionState();
     restoreAgentActiveFromCtx(ctx);
     publishState(true);
   });'''
-if session_switch_old in src:
-    src = src.replace(session_switch_old, session_switch_new, 1)
-elif session_switch_new not in src:
+src, session_switch_count = session_switch_re.subn(session_switch_new, src, count=1)
+if session_switch_count != 1:
     sys.stderr.write("error: session_switch handler not found; integration shape changed\n")
     sys.exit(3)
 
-agent_start_old = '''  pi.on("agent_start", (_event, ctx) => {
-    if (!rootSession && !activateRootSession(ctx)) {
-      return;
-    }
-    updateSessionRef(ctx);
-    void reportSession();
-    clearPendingTimers();
-    clearFailureState();
-    agentActive = true;
-    publishState();
-  });'''
-agent_start_new = '''  pi.on?.("before_agent_start", (_event, ctx) => {
+before_agent_start = '''  pi.on?.("before_agent_start", (_event, ctx) => {
     stashLatestCtx(ctx);
   });
 
-  pi.on("agent_start", (_event, ctx) => {
-    stashLatestCtx(ctx);
-    if (!rootSession && !activateRootSession(ctx)) {
-      return;
-    }
-    updateSessionRef(ctx);
-    void reportSession();
-    clearPendingTimers();
-    clearFailureState();
-    agentActive = true;
-    publishState();
-  });'''
-if agent_start_old in src:
-    src = src.replace(agent_start_old, agent_start_new, 1)
-elif agent_start_new not in src:
-    sys.stderr.write("error: agent_start handler not found; integration shape changed\n")
-    sys.exit(3)
+'''
+if 'pi.on?.("before_agent_start"' not in src:
+    agent_start_anchor = '  pi.on("agent_start", (_event, ctx) => {\n'
+    if agent_start_anchor not in src:
+        sys.stderr.write("error: agent_start handler not found; integration shape changed\n")
+        sys.exit(3)
+    src = src.replace(agent_start_anchor, before_agent_start + agent_start_anchor, 1)
 
-tool_replacements = [
-    ('''  pi.on("tool_approval_requested", (event, ctx) => {
-    if (!rootSession && !activateRootSession(ctx)) {''',
-     '''  pi.on("tool_approval_requested", (event, ctx) => {
-    stashLatestCtx(ctx);
-    if (!rootSession && !activateRootSession(ctx)) {'''),
-    ('''  pi.on("tool_approval_resolved", (_event, ctx) => {
-    if (!rootSession && !activateRootSession(ctx)) {''',
-     '''  pi.on("tool_approval_resolved", (_event, ctx) => {
-    stashLatestCtx(ctx);
-    if (!rootSession && !activateRootSession(ctx)) {'''),
-    ('''  pi.on("tool_execution_start", (event, ctx) => {
-    if (event?.toolName !== "ask") {''',
-     '''  pi.on("tool_execution_start", (event, ctx) => {
-    stashLatestCtx(ctx);
-    if (event?.toolName !== "ask") {'''),
-    ('''  pi.on("tool_execution_end", (event, ctx) => {
-    if (event?.toolName !== "ask") {''',
-     '''  pi.on("tool_execution_end", (event, ctx) => {
-    stashLatestCtx(ctx);
-    if (event?.toolName !== "ask") {'''),
+agent_start_header = '  pi.on("agent_start", (_event, ctx) => {\n'
+agent_start_stashed = agent_start_header + "    stashLatestCtx(ctx);\n"
+if agent_start_stashed not in src:
+    if agent_start_header not in src:
+        sys.stderr.write("error: agent_start handler not found; integration shape changed\n")
+        sys.exit(3)
+    src = src.replace(agent_start_header, agent_start_stashed, 1)
+
+tool_headers = [
+    '  pi.on("tool_approval_requested", (event, ctx) => {\n',
+    '  pi.on("tool_approval_resolved", (_event, ctx) => {\n',
+    '  pi.on("tool_execution_start", (event, ctx) => {\n',
+    '  pi.on("tool_execution_end", (event, ctx) => {\n',
 ]
-for old, new in tool_replacements:
-    if old in src:
-        src = src.replace(old, new, 1)
-    elif new not in src:
+for header in tool_headers:
+    stashed = header + "    stashLatestCtx(ctx);\n"
+    if stashed in src:
+        continue
+    if header not in src:
         sys.stderr.write("error: tool hook not found; integration shape changed\n")
+        sys.exit(3)
+    src = src.replace(header, stashed, 1)
+
+legacy_activation_gate = "if (!rootSession && !activateRootSession(ctx))"
+if legacy_activation_gate not in src and "if (!validateRootSession(undefined, ctx))" not in src:
+    sys.stderr.write("error: lifecycle root activation gates not found; integration shape changed\n")
+    sys.exit(3)
+src = src.replace(legacy_activation_gate, "if (!validateRootSession(undefined, ctx))")
+
+publish_re = re.compile(
+    r'(  function publishState\(force = false\)(?:: [^{]+)? \{\n)'
+)
+publish_guard = "    if (!rootSession || !validateRootSession(undefined, latestCtx)) return;\n"
+if publish_guard not in src:
+    src, publish_count = publish_re.subn(
+        lambda match: match.group(1) + publish_guard,
+        src,
+        count=1,
+    )
+    if publish_count != 1:
+        sys.stderr.write("error: publishState handler not found; integration shape changed\n")
         sys.exit(3)
 
 # Find the agent_start handler and the end of its registration call.
@@ -313,41 +415,22 @@ insert_at = end + len("});")
 block = (
     "\n\n"
     f"  // {marker}: injected by sbin/fm-patch-herdr-omp.sh.\n"
-    f"  // {patch_marker}: heartbeat force-publishes lifecycle state; ctx.isIdle()\n"
-    "  // is consulted only to recover a just-reloaded runtime.\n"
-    "  // ROOT CAUSE this fixes: the reporter enables state reporting only after\n"
-    "  // activateRootSession() sees ctx.hasUI === true. A long-lived omp session\n"
-    "  // auto-compacts / reloads many times (observed hundreds of times per mate),\n"
-    "  // and a reload replaces this extension runtime; the re-fired session event\n"
-    "  // does not reliably carry hasUI, so rootSession stays false and the reporter\n"
-    "  // goes permanently silent - herdr then falls back to idle for the rest of\n"
-    "  // the session even while the agent is actively working. A fresh session\n"
-    "  // works only because it has not compacted yet.\n"
-    "  // Fix: enabled() already proves this is a real herdr-managed pane (HERDR_ENV\n"
-    "  // + pane id + socket are all present), which is the same fact hasUI was a\n"
-    "  // proxy for, so the heartbeat can re-establish rootSession on its own.\n"
-    "  // REGRESSION FIXED HERE: a prior version of this heartbeat called\n"
-    "  // restoreAgentActiveFromCtx() (re-sampling ctx.isIdle()) on every tick, even\n"
-    "  // once rootSession was already true and agent_start/agent_end lifecycle\n"
-    "  // hooks already owned agentActive. During an active whiteboard-driven turn\n"
-    "  // ctx.isIdle() can read true, so the heartbeat overwrote a correct Working\n"
-    "  // state with false Idle every resync interval - a fleetwide false-idle\n"
-    "  // regression despite healthy pane binding and socket. Invariant enforced\n"
-    "  // now: ctx.isIdle() is sampled ONLY while rootSession is still false (a\n"
-    "  // just-reloaded runtime with no live agent_start/agent_end yet to trust);\n"
-    "  // once activated, the heartbeat force-publishes the agentActive value the\n"
-    "  // lifecycle hooks already set and never re-derives it from ctx.\n"
+    f"  // {patch_marker}: exact-claim heartbeat force-publishes retained lifecycle state;\n"
+    "  // ctx.isIdle() is consulted only when an already-claimed root runtime reloads.\n"
+    "  // The inherited HERDR_* environment and ctx.hasUI are not root identity.\n"
+    "  // Every tick validates the live session file+id against the process-global\n"
+    "  // claim before publishing. This lets a reloaded root resume while preventing\n"
+    "  // in-process task/ACP children from claiming or overwriting pane authority.\n"
+    "  // ctx.isIdle() is sampled only when this module-local runtime first recovers\n"
+    "  // the exact persisted claim; lifecycle hooks own agentActive after that.\n"
     "  try {\n"
     f"    const __fmResyncMs = {int(resync_ms)};\n"
     "    const __fmResync = setInterval(() => {\n"
     "      try {\n"
     "        if (!enabled()) return;\n"
-    "        if (!rootSession) {\n"
-    "          // Reload dropped activation; re-establish it. Report the session\n"
-    "          // ref so herdr rebinds this source, then seed agentActive from\n"
-    "          // ctx.isIdle() for this just-recovered runtime only.\n"
-    "          rootSession = true;\n"
-    "          if (latestCtx) updateSessionRef(latestCtx);\n"
+    "        const __fmWasRootSession = rootSession;\n"
+    "        if (!validateRootSession(undefined, latestCtx)) return;\n"
+    "        if (!__fmWasRootSession) {\n"
     "          void reportSession(\"fm-reload-resync\");\n"
     "          restoreAgentActiveFromCtx();\n"
     "        }\n"
@@ -360,7 +443,7 @@ block = (
 
 patched = src[:insert_at] + block + src[insert_at:]
 if not is_patched(patched):
-    sys.stderr.write("error: patched integration failed self-check\n")
+    sys.stderr.write(f"error: patched integration failed self-check; missing {is_patched.missing!r}\n")
     sys.exit(3)
 io.open(path, "w", encoding="utf-8").write(patched)
 sys.stderr.write(f"patched: {path} (resync every {resync_ms}ms)\n")
