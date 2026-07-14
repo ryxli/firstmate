@@ -133,12 +133,15 @@ export interface ClassifyResult {
 
 // Matches sbin/fm-classify-status.sh: optional ISO-ish timestamp prefix, then
 // captain-relevant status prefixes or whole status phrases. Avoid substring
-// matches such as "already", "unmerged", or "readying".
+// matches such as "already", "unmerged", or "readying". Working reports are
+// internal even when they mention a completed merge elsewhere.
 const STATUS_PREFIX_RE = /^(done|blocked|failed|needs-decision):/i;
 const STATUS_PHRASE_RE = /(^|[^A-Za-z])(PR ready|checks green|ready in branch|merged)([^A-Za-z]|$)/i;
+const WORKING_STATUS_RE = /^working(?:\s|:)/i;
 
 function captainRelevantStatusLine(line: string): boolean {
 	const stripped = line.replace(/^\d{4}-\d{2}-\d{2}T\S+\s+/, "");
+	if (WORKING_STATUS_RE.test(stripped)) return false;
 	return STATUS_PREFIX_RE.test(stripped) || STATUS_PHRASE_RE.test(stripped);
 }
 
@@ -504,7 +507,12 @@ interface Supervisor {
 	lastBlockedWakeMs: Map<string, number>; // pane -> last blocked-wake ts (ship/scout debounce)
 	pendingEvents: FleetEvent[];
 	pendingStale: string[];
-	deferredWakes: Array<{ content: string; notifyOs: boolean }>;
+	deferredWakes: Array<{
+		content: string;
+		notifyOs: boolean;
+		requiredMetaTasks: string[];
+		afkBatch: boolean;
+	}>;
 	activeTurn: boolean;
 	statusWatchers: Set<string>;
 	statusRefreshTimer?: Timer;
@@ -1211,6 +1219,10 @@ async function runChecks(sup: Supervisor): Promise<void> {
 	for (const f of files) {
 		if (sup.abort.signal.aborted) return;
 		const task = f.slice(0, -".check.sh".length);
+		const metaPath = join(sup.stateDir, `${task}.meta`);
+		// A check script can outlive teardown or a manually removed task meta.
+		// Never poll an orphaned check: its output must not wake the captain.
+		if (!existsSync(metaPath)) continue;
 		const crew = findCrewByTask(sup, task);
 		let out = "";
 		try {
@@ -1223,7 +1235,7 @@ async function runChecks(sup: Supervisor): Promise<void> {
 		} catch {
 			out = ""; // a failed/timed-out check is silence (no wake), like bash
 		}
-		if (out.length > 0) {
+		if (out.length > 0 && existsSync(metaPath)) {
 			enqueueEvent(sup, {
 				t: Date.now(),
 				kind: "check",
@@ -1269,32 +1281,46 @@ function isAfkActive(sup: Supervisor): boolean {
 
 async function flush(sup: Supervisor): Promise<void> {
 	if (sup.abort.signal.aborted) return;
-	const events = sup.pendingEvents.splice(0);
+	// A merge check may sit in the grace queue while teardown removes its meta.
+	// Revalidate before classification so the queued event cannot wake afterward.
+	const events = sup.pendingEvents.splice(0).filter(
+		(e) => e.kind !== "check" || existsSync(join(sup.stateDir, `${e.task}.meta`)),
+	);
 	const stale = sup.pendingStale.splice(0);
 	if (events.length === 0 && stale.length === 0) return;
 
 	const afk = isAfkActive(sup);
 	const { digests } = classifyAndDigest(events, { afk });
+	const checkTasks = [...new Set(events.filter((e) => e.kind === "check").map((e) => e.task))];
+	const requiredMetaTasksFor = (content: string): string[] =>
+		checkTasks.filter((task) => content.includes(`] ${task} `) || content.includes(`- ${task} `));
 	const all = [...digests, ...stale];
 	if (all.length === 0) return;
 
 	if (afk) {
 		// classifyAndDigest already combined events. A stale nudge is intentionally
 		// not an OS notification, even when it is folded into an AFK batch.
-		inject(sup, all.length === 1 ? (all[0] ?? "") : all.join("\n"), digests.length > 0);
+		const content = all.length === 1 ? (all[0] ?? "") : all.join("\n");
+		inject(sup, content, digests.length > 0, requiredMetaTasksFor(content), true);
 	} else {
-		for (const digest of digests) inject(sup, digest, true);
+		for (const digest of digests) inject(sup, digest, true, requiredMetaTasksFor(digest));
 		for (const staleDigest of stale) inject(sup, staleDigest, false);
 	}
 }
 
 export const FM_WAKE_DELIVERY_OPTIONS = { deliverAs: "nextTurn", triggerTurn: true } as const;
 
-function inject(sup: Supervisor, content: string, notifyOs = false): void {
+function inject(
+	sup: Supervisor,
+	content: string,
+	notifyOs = false,
+	requiredMetaTasks: string[] = [],
+	afkBatch = false,
+): void {
 	if (sup.activeTurn) {
 		// Never ask OMP to schedule a continuation inside the supervisor's own
 		// active turn. Keep the message hidden and deliver it at agent_end.
-		sup.deferredWakes.push({ content, notifyOs });
+		sup.deferredWakes.push({ content, notifyOs, requiredMetaTasks, afkBatch });
 		return;
 	}
 	deliverWake(sup, content, notifyOs);
@@ -1308,15 +1334,48 @@ function deliverWake(sup: Supervisor, content: string, notifyOs: boolean): void 
 		);
 	} catch (err) {
 		logWarn(sup, `fm-supervisor: inject failed: ${String(err)}`);
+
 		return;
 	}
 	if (notifyOs) notifyCaptainOs(sup, content);
 }
 
+function filterAfkBatch(content: string, missingTasks: string[]): string | undefined {
+	if (missingTasks.length === 0) return content;
+	const lines = content.split("\n");
+	const header = lines[0] ?? "";
+	const headerMatch = header.match(/^\[wake x\d+ ([^\]]+)\] afk batch - \d+ relevant event\(s\):$/);
+	if (!headerMatch) return undefined;
+	const keptLines = lines.slice(1).filter(
+		(line) => !line.startsWith("  - ") || !missingTasks.some((task) => line.startsWith(`  - ${task} `)),
+	);
+	const entryCount = keptLines.filter((line) => line.startsWith("  - ")).length;
+	if (entryCount === 0) {
+		const tail = keptLines.filter((line) => !line.startsWith("  - "));
+		return tail.length > 0 ? tail.join("\n") : undefined;
+	}
+	const nextHeader = `[wake x${entryCount} ${headerMatch[1]}] afk batch - ${entryCount} relevant event(s):`;
+	return [nextHeader, ...keptLines].join("\n");
+}
+
 function flushDeferredWakes(sup: Supervisor): void {
 	if (sup.activeTurn || sup.deferredWakes.length === 0) return;
 	const pending = sup.deferredWakes.splice(0);
-	for (const wake of pending) deliverWake(sup, wake.content, wake.notifyOs);
+	for (const wake of pending) {
+		// A check digest can be deferred across an active turn; teardown may remove
+		// its meta before agent_end, so discard it instead of delivering stale work.
+		const missingTasks = wake.requiredMetaTasks.filter(
+			(task) => !existsSync(join(sup.stateDir, `${task}.meta`)),
+		);
+		if (missingTasks.length > 0) {
+			if (!wake.afkBatch) continue;
+			const filtered = filterAfkBatch(wake.content, missingTasks);
+			if (filtered === undefined) continue;
+			deliverWake(sup, filtered, wake.notifyOs);
+			continue;
+		}
+		deliverWake(sup, wake.content, wake.notifyOs);
+	}
 }
 
 function notifyCaptainOs(sup: Supervisor, content: string): void {
