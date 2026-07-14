@@ -67,6 +67,37 @@ function deepFreeze<T>(value: T): T {
 	return value;
 }
 
+function findCoherentParentChain(byType: ReadonlyMap<EventType, readonly CausalEvent[]>): readonly CausalEvent[] | undefined {
+	const byParent = new Map<EventId, CausalEvent[]>();
+	for (const events of byType.values()) {
+		for (const event of events) {
+			const parentEventId = taggedValue(event.lineage.parent_event_id);
+			if (parentEventId === undefined) continue;
+			const children = byParent.get(parentEventId) ?? [];
+			children.push(event);
+			byParent.set(parentEventId, children);
+		}
+	}
+	const walk = (current: CausalEvent, nextTypeIndex: number, rootTaskId: string, chain: readonly CausalEvent[]): readonly CausalEvent[] | undefined => {
+		if (nextTypeIndex === REQUIRED_EVENT_TYPES.length) return chain;
+		for (const candidate of byParent.get(current.event_id) ?? []) {
+			if (candidate.event_type !== REQUIRED_EVENT_TYPES[nextTypeIndex]) continue;
+			if (taggedValue(candidate.lineage.root_task_id) !== rootTaskId) continue;
+			const result = walk(candidate, nextTypeIndex + 1, rootTaskId, [...chain, candidate]);
+			if (result !== undefined) return result;
+		}
+		return undefined;
+	};
+	for (const root of byType.get("task.opened") ?? []) {
+		if (taggedValue(root.lineage.parent_event_id) !== undefined) continue;
+		const rootTaskId = taggedValue(root.lineage.root_task_id);
+		if (rootTaskId === undefined) continue;
+		const chain = walk(root, 1, rootTaskId, [root]);
+		if (chain !== undefined) return chain;
+	}
+	return undefined;
+}
+
 function describeEpisode(events: readonly CausalEvent[], episodeId: EpisodeId): ReplayEpisode {
 	const episodeEvents = events.filter((event) => taggedValue(event.lineage.episode_id) === episodeId);
 	const byType = new Map<EventType, CausalEvent[]>();
@@ -106,13 +137,15 @@ function describeEpisode(events: readonly CausalEvent[], episodeId: EpisodeId): 
 		});
 		if (!linked) reasons.push(`${eventType} has no explicit parent link to ${expectedParentType}`);
 	}
-	const sessionBound = byType.get("session.bound") ?? [];
+	const coherentChain = findCoherentParentChain(byType);
+	if (coherentChain === undefined) reasons.push("events do not form one coherent root-to-outcome parent chain");
+	const sessionBound = coherentChain?.filter((event) => event.event_type === "session.bound") ?? [];
 	if (!sessionBound.some((event) => taggedValue(event.lineage.session_id) !== undefined)) {
 		reasons.push("session.bound has no explicit session_id");
 	}
-	const acknowledgements = byType.get("delivery.acknowledged") ?? [];
+	const acknowledgements = coherentChain?.filter((event) => event.event_type === "delivery.acknowledged") ?? [];
 	if (acknowledgements.length === 0) reasons.push("delivery acknowledgement is absent, so exposure is ineffective");
-	const status = hasUnjoinableIdentity ? "unjoinable" : reasons.length === 0 ? "complete" : "not_estimable";
+	const status = hasUnjoinableIdentity ? "unjoinable" : coherentChain !== undefined && reasons.length === 0 ? "complete" : "not_estimable";
 	return {
 		episode_id: episodeId,
 		status,
@@ -123,9 +156,9 @@ function describeEpisode(events: readonly CausalEvent[], episodeId: EpisodeId): 
 	};
 }
 
-export function replayEvents(events: readonly CausalEvent[]): ReplayResult {
+export function replayEvents(events: readonly CausalEvent[], requestedStudyId?: StudyId): ReplayResult {
 	try {
-		const validated = validateLedgerEvents(events);
+		const validated = validateLedgerEvents(events, requestedStudyId);
 		const seen = new Set<EventId>();
 		const duplicates: EventId[] = [];
 		for (const event of events) {
@@ -155,7 +188,7 @@ export function replayEvents(events: readonly CausalEvent[]): ReplayResult {
 
 export function replayStudyLedger(ledgerDirectory: string, studyId: StudyId): ReplayResult {
 	try {
-		return replayEvents(readStudyLedger(ledgerDirectory, studyId).events);
+		return replayEvents(readStudyLedger(ledgerDirectory, studyId).events, studyId);
 	} catch (error) {
 		const message = error instanceof LedgerCorruptionError ? error.message : error instanceof Error ? error.message : "unknown replay read failure";
 		return deepFreeze({ status: "rejected", accepted_event_ids: [], idempotent_event_ids: [], episodes: [], corruptions: [message] });
