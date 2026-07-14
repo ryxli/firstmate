@@ -92,6 +92,17 @@ json.dump({"result":{"panes":[
 ]}}, open(out, "w"))
 PY
 }
+
+write_identityless_pane() {
+  local path=$1 home=$2
+  python3 - "$path" "$home" <<'PY'
+import json, sys
+out, home = sys.argv[1:]
+json.dump({"result":{"panes":[
+  {"pane_id":"w1:p1", "display_agent":"Firstmate", "agent":"omp", "agent_status":"working", "cwd":home},
+]}}, open(out, "w"))
+PY
+}
 run_check() {
   local repo=$1 fakebin=$2 panes=$3 log=$4
   shift 4
@@ -122,21 +133,69 @@ test_fresh_stale_missing_and_mismatched() {
   write_receipt "$home/p2" "w1:p5" "sid-2" "$repo" 1
   write_panes "$panes" "$home"; : > "$log"
   if out=$(FM_TEST_HOME="$home" run_check "$repo" "$fakebin" "$panes" "$log"); then fail "unknown proof did not fail"; fi
-  printf '%s\n' "$out" | grep -F 'w1:p1 Firstmate working session~' | grep -F 'LATEST (activation-proof-matches)' >/dev/null || fail "path identity proof was not fresh"
-  printf '%s\n' "$out" | grep -F 'w1:p5 Secondmate idle session~sid-2 -> STALE (manifest-mismatch)' >/dev/null || fail "stale manifest was not explicit"
+  printf '%s\n' "$out" | grep -F 'w1:p1 Firstmate working session~' | grep -F 'activation=LATEST (activation-proof-matches) binding=bound (identity-matches) topology=present (expected-omp-pane-present)' >/dev/null || fail "path identity proof was not fresh and bound"
+  printf '%s\n' "$out" | grep -F 'w1:p5 Secondmate idle session~sid-2 -> activation=STALE (manifest-mismatch) binding=bound (identity-matches) topology=present (expected-omp-pane-present)' >/dev/null || fail "stale manifest was not explicit"
   printf '%s\n' "$out" | grep -F 'w1:p5 Secondmate idle session~sid-2' >/dev/null || fail "stale secondmate meta was not resolved to live pane"
   printf '%s\n' "$out" | grep -F 'w1:p2 ' >/dev/null && fail "stale secondmate pane was trusted"
-  printf '%s\n' "$out" | grep -F 'w1:p4 secondmate idle session~unknown -> unknown (expected-pane-not-omp)' >/dev/null || fail "non-OMP expected pane was omitted"
-  printf '%s\n' "$out" | grep -F 'missing:sm-no-pane secondmate-missing-pane unknown session~unknown -> unknown (missing-supervisor-metadata)' >/dev/null || fail "pane-less secondmate metadata was omitted"
-  printf '%s\n' "$out" | grep -F 'w1:p3 Missing receipt idle session~sid-3 -> unknown (missing-activation-receipt)' >/dev/null || fail "missing receipt was not explicit"
+  printf '%s\n' "$out" | grep -F 'w1:p4 secondmate idle session~unknown -> activation=unknown (expected-pane-not-omp) binding=unknown (expected-pane-not-omp) topology=incomplete (expected-pane-not-omp)' >/dev/null || fail "non-OMP expected pane was omitted"
+  printf '%s\n' "$out" | grep -F 'missing:sm-no-pane secondmate-missing-pane unknown session~unknown -> activation=unknown (missing-supervisor-metadata) binding=unknown (missing-supervisor-metadata) topology=missing (missing-supervisor-metadata)' >/dev/null || fail "pane-less secondmate metadata was omitted"
+  printf '%s\n' "$out" | grep -F 'w1:p3 Missing receipt idle session~sid-3 -> activation=unknown (missing-activation-receipt) binding=unknown (missing-activation-receipt) topology=present (expected-omp-pane-present)' >/dev/null || fail "missing receipt was not explicit"
   FM_FAKE_NO_CURRENT=1 out=$(FM_TEST_HOME="$home" run_check "$repo" "$fakebin" "$panes" "$log") || true
-  printf '%s\n' "$out" | grep -F 'observable=false' >/dev/null || fail "missing current pane was treated as observable"
-  printf '%s\n' "$out" | grep -F 'state=unknown' >/dev/null || fail "missing current pane was treated as fresh"
+  printf '%s\n' "$out" | grep -F 'topology present=2 missing=1 incomplete=1 state=unknown' >/dev/null || fail "missing current pane did not report topology independently"
+  printf '%s\n' "$out" | grep -F 'activation total=4 latest=0 stale=1 unknown=3 state=stale' >/dev/null || fail "missing current pane changed activation result"
   printf '%s\n' "$out" | grep -F 'Plain terminal' >/dev/null && fail "plain terminal was included"
   grep -E 'pane run|tab create|agent rename' "$log" >/dev/null && fail "check was not read-only"
-  pass "fresh, stale, missing, and mismatched activation proof is classified explicitly"
+  pass "freshness, identity binding, and topology are classified independently"
   unset FM_FAKE_NO_CURRENT
 }
+
+test_fresh_activation_without_herdr_identity() {
+  local repo fakebin home panes log json
+  repo="$TMP_ROOT/identityless-repo"; fakebin="$TMP_ROOT/identityless-fakebin"; home="$TMP_ROOT/identityless-home"
+  panes="$TMP_ROOT/identityless-panes.json"; log="$TMP_ROOT/identityless-herdr.log"
+  make_fixture_repo "$repo"; make_fake_herdr "$fakebin"
+  write_receipt "$home" "w1:p1" "receipt-session-id" "$repo"
+  write_identityless_pane "$panes" "$home"; : > "$log"
+  json=$(FM_TEST_HOME="$home" run_check "$repo" "$fakebin" "$panes" "$log" --json) || fail "fresh activation with missing Herdr identity failed"
+  printf '%s' "$json" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+mate = r["mates"][0]
+assert mate["freshness"] == "LATEST"
+assert mate["reason"] == "activation-proof-matches"
+assert mate["binding"] == {"state": "unknown", "reason": "missing-session-identity"}
+assert r["activation"]["state"] == r["state"] == "fresh"
+assert r["identity"]["state"] == "unknown"
+assert r["topology"]["state"] == "complete"
+' || fail "missing Herdr identity coupled activation freshness"
+  pass "current activation remains fresh without Herdr session identity"
+}
+
+test_fresh_activation_with_unknown_topology() {
+  local repo fakebin home panes log json
+  repo="$TMP_ROOT/topology-repo"; fakebin="$TMP_ROOT/topology-fakebin"; home="$TMP_ROOT/topology-home"
+  panes="$TMP_ROOT/topology-panes.json"; log="$TMP_ROOT/topology-herdr.log"
+  make_fixture_repo "$repo"; make_fake_herdr "$fakebin"
+  mkdir -p "$home/p2" "$home/state"
+  printf 'pane=w1:p2\nkind=secondmate\nhome=%s\n' "$home/p2" > "$home/state/sm.meta"
+  write_receipt "$home/p2" "w1:p5" "sid-2" "$repo"
+  write_panes "$panes" "$home"; : > "$log"
+  json=$(FM_FAKE_NO_CURRENT=1 FM_TEST_HOME="$home" run_check "$repo" "$fakebin" "$panes" "$log" --json) || fail "fresh activation with unknown topology failed"
+  printf '%s' "$json" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+assert r["activation"]["state"] == r["state"] == "fresh"
+assert r["identity"]["state"] == "bound"
+assert r["topology"] == {
+    "state": "unknown",
+    "reason": "missing-current-pane",
+    "summary": {"present": 1, "missing": 0, "incomplete": 0},
+}
+' || fail "unknown topology coupled activation freshness"
+  pass "current activation remains fresh with unknown topology"
+  unset FM_FAKE_NO_CURRENT
+}
+
 
 test_json_output_is_parseable() {
   local repo fakebin home panes log digest json
@@ -151,15 +210,19 @@ test_json_output_is_parseable() {
   printf '%s' "$json" | python3 -c '
 import json, sys
 r=json.load(sys.stdin)
-assert r["summary"] == {"total":3,"latest":1,"stale":0,"unknown":2}
+assert r["summary"] == {"total":3,"latest":3,"stale":0,"unknown":0}
 fresh = [m for m in r["mates"] if m["pane"] == "w1:p1"][0]
 assert fresh["freshness"] == "LATEST"
 assert fresh["reason"] == "activation-proof-matches"
-assert r["state"] == "unknown" and r["observable"] and r["revision_observable"]
+assert r["activation"]["state"] == r["state"] == "fresh"
+assert r["identity"]["state"] == "mismatch"
+assert r["topology"]["state"] == "complete"
 assert len(r["latest_load_once"]["sha256"]) == 64
 ' || fail "--json did not emit expected proof schema"
   pass "--json emits parseable activation-proof schema"
 }
 
 test_fresh_stale_missing_and_mismatched
+test_fresh_activation_without_herdr_identity
+test_fresh_activation_with_unknown_topology
 test_json_output_is_parseable

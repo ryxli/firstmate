@@ -2,15 +2,15 @@
 # fm-fleet-updated.sh - read-only activation-proof check for live OMP panes.
 #
 # A session-file mtime is not evidence that an omp --resume process loaded
-# current sources. Each session_start writes an activation receipt, and this
-# command compares that receipt with live Herdr identity, pane identity, and
-# the exact current load-once manifest digest.
+# current sources. Each session_start writes an activation receipt. Activation
+# freshness, Herdr identity binding, and expected fleet topology are reported
+# independently because a missing Herdr field must not hide a current receipt.
 set -u
 
 usage() {
   printf '%s\n' 'usage: fm-fleet-updated.sh [--json]' >&2
-  printf '%s\n' '  Report whether live agent sessions have a current activation receipt.' >&2
-  printf '%s\n' '  This command is strictly read-only: it only runs herdr pane list and reads files.' >&2
+  printf '%s\n' '  Report activation freshness, Herdr identity binding, and fleet topology independently.'
+  printf '%s\n' '  This command is strictly read-only: it only runs Herdr queries and reads files.'
 }
 
 OUTPUT_MODE=text
@@ -193,6 +193,7 @@ mates = []
 for pane_id, expected_entry in expected.items():
     expected_kind, expected_home = expected_entry
     pane = pane_by_id.get(pane_id)
+    receipt_location = os.path.join(expected_home, "state", "activation-receipt.json") if expected_home else None
     if not isinstance(pane, dict):
         if pane_id.startswith("missing-home:"):
             missing_reason = "missing-supervisor-home"
@@ -200,58 +201,85 @@ for pane_id, expected_entry in expected.items():
             missing_reason = "missing-supervisor-metadata"
         else:
             missing_reason = "missing-live-pane"
-        mates.append({"pane": pane_id, "name": expected_kind, "status": "unknown",
-                      "session_path": None, "session_id": None,
-                      "receipt": os.path.join(expected_home, "state", "activation-receipt.json") if expected_home else None, "started_at": "unknown",
-                      "freshness": "unknown", "reason": missing_reason})
+        mates.append({
+            "pane": pane_id,
+            "name": expected_kind,
+            "status": "unknown",
+            "session_path": None,
+            "session_id": None,
+            "receipt": receipt_location,
+            "started_at": "unknown",
+            "freshness": "unknown",
+            "reason": missing_reason,
+            "binding": {"state": "unknown", "reason": missing_reason},
+            "topology": {"state": "missing", "reason": missing_reason},
+        })
         continue
     session_path, session_id = identity(pane)
     agent = pane.get("agent")
     if agent != "omp":
-        mates.append({"pane": pane_id, "name": expected_kind, "status": str(pane.get("agent_status") or "unknown"),
-                      "session_path": None, "session_id": None,
-                      "receipt": os.path.join(expected_home, "state", "activation-receipt.json") if expected_home else None, "started_at": "unknown",
-                      "freshness": "unknown", "reason": "expected-pane-not-omp"})
+        mates.append({
+            "pane": pane_id,
+            "name": expected_kind,
+            "status": str(pane.get("agent_status") or "unknown"),
+            "session_path": None,
+            "session_id": None,
+            "receipt": receipt_location,
+            "started_at": "unknown",
+            "freshness": "unknown",
+            "reason": "expected-pane-not-omp",
+            "binding": {"state": "unknown", "reason": "expected-pane-not-omp"},
+            "topology": {"state": "incomplete", "reason": "expected-pane-not-omp"},
+        })
         continue
     name = str(pane.get("display_agent") or pane.get("label") or agent or "unknown")
     status = str(pane.get("agent_status") or "unknown")
-    freshness, reason = "unknown", "missing-activation-receipt"
     receipt = None
     try:
-        with open(os.path.join(expected_home, "state", "activation-receipt.json"), encoding="utf-8") as stream:
+        with open(receipt_location, encoding="utf-8") as stream:
             receipt = json.load(stream)
     except (OSError, ValueError, TypeError):
         pass
-    if not isinstance(receipt, dict):
-        reason = "missing-activation-receipt"
-    elif not valid_receipt(receipt)[0]:
-        reason = valid_receipt(receipt)[1]
-    elif not (session_path or session_id):
-        reason = "missing-session-identity"
-    elif receipt.get("pane_id") != pane_id:
-        reason = "pane-id-mismatch"
-    elif session_path and receipt.get("session_path") != session_path:
-        reason = "session-path-mismatch"
-    elif session_id and receipt.get("session_id") != session_id:
-        reason = "session-id-mismatch"
+    receipt_valid = False
+    receipt_reason = "missing-activation-receipt"
+    if isinstance(receipt, dict):
+        receipt_valid, receipt_reason = valid_receipt(receipt)
+    freshness, reason = "unknown", receipt_reason
+    if not receipt_valid:
+        pass
+    elif not manifest_hash:
+        reason = "current-manifest-unavailable"
     elif receipt.get("manifest_sha256") != manifest_hash:
         freshness, reason = "STALE", "manifest-mismatch"
     elif iso(receipt.get("started_at")) == "unknown":
         reason = "invalid-start-time"
-    elif not manifest_hash:
-        reason = "current-manifest-unavailable"
     else:
         freshness, reason = "LATEST", "activation-proof-matches"
+    binding_state, binding_reason = "unknown", "missing-session-identity"
+    if not receipt_valid:
+        binding_reason = receipt_reason
+    elif not (session_path or session_id):
+        pass
+    elif receipt.get("pane_id") != pane_id:
+        binding_state, binding_reason = "mismatch", "pane-id-mismatch"
+    elif session_path and receipt.get("session_path") != session_path:
+        binding_state, binding_reason = "mismatch", "session-path-mismatch"
+    elif session_id and receipt.get("session_id") != session_id:
+        binding_state, binding_reason = "mismatch", "session-id-mismatch"
+    else:
+        binding_state, binding_reason = "bound", "identity-matches"
     mates.append({
         "pane": pane_id,
         "name": name,
         "status": status,
         "session_path": session_path,
         "session_id": session_id,
-        "receipt": os.path.join(expected_home, "state", "activation-receipt.json") if expected_home else None,
+        "receipt": receipt_location,
         "started_at": iso(receipt.get("started_at")) if isinstance(receipt, dict) else "unknown",
         "freshness": freshness,
         "reason": reason,
+        "binding": {"state": binding_state, "reason": binding_reason},
+        "topology": {"state": "present", "reason": "expected-omp-pane-present"},
     })
 
 summary = {
@@ -260,36 +288,74 @@ summary = {
     "stale": sum(m["freshness"] == "STALE" for m in mates),
     "unknown": sum(m["freshness"] == "unknown" for m in mates),
 }
-observable = herdr_state == "ok" and summary["total"] > 0 and not self_missing
+binding_summary = {
+    "bound": sum(m["binding"]["state"] == "bound" for m in mates),
+    "mismatch": sum(m["binding"]["state"] == "mismatch" for m in mates),
+    "unknown": sum(m["binding"]["state"] == "unknown" for m in mates),
+}
+topology_summary = {
+    "present": sum(m["topology"]["state"] == "present" for m in mates),
+    "missing": sum(m["topology"]["state"] == "missing" for m in mates),
+    "incomplete": sum(m["topology"]["state"] == "incomplete" for m in mates),
+}
 revision_observable = manifest_hash is not None
-if not observable or not revision_observable:
-    result_state = "unknown"
-elif summary["unknown"] or summary["stale"]:
-    result_state = "stale" if summary["stale"] else "unknown"
+if not revision_observable or summary["total"] == 0:
+    activation_state = "unknown"
+elif summary["stale"]:
+    activation_state = "stale"
+elif summary["unknown"]:
+    activation_state = "unknown"
 else:
-    result_state = "fresh"
+    activation_state = "fresh"
+if not summary["total"]:
+    binding_state = "unknown"
+elif binding_summary["mismatch"]:
+    binding_state = "mismatch"
+elif binding_summary["unknown"]:
+    binding_state = "unknown"
+else:
+    binding_state = "bound"
+if herdr_state != "ok":
+    topology_state, topology_reason = "unknown", "herdr-unavailable"
+elif self_missing:
+    topology_state, topology_reason = "unknown", "missing-current-pane"
+elif topology_summary["missing"] or topology_summary["incomplete"]:
+    topology_state, topology_reason = "incomplete", "expected-pane-unavailable"
+else:
+    topology_state, topology_reason = "complete", "expected-omp-panes-present"
+observable = topology_state == "complete"
 result = {
     "latest_load_once": {"sha256": manifest_hash, "paths": paths},
     "herdr": herdr_state,
     "mates": mates,
     "summary": summary,
+    "activation": {
+        "state": activation_state,
+        "summary": summary,
+        "revision_observable": revision_observable,
+    },
+    "identity": {"state": binding_state, "summary": binding_summary},
+    "topology": {"state": topology_state, "reason": topology_reason, "summary": topology_summary},
     "observable": observable,
     "revision_observable": revision_observable,
-    "state": result_state,
+    "state": activation_state,
 }
 if mode == "json":
     print(json.dumps(result, sort_keys=True))
 else:
     for mate in mates:
         identity_text = mate["session_path"] or mate["session_id"] or "unknown"
-        print("%s %s %s session~%s -> %s (%s)" % (
+        print("%s %s %s session~%s -> activation=%s (%s) binding=%s (%s) topology=%s (%s)" % (
             mate["pane"], mate["name"], mate["status"], identity_text,
             mate["freshness"], mate["reason"],
+            mate["binding"]["state"], mate["binding"]["reason"],
+            mate["topology"]["state"], mate["topology"]["reason"],
         ))
-    print("summary total=%d latest=%d stale=%d unknown=%d herdr=%s manifest~%s observable=%s revision=%s state=%s" % (
-        summary["total"], summary["latest"], summary["stale"], summary["unknown"],
-        herdr_state, manifest_hash or "unknown", str(observable).lower(),
-        str(revision_observable).lower(), result_state,
+    print("summary activation total=%d latest=%d stale=%d unknown=%d state=%s identity bound=%d mismatch=%d unknown=%d state=%s topology present=%d missing=%d incomplete=%d state=%s herdr=%s manifest~%s revision=%s" % (
+        summary["total"], summary["latest"], summary["stale"], summary["unknown"], activation_state,
+        binding_summary["bound"], binding_summary["mismatch"], binding_summary["unknown"], binding_state,
+        topology_summary["present"], topology_summary["missing"], topology_summary["incomplete"], topology_state,
+        herdr_state, manifest_hash or "unknown", str(revision_observable).lower(),
     ))
-sys.exit(0 if result_state == "fresh" else 1)
+sys.exit(0 if activation_state == "fresh" else 1)
 ' "$OUTPUT_MODE" "$FM_ROOT" "$FM_HOME" "$HERDR_STATE" "$CURRENT_PANE_ID" "$@"
