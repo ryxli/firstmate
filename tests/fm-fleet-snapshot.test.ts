@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { attentionFor, collectSnapshot, findTask, normalizeTaskState } from "../.omp/extensions/bridge/collect";
+import { attentionFor, collectSnapshot, findTask, normalizeTaskState, readRawHome } from "../.omp/extensions/bridge/collect";
 import { parseStatus, render } from "../.omp/extensions/bridge/fleet";
 import type { AgentRow, ParsedHome, StatusState } from "../.omp/extensions/bridge/fleet";
 const FIXTURE_MANIFEST = "fixture manifest\n";
@@ -14,6 +14,22 @@ function receiptManifestHash(content: string): string {
 	const fileHash = createHash("sha256").update(content).digest("hex");
 	return createHash("sha256").update(`AGENTS.md\0${fileHash}\0`).digest("hex");
 }
+function receiptManifestHashEntries(entries: Record<string, string>): string {
+	const hash = createHash("sha256");
+	for (const path of Object.keys(entries).sort()) {
+		const digest = createHash("sha256").update(entries[path]).digest("hex");
+		hash.update(path);
+		hash.update("\0");
+		hash.update(digest);
+		hash.update("\0");
+	}
+	return hash.digest("hex");
+}
+function manifestEntry(path: string, content: string): { path: string; sha256: string } {
+	return { path, sha256: createHash("sha256").update(content).digest("hex") };
+}
+
+
 
 function fixtureHome(): { home: string; panes: string } {
 	const root = mkdtempSync(join(tmpdir(), "fleet-snapshot-"));
@@ -53,6 +69,7 @@ describe("canonical FleetSnapshot collector", () => {
 				pane_id: "w1:p1",
 				session_id: "session-1",
 				started_at: "2026-07-13T00:00:00Z",
+				manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)],
 			}));
 		try {
 			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
@@ -123,6 +140,8 @@ describe("canonical FleetSnapshot collector", () => {
 				manifest_sha256: receiptManifestHash("child manifest\n"),
 				pane_id: "w1:p2",
 				session_id: "child-session",
+				started_at: "2026-07-13T00:00:00Z",
+				manifest: [manifestEntry("AGENTS.md", "child manifest\n")],
 			}));
 			const gauge = join(child, "gauge");
 			mkdirSync(join(gauge, "data"), { recursive: true });
@@ -134,6 +153,8 @@ describe("canonical FleetSnapshot collector", () => {
 				manifest_sha256: receiptManifestHash("gauge manifest\n"),
 				pane_id: "w1:p3",
 				session_id: "gauge-session",
+				started_at: "2026-07-13T00:00:00Z",
+				manifest: [manifestEntry("AGENTS.md", "gauge manifest\n")],
 			}));
 			writeFileSync(join(child, "data", "secondmates.md"), `- gauge - nested child (home: ${gauge})\n`);
 			writeFileSync(join(child, "state", "gauge.meta"), `kind=secondmate\nhome=${gauge}\npane=w1:p3\n`);
@@ -145,6 +166,8 @@ describe("canonical FleetSnapshot collector", () => {
 				manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST),
 				pane_id: "w1:p1",
 				session_id: "session-1",
+				started_at: "2026-07-13T00:00:00Z",
+				manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)],
 			}));
 			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [
 				{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "session-1", agent: "omp" },
@@ -167,6 +190,8 @@ describe("canonical FleetSnapshot collector", () => {
 				manifest_sha256: receiptManifestHash("child manifest\n"),
 				pane_id: "w1:p99",
 				session_id: "stale-child-session",
+				started_at: "2026-07-13T00:00:00Z",
+				manifest: [manifestEntry("AGENTS.md", "child manifest\n")],
 			}));
 			const staleChildReceipt = await collectSnapshot("2026-07-13T00:00:04.250Z");
 			expect(staleChildReceipt.topology).toMatchObject({ state: "complete", present: 3, missing: 0, incomplete: 0 });
@@ -320,12 +345,16 @@ describe("canonical FleetSnapshot collector", () => {
 			manifest_sha256: receiptManifestHash("main alias manifest\n"),
 			pane_id: "w1:p1",
 			session_id: "main-session",
+			started_at: "2026-07-13T00:00:00Z",
+			manifest: [manifestEntry("AGENTS.md", "main alias manifest\n")],
 		}));
 		writeFileSync(join(child, "state", "activation-receipt.json"), JSON.stringify({
 			schema: "firstmate.activation-receipt/v1",
 			manifest_sha256: receiptManifestHash("child alias manifest\n"),
 			pane_id: "w1:p2",
 			session_id: "child-session",
+			started_at: "2026-07-13T00:00:00Z",
+			manifest: [manifestEntry("AGENTS.md", "child alias manifest\n")],
 		}));
 		symlinkSync(home, alias, "dir");
 		const panes = join(root, "panes.json");
@@ -364,6 +393,8 @@ describe("canonical FleetSnapshot collector", () => {
 			manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST),
 			pane_id: "w1:p1",
 			session_id: "session-1",
+			started_at: "2026-07-13T00:00:00Z",
+			manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)],
 		}));
 		const oldHome = process.env.FM_HOME;
 		const oldPanes = process.env.FM_FLEET_PANES_FILE;
@@ -499,12 +530,12 @@ describe("canonical FleetSnapshot collector", () => {
 			liveRow("needs", "needs-decision"),
 			liveRow("other", "other"),
 		], [], "2026-07-13T00:00:00Z");
-		expect(livePending.map(item => item.key)).toEqual(["live/blocked", "live/done", "live/working", "live/failed", "live/idle", "live/needs", "live/other", "live/unknown"]);
+		expect(livePending.map(item => item.key)).toEqual(["live/failed", "live/blocked", "live/needs", "live/done", "live/working", "live/idle", "live/other", "live/unknown"]);
 		expect(livePending.find(item => item.id === "blocked")?.cls).toBe("CAPTAIN-BLOCKED");
 		expect(livePending.find(item => item.id === "done")?.cls).toBe("REVIEW-READY");
 		expect(livePending.find(item => item.id === "working")?.cls).toBe("IN-FLIGHT");
-		expect(livePending.find(item => item.id === "failed")?.cls).toBe("DORMANT");
-		expect(livePending.find(item => item.id === "needs")?.cls).toBe("DORMANT");
+		expect(livePending.find(item => item.id === "failed")?.cls).toBe("CAPTAIN-BLOCKED");
+		expect(livePending.find(item => item.id === "needs")?.cls).toBe("CAPTAIN-BLOCKED");
 		expect(livePending.find(item => item.id === "unknown")?.cls).toBe("UNKNOWN");
 		expect(pending.find(item => item.id === "add-tests")?.reason).toContain("blocks 3");
 		expect(pending.find(item => item.id === "wire-api")?.reason).toContain("blocks 1");
@@ -536,5 +567,160 @@ describe("canonical FleetSnapshot collector", () => {
 			{ ...liveRow("zzz", "other"), key: "a/zzz", owner: "a", home: "/display/beta" },
 		], duplicateHomes, "2026-07-13T00:00:00Z");
 		expect(crossOwnerPending.map(item => item.key)).toEqual(["z/aaa", "a/zzz"]);
+	});
+	it("maps live secondmate terminal states to captain attention", () => {
+		const liveSecondmate = (id: string, liveStatus: string): AgentRow => ({
+			key: `secondmate/${id}`,
+			id,
+			owner: "secondmate",
+			kind: "secondmate",
+			liveStatus,
+			home: "/tmp/secondmate",
+			topology: { home: "/tmp/secondmate" },
+		});
+		const pending = attentionFor([
+			liveSecondmate("failed", "failed"),
+			liveSecondmate("needs", "needs-decision"),
+		], [], "2026-07-13T00:00:00Z");
+		expect(pending.map(item => item.key)).toEqual(["secondmate/failed", "secondmate/needs"]);
+		expect(pending.find(item => item.id === "failed")?.cls).toBe("CAPTAIN-BLOCKED");
+		expect(pending.find(item => item.id === "needs")?.cls).toBe("CAPTAIN-BLOCKED");
+	});
+	it("hashes symlinked bridge sources in the activation manifest", async () => {
+		const fixture = fixtureHome();
+		const oldHome = process.env.FM_HOME;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		const source = join(fixture.home, "..", "bridge-source");
+		const bridgeSource = "export default 1;\n";
+		mkdirSync(source, { recursive: true });
+		writeFileSync(join(source, "index.ts"), bridgeSource);
+		mkdirSync(join(fixture.home, ".omp"), { recursive: true });
+		symlinkSync(source, join(fixture.home, ".omp", "extensions"), "dir");
+		const entries = { "AGENTS.md": FIXTURE_MANIFEST, ".omp/extensions/index.ts": bridgeSource };
+		writeFileSync(join(fixture.home, "state", "activation-receipt.json"), JSON.stringify({
+			schema: "firstmate.activation-receipt/v1",
+			manifest_sha256: receiptManifestHashEntries(entries),
+			pane_id: "w1:p1",
+			session_id: "session-1",
+			started_at: "2026-07-13T00:00:00Z",
+			manifest: Object.entries(entries).map(([path, content]) => ({ path, sha256: createHash("sha256").update(content).digest("hex") })),
+		}));
+		process.env.FM_HOME = fixture.home;
+		process.env.FM_FLEET_PANES_FILE = fixture.panes;
+		try {
+			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
+			expect(snapshot.activation).toMatchObject({ state: "fresh", fresh: 1, stale: 0, unknown: 0 });
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
+	});
+
+	it("discovers metadata-linked secondmate homes without a usable registry", async () => {
+		const fixture = fixtureHome();
+		const oldHome = process.env.FM_HOME;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		const child = join(fixture.home, "..", "plum");
+		mkdirSync(join(child, "data"), { recursive: true });
+		mkdirSync(join(child, "state"), { recursive: true });
+		writeFileSync(join(child, "AGENTS.md"), "child manifest\n");
+		writeFileSync(join(child, "data", "backlog.md"), "## In flight\n- **child-task** - child work (repo: app)\n");
+		writeFileSync(join(child, "state", "child-task.meta"), "kind=ship\npane=w1:p2\nworker=child\n");
+		writeFileSync(join(child, "state", "child-task.status"), "working: child work\n");
+		writeFileSync(join(fixture.home, "state", "plum.meta"), `kind=secondmate\nhome=${child}\npane=w1:p2\n`);
+		const registryPath = join(fixture.home, "data", "secondmates.md");
+		writeFileSync(registryPath, "not a valid secondmate registry\n");
+		writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [
+			{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", agent: "omp" },
+			{ pane_id: "w1:p2", cwd: child, agent_status: "working", agent: "omp" },
+		] } }));
+		process.env.FM_HOME = fixture.home;
+		process.env.FM_FLEET_PANES_FILE = fixture.panes;
+		try {
+			rmSync(registryPath);
+			const absent = await collectSnapshot("2026-07-13T00:00:00Z");
+			expect(absent.homePaths).toEqual([fixture.home, child]);
+			writeFileSync(registryPath, "not a valid secondmate registry\n");
+			const malformed = await collectSnapshot("2026-07-13T00:00:00Z");
+			expect(malformed.homePaths).toEqual([fixture.home, child]);
+			expect(malformed.health?.homes).toBe(2);
+			expect(malformed.tasks.find(task => task.key === "plum/child-task")?.topology?.home).toBe(child);
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
+	});
+
+	it("honors FM_ROOT_OVERRIDE and FM_STATE_OVERRIDE for the main home", async () => {
+		const fixture = fixtureHome();
+		const oldHome = process.env.FM_HOME;
+		const oldRoot = process.env.FM_ROOT_OVERRIDE;
+		const oldState = process.env.FM_STATE_OVERRIDE;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		const state = join(fixture.home, "..", "override-state");
+		mkdirSync(state, { recursive: true });
+		writeFileSync(join(state, "self.meta"), "kind=ship\npane=w1:p1\nworker=self\n");
+		writeFileSync(join(state, "self.status"), "failed: override state\n");
+		writeFileSync(join(state, "activation-receipt.json"), JSON.stringify({
+			schema: "firstmate.activation-receipt/v1",
+			manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST),
+			pane_id: "w1:p1",
+			started_at: "2026-07-13T00:00:00Z",
+			manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)],
+		}));
+		delete process.env.FM_HOME;
+		process.env.FM_ROOT_OVERRIDE = fixture.home;
+		process.env.FM_STATE_OVERRIDE = state;
+		process.env.FM_FLEET_PANES_FILE = fixture.panes;
+		try {
+			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
+			expect(snapshot.home).toBe(fixture.home);
+			expect(snapshot.agents?.find(agent => agent.id === "self")?.status).toBe("failed");
+			expect(snapshot.pending?.find(item => item.id === "self")?.cls).toBe("CAPTAIN-BLOCKED");
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldRoot === undefined) delete process.env.FM_ROOT_OVERRIDE;
+			else process.env.FM_ROOT_OVERRIDE = oldRoot;
+			if (oldState === undefined) delete process.env.FM_STATE_OVERRIDE;
+			else process.env.FM_STATE_OVERRIDE = oldState;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
+	});
+
+	it("rejects partial and malformed activation receipts", async () => {
+		const fixture = fixtureHome();
+		const oldHome = process.env.FM_HOME;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		process.env.FM_HOME = fixture.home;
+		process.env.FM_FLEET_PANES_FILE = fixture.panes;
+		const receiptPath = join(fixture.home, "state", "activation-receipt.json");
+		try {
+			for (const receipt of [
+				{ schema: "firstmate.activation-receipt/v1", manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST), pane_id: "w1:p1" },
+				{ schema: "firstmate.activation-receipt/v1", manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST), pane_id: 7, started_at: "2026-07-13T00:00:00Z", manifest: [] },
+				{ schema: "firstmate.activation-receipt/v1", manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST), pane_id: "w1:p1", started_at: "2026-07-13T00:00:00Z", manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)] },
+				{ schema: "firstmate.activation-receipt/v1", manifest_sha256: "0".repeat(64), pane_id: "w1:p1", started_at: "2026-07-13T00:00:00Z", manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)] },
+			]) {
+				writeFileSync(receiptPath, JSON.stringify(receipt));
+				const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
+				expect(snapshot.activation).toMatchObject({ state: "unknown", fresh: 0, stale: 0, unknown: 1 });
+				expect(readRawHome(fixture.home, true).activationPane).toBeUndefined();
+			}
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
 	});
 });

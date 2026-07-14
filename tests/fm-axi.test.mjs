@@ -72,11 +72,15 @@ try {
     manifest_sha256: manifestHash(homeManifest),
     pane_id: "w1:p1",
     session_id: "home-session",
+    started_at: "2026-07-13T00:00:00Z",
+    manifest: [{ path: "AGENTS.md", sha256: createHash("sha256").update(homeManifest).digest("hex") }],
   }));
   writeFileSync(join(secondmate, "state", "activation-receipt.json"), JSON.stringify({
     schema: "firstmate.activation-receipt/v1",
     manifest_sha256: manifestHash(secondmateManifest),
     pane_id: "w1:p2",
+    started_at: "2026-07-13T00:00:00Z",
+    manifest: [{ path: "AGENTS.md", sha256: createHash("sha256").update(secondmateManifest).digest("hex") }],
     session_id: "plum-session",
   }));
   writeFileSync(join(home, "state", "self.meta"), "pane=w1:p1\nkind=ship\nworker=self\n");
@@ -110,6 +114,9 @@ try {
   const tasks = toon(run(["fleet", "tasks", "--state", "in-flight"]), "in-flight tasks");
   if (tasks.command !== "fleet tasks" || tasks.result.length !== 2 || !tasks.result.every(task => task.key)) throw new Error(`ranked task list was wrong: ${JSON.stringify(tasks)}`);
   console.log("ok - task list is ranked and owner-qualified");
+  const tasksHelp = toon(run(["fleet", "tasks", "-h"]), "tasks help");
+  if (tasksHelp.command !== "fleet tasks") throw new Error(`short task help was rejected: ${JSON.stringify(tasksHelp)}`);
+  console.log("ok - task list accepts short help");
 
   const targeted = toon(run(["fleet", "task", "get", "home/self"]), "targeted task");
   if (targeted.result.key !== "home/self" || targeted.result.topology.home !== home) throw new Error(`targeted task lost topology: ${JSON.stringify(targeted)}`);

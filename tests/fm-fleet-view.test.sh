@@ -52,4 +52,15 @@ home, folder, fleet, kpi = sys.argv[1:]
 assert home in open(fleet).read(), home
 assert folder in open(kpi).read(), folder
 PY
+
+printf '%s\n' '{"schema":"fleet-snapshot/1","home":"/tmp/home-a","homePaths":["/tmp/home-a","/tmp/plum","/tmp/gauge"],"health":{"state":"degraded","homes":3,"missingHomes":0,"livePanes":0,"herdr":"ok"},"agents":[],"tasks":[],"attention":[],"pending":[],"mates":[],"otherLivePanes":[],"notes":[]}' > "$TMP/count-input.json"
+"$ROOT/sbin/fm-fleet-view.sh" --input "$TMP/count-input.json" --no-open --output "$TMP/count.html" >/dev/null
+python3 - "$TMP/count.html" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+assert '"homePaths":["/tmp/home-a","/tmp/plum","/tmp/gauge"]' in text
+assert 'typeof snap.health.homes === "number"' in text
+assert 'home_count: homeCount' in text
+PY
+printf '%s\n' 'ok - visual projection carries authoritative multi-home count'
 printf '%s\n' 'ok - visual wrappers reject flag values and honor explicit homes'

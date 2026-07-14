@@ -107,7 +107,7 @@ async function main(argv: string[]): Promise<number> {
 	try {
 		if (command === "tasks") {
 			let state: TaskRow["state"] | undefined;
-			if (argv.length === 3 && argv[2] === "--help") {
+			if (argv.length === 3 && (argv[2] === "--help" || argv[2] === "-h")) {
 				output({ command: "fleet tasks", usage: "fm-axi fleet tasks [--state <in-flight|queued|done>]", description: "Ranked task list." });
 				return 0;
 			}
