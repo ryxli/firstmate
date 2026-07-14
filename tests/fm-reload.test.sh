@@ -239,8 +239,8 @@ run_reload() {
   FM_STATE_OVERRIDE="${FM_STATE_OVERRIDE:-$dir/state}" \
   FM_RELOAD_NO_GUARD="${FM_RELOAD_NO_GUARD-1}" \
   FM_RELOAD_QUIT_GRACE=0 \
-  FM_RELOAD_TIMEOUT=1 \
-  FM_RELOAD_PROOF_TIMEOUT=1 \
+  FM_RELOAD_TIMEOUT="${FM_RELOAD_TIMEOUT:-1}" \
+  FM_RELOAD_PROOF_TIMEOUT="${FM_RELOAD_PROOF_TIMEOUT:-1}" \
   FM_RELOAD_SELF_TIMEOUT="${FM_RELOAD_SELF_TIMEOUT:-1}" \
     PATH="$fakebin:$PATH" \
     "$RELOAD" "$@"
@@ -856,7 +856,10 @@ test_stale_idle_screen_waits_then_reloads() {
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
   local sid="abcd1234-0000-0000-0000-000000000017"
+  # Two visible-screen reads are intentional; allow worker startup and both reads under load.
   FM_RELOAD_NO_GUARD='' \
+  FM_RELOAD_TIMEOUT=3 \
+  FM_RELOAD_PROOF_TIMEOUT=3 \
   FM_FAKE_HERDR_CURRENT="w1:p1" \
   FM_FAKE_HERDR_AGENT=omp \
   FM_FAKE_HERDR_STATUS=idle \

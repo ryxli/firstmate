@@ -150,7 +150,7 @@ export function readRawHome(homePath: string, isMain: boolean, depth = 0): RawHo
 	}
 	const receipt = objectRecord(parseJson(readFileOrNull(join(homePath, "state", "activation-receipt.json")) ?? ""));
 	const activationPane = stringValue(receipt?.pane_id);
-	return { path: homePath, isMain, backlogText, metas, statuses, statusMtimes, depth, activationPane };
+	return { path: homePath, pathKey: canonicalPath(homePath), isMain, backlogText, metas, statuses, statusMtimes, depth, activationPane };
 }
 
 interface Spawned {
@@ -184,7 +184,8 @@ function paneFromRecord(value: unknown): HerdrAgent | null {
 	return {
 		pane_id: text("pane_id") ?? text("id"),
 		agent_status: text("agent_status") ?? text("status"),
-		cwd: cwd ? canonicalPath(cwd) : undefined,
+		cwd,
+		cwdKey: cwd ? canonicalPath(cwd) : undefined,
 		workspace_id: text("workspace_id"),
 		workspace_label: text("workspace_label"),
 		tab_id: text("tab_id"),
@@ -232,7 +233,7 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 	for (const pane of panes) if (pane.pane_id) byPane.set(pane.pane_id, pane);
 	const agents: AgentRow[] = [];
 	for (const home of homes) {
-		const owner = owners.get(normalizeHomePath(home.path)) ?? home.label;
+		const owner = owners.get(home.pathKey ?? normalizeHomePath(home.path)) ?? home.label;
 		if (home.isMain) {
 			const supervisor = paneForHome(home.path, homes, panes);
 			if (supervisor) {
@@ -242,6 +243,7 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 					owner,
 					kind: "supervisor",
 					status: supervisor.agent_status,
+					liveStatus: supervisor.agent_status,
 					statusText: "",
 					pane: supervisor.pane_id,
 					home: home.path,
@@ -252,9 +254,13 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 		}
 		for (const agent of home.agents) {
 			const pane = agent.meta.pane ? byPane.get(agent.meta.pane) : undefined;
-			const statusKnown = isTerminalStatus(agent.status);
-			const status = statusKnown ? agent.status?.state : pane?.agent_status;
-			const statusText = statusKnown ? agent.status?.text : undefined;
+			const statusFile = agent.status;
+			const liveStatus = pane?.agent_status;
+			const statusKnown = isTerminalStatus(statusFile);
+			// Terminal file signals win; otherwise live Herdr wins when present,
+			// with the persisted signal as the offline/missing-pane fallback.
+			const status = statusKnown ? statusFile?.state : liveStatus ?? statusFile?.state;
+			const statusText = statusKnown || !liveStatus ? statusFile?.text : undefined;
 			agents.push({
 				key: canonicalTaskKey(owner, agent.id),
 				id: agent.id,
@@ -262,6 +268,8 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 				kind: agent.meta.kind,
 				status,
 				statusText,
+				statusFile,
+				liveStatus,
 				statusMtime: agent.statusMtime,
 				depth: home.depth,
 				pane: agent.meta.pane,
@@ -284,85 +292,99 @@ function humanAge(seconds: number): string {
 	return `${seconds}s`;
 }
 export function attentionFor(agents: AgentRow[], homes: ParsedHome[], now: string): PendingItem[] {
+	const ownerByHome = resolveOwnerByHome(homes);
 	const blast = new Map<string, number>();
 	for (const home of homes) {
-		for (const item of home.backlog.queued) {
-			const match = /blocked-by:\s*([a-z0-9][a-z0-9-]*)/i.exec(item.desc);
-			if (match) blast.set(match[1], (blast.get(match[1]) ?? 0) + 1);
+		const owner = ownerByHome.get(home.pathKey ?? normalizeHomePath(home.path)) ?? home.label;
+		const blockedBy = /blocked-by:\s*([a-z0-9][a-z0-9-]*)/gi;
+		for (const match of (home.backlogText ?? "").matchAll(blockedBy)) {
+			const key = canonicalTaskKey(owner, match[1]);
+			blast.set(key, (blast.get(key) ?? 0) + 1);
 		}
 	}
 	const parsedNow = Date.parse(now);
 	const nowSeconds = Number.isFinite(parsedNow) ? Math.floor(parsedNow / 1000) : Math.floor(Date.now() / 1000);
 	const rows: Array<PendingItem & { severity: number; blast: number; ageSec: number; proximity: number }> = [];
 	for (const agent of agents) {
-		const state = (agent.status ?? "").toLowerCase();
-		const text = (agent.statusText ?? "").toLowerCase();
+		const file = agent.statusFile;
+		const fileTerminal = isTerminalStatus(file);
+		const fileState = fileTerminal ? (file?.state ?? "") : "";
+		const fileText = fileTerminal ? (file?.text ?? "").toLowerCase() : "";
+		const live = (agent.liveStatus ?? agent.status ?? "").toLowerCase();
 		let clsRank = 0;
 		let severity = 0;
 		let tag = "UNBOUND";
 		if (agent.kind === "secondmate") {
-			if (state === "failed") {
+			if (fileState === "failed") {
 				clsRank = 4;
 				severity = 2;
 				tag = "FAILED (secondmate)";
-			} else if (state === "needs-decision") {
+			} else if (fileState === "needs-decision") {
 				clsRank = 4;
 				severity = 1;
 				tag = "NEEDS DECISION (secondmate)";
-			} else if (state === "blocked") {
+			} else if (fileState === "blocked" || live === "blocked") {
 				clsRank = 4;
 				severity = 1;
 				tag = "BLOCKED (secondmate)";
-			} else if (state === "unknown" || state === "") {
+			} else if (live === "unknown" || live === "") {
 				tag = "UNBOUND (secondmate)";
 			} else {
 				clsRank = 1;
 				tag = "secondmate idle";
 			}
-		} else if (state === "failed") {
+		} else if (fileTerminal && fileState === "failed") {
 			clsRank = 4;
 			severity = 2;
 			tag = "FAILED";
-		} else if (state === "needs-decision") {
+		} else if (fileTerminal && fileState === "needs-decision") {
 			clsRank = 4;
 			severity = 1;
 			tag = "NEEDS DECISION";
-		} else if (state === "blocked") {
+		} else if (fileTerminal && fileState === "blocked") {
 			clsRank = 4;
 			severity = 1;
 			tag = "BLOCKED";
-		} else if (/\bready in branch\b/i.test(text)) {
+		} else if (fileTerminal && /\bready in branch\b/i.test(fileText)) {
 			clsRank = 3;
 			severity = 1;
 			tag = "READY (branch)";
-		} else if (/\bchecks green\b|\bpr ready\b/i.test(text)) {
+		} else if (fileTerminal && /\bchecks green\b|\bpr ready\b/i.test(fileText)) {
 			clsRank = 3;
 			severity = 1;
 			tag = "PR READY";
-		} else if (state === "done") {
+		} else if (fileTerminal && fileState === "done") {
 			clsRank = 3;
-			severity = /\bmerged\b/i.test(text) ? 0 : 1;
+			severity = /\bmerged\b/i.test(fileText) ? 0 : 1;
 			tag = severity === 0 ? "MERGED (teardown)" : "DONE (review)";
-		} else if (/\bmerged\b/i.test(text)) {
+		} else if (fileTerminal && /\bmerged\b/i.test(fileText)) {
 			clsRank = 3;
+			severity = 0;
 			tag = "MERGED (teardown)";
-		} else if (state === "working") {
+		} else if (live === "blocked") {
+			clsRank = 4;
+			severity = 1;
+			tag = "BLOCKED (frozen)";
+		} else if (live === "working") {
 			clsRank = 2;
 			tag = "working";
-		} else if (state === "idle") {
+		} else if (live === "done") {
+			clsRank = 3;
+			tag = "done (closeout)";
+		} else if (live === "idle") {
 			clsRank = 1;
 			tag = "idle";
-		} else if (state === "unknown" || state === "") {
+		} else if (live === "unknown" || live === "") {
 			tag = "UNBOUND";
 		} else {
 			clsRank = 1;
-			tag = state;
+			tag = live;
 		}
-		const blastCount = blast.get(agent.id) ?? 0;
+		const blastCount = blast.get(agent.key) ?? 0;
 		const ageSec = agent.statusMtime ? Math.max(0, nowSeconds - agent.statusMtime) : 0;
 		const proximity = -(agent.depth ?? 0);
 		const extras: string[] = [];
-		if (agent.statusText && clsRank >= 3) extras.push(agent.statusText.slice(0, 64));
+		if (fileTerminal && file?.text && clsRank >= 3) extras.push(file.text.slice(0, 64));
 		if (blastCount > 0) extras.push(`blocks ${blastCount}`);
 		if (ageSec >= 60 && clsRank >= 3) extras.push(humanAge(ageSec));
 		if (proximity < 0 && clsRank >= 3) extras.push("forwarded");
@@ -380,7 +402,7 @@ export function attentionFor(agents: AgentRow[], homes: ParsedHome[], now: strin
 		});
 	}
 	return rows
-		.sort((a, b) => b.clsRank - a.clsRank || b.severity - a.severity || b.blast - a.blast || b.ageSec - a.ageSec || b.proximity - a.proximity || (a.key ?? "").localeCompare(b.key ?? ""))
+		.sort((a, b) => b.clsRank - a.clsRank || b.severity - a.severity || b.blast - a.blast || b.ageSec - a.ageSec || b.proximity - a.proximity || a.id.localeCompare(b.id) || (a.key ?? "").localeCompare(b.key ?? ""))
 		.map(({ severity: _severity, blast: _blast, ageSec: _ageSec, proximity: _proximity, ...row }) => row);
 }
 
@@ -649,7 +671,16 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 			}
 		}
 	}
-	const homes = rawHomes.map(parseHome);
+	const homes = rawHomes.map(raw => {
+		const home = parseHome(raw);
+		return {
+			...home,
+			agents: home.agents.map(agent => ({
+				...agent,
+				meta: { ...agent.meta, homeKey: agent.meta.home ? canonicalPath(agent.meta.home) : undefined },
+			})),
+		};
+	});
 	const live = await fetchPaneInventory(normalizePaneCap(options.maxLivePanes));
 	if (!live.ok) notes.push("herdr pane inventory unavailable - live topology omitted");
 	const byPane = new Map<string, HerdrAgent>();
@@ -663,7 +694,7 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 	base.homePaths = homePaths;
 	base.agents = agents;
 	base.attention = attention;
-	base.pending = attention;
+	base.pending = attention.filter(item => item.clsRank >= 3);
 	const activationCheck = activationFor(homePaths, live.panes, homes, main);
 	base.activation = activationCheck.activation;
 	base.identity = activationCheck.identity;

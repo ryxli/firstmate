@@ -132,6 +132,18 @@ try {
   const old = run(["fleet", "focus"]);
   if (old.status !== 2) throw new Error(`removed compatibility command accepted: ${old.status}`);
   console.log("ok - help and compatibility validation are TOON");
+  const nested = run(["fleet", "fleet"]);
+  if (nested.status !== 2) throw new Error(`nested fleet unexpectedly exited ${nested.status}`);
+  const nestedError = decode(nested.stdout, { expandPaths: "safe" });
+  if (nestedError.code !== "VALIDATION_ERROR") throw new Error(`nested fleet was not a TOON validation error: ${nested.stdout}`);
+  console.log("ok - nested fleet command is rejected");
+  for (const args of [["fleet", "task", "--help", "garbage"], ["fleet", "agent", "--help", "garbage"], ["fleet", "metrics", "--help", "garbage"]]) {
+    const malformedHelp = run(args);
+    if (malformedHelp.status !== 2) throw new Error(`${args.join(" ")} unexpectedly exited ${malformedHelp.status}`);
+    const malformedError = decode(malformedHelp.stdout, { expandPaths: "safe" });
+    if (malformedError.code !== "VALIDATION_ERROR") throw new Error(`${args.join(" ")} did not emit TOON validation error: ${malformedHelp.stdout}`);
+  }
+  console.log("ok - targeted help requires exact arity");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

@@ -24,6 +24,8 @@ export interface Meta {
 	home?: string;
 	kind?: string;
 	mode?: string;
+	/** Canonical path identity used for matching; `home` remains display-only. */
+	homeKey?: string;
 	raw: Record<string, string>;
 }
 
@@ -60,6 +62,8 @@ export interface HerdrAgent {
 	pane_id?: string;
 	agent_status?: string;
 	name?: string;
+	/** Canonical cwd identity used for matching; `cwd` remains display-only. */
+	cwdKey?: string;
 	cwd?: string;
 	workspace_id?: string;
 	workspace_label?: string;
@@ -78,6 +82,8 @@ export interface HerdrAgent {
 
 export interface RawHome {
 	path: string;
+	/** Canonical path identity used for matching; `path` remains display-only. */
+	pathKey?: string;
 	isMain: boolean;
 	backlogText: string | null;
 	metas: { id: string; text: string }[];
@@ -100,6 +106,10 @@ export interface ParsedAgent {
 
 export interface ParsedHome {
 	path: string;
+	/** Canonical path identity used for matching; `path` remains display-only. */
+	pathKey?: string;
+	/** Raw backlog source retained for exact dependency scanning. */
+	backlogText?: string | null;
 	label: string;
 	isMain: boolean;
 	backlog: Backlog;
@@ -249,6 +259,8 @@ export function parseHome(raw: RawHome): ParsedHome {
 	agents.sort((a, b) => a.id.localeCompare(b.id));
 	return {
 		path: raw.path,
+		pathKey: raw.pathKey ?? normalizeHomePath(raw.path),
+		backlogText: raw.backlogText,
 		label: basename(raw.path),
 		activationPane: raw.activationPane,
 		isMain: raw.isMain,
@@ -340,6 +352,10 @@ export interface AgentRow {
 	kind?: string;
 	status?: string;
 	statusText?: string;
+	/** Parsed status-file signal; never conflated with live Herdr state. */
+	statusFile?: StatusLine;
+	/** Live Herdr pane state; never promoted over status-file provenance. */
+	liveStatus?: string;
 	statusMtime?: number;
 	depth?: number;
 	pane?: string;
@@ -461,17 +477,36 @@ function blockedNote(desc: string): string {
 	return m ? `blocked-by ${m[1].trim()}` : "ready";
 }
 
-/** Normalize the POSIX home paths used by metadata and registry records. */
+/** Normalize a display path only when no canonical collector key is available. */
 export function normalizeHomePath(path?: string): string {
 	return (path ?? "").replace(/\/+$/, "");
 }
 
-/** Resolve a home pane using explicit receipt/meta identity before safe fallback. */
+function homePathKey(home: ParsedHome): string {
+	return home.pathKey ?? normalizeHomePath(home.path);
+}
+
+function metaHomePathKey(meta: Meta): string | undefined {
+	return meta.homeKey ?? (meta.home ? normalizeHomePath(meta.home) : undefined);
+}
+
+/** Resolve a home pane from canonical linked metadata, receipt, then cwd. */
 export function resolveHomePane(home: ParsedHome, homes: ParsedHome[], herdrByPane: Map<string, HerdrAgent>, herdrAll: HerdrAgent[]): HerdrAgent | undefined {
-	const linkedPane = home.activationPane ?? homes.flatMap(parent => parent.agents)
-		.find(agent => agent.meta.kind === "secondmate" && agent.meta.home && normalizeHomePath(agent.meta.home) === normalizeHomePath(home.path) && agent.meta.pane)?.meta.pane;
-	if (linkedPane) return herdrByPane.get(linkedPane);
-	const candidates = herdrAll.filter(agent => (!agent.agent || agent.agent === "omp") && normalizeHomePath(agent.cwd) === normalizeHomePath(home.path));
+	const targetKey = homePathKey(home);
+	// The main-home secondmate meta is the durable link. Prefer it over a
+	// child receipt: receipts can be stale while the linked pane remains live.
+	const linkedPanes = homes.flatMap(parent => parent.agents)
+		.filter(agent => agent.meta.kind === "secondmate" && metaHomePathKey(agent.meta) === targetKey && agent.meta.pane)
+		.map(agent => agent.meta.pane as string);
+	for (const paneId of linkedPanes) {
+		const linked = herdrByPane.get(paneId);
+		if (linked) return linked;
+	}
+	if (home.activationPane) {
+		const receiptPane = herdrByPane.get(home.activationPane);
+		if (receiptPane) return receiptPane;
+	}
+	const candidates = herdrAll.filter(agent => (!agent.agent || agent.agent === "omp") && (agent.cwdKey ?? normalizeHomePath(agent.cwd)) === targetKey);
 	return candidates.length === 1 ? candidates[0] : undefined;
 }
 
@@ -480,16 +515,17 @@ export function resolveOwnerByHome(homes: ParsedHome[]): Map<string, string> {
 	const owners = new Map<string, string>();
 	const main = homes.find(home => home.isMain);
 	if (!main) return owners;
-	owners.set(normalizeHomePath(main.path), main.label);
+	owners.set(homePathKey(main), main.label);
 	const secondmateHomes = homes.filter(home => !home.isMain);
-	const homeByPath = new Map(secondmateHomes.map(home => [normalizeHomePath(home.path), home]));
+	const homeByPath = new Map(secondmateHomes.map(home => [homePathKey(home), home]));
 	for (const parent of homes) {
 		for (const agent of parent.agents) {
-			if (agent.meta.kind !== "secondmate" || !agent.meta.home) continue;
-			if (homeByPath.has(normalizeHomePath(agent.meta.home))) owners.set(normalizeHomePath(agent.meta.home), agent.id);
+			if (agent.meta.kind !== "secondmate") continue;
+			const linkedKey = metaHomePathKey(agent.meta);
+			if (linkedKey && homeByPath.has(linkedKey)) owners.set(linkedKey, agent.id);
 		}
 	}
-	for (const home of homes) if (!owners.has(normalizeHomePath(home.path))) owners.set(normalizeHomePath(home.path), basename(home.path));
+	for (const home of homes) if (!owners.has(homePathKey(home))) owners.set(homePathKey(home), basename(home.path));
 	return owners;
 }
 
@@ -508,10 +544,9 @@ export function buildSnapshot(
 	now: string,
 	notes: string[] = [],
 ): FleetSnapshot {
-	const normPath = normalizeHomePath;
 	const secondmateHomes = homes.filter(h => !h.isMain);
 	const homeByPath = new Map<string, ParsedHome>();
-	for (const h of secondmateHomes) homeByPath.set(normPath(h.path), h);
+	for (const h of secondmateHomes) homeByPath.set(homePathKey(h), h);
 
 	const usedPanes = new Set<string>();
 	const ownerByHome = resolveOwnerByHome(homes);
@@ -528,8 +563,9 @@ export function buildSnapshot(
 		// Secondmates are kind=secondmate metas in the MAIN home, linked to their own homes.
 		for (const a of mainHome.agents) {
 			if (a.meta.kind !== "secondmate") continue;
-			const smHome = a.meta.home ? homeByPath.get(normPath(a.meta.home)) : undefined;
-			if (smHome) consumedHomes.add(normPath(smHome.path));
+			const linkedKey = metaHomePathKey(a.meta);
+			const smHome = linkedKey ? homeByPath.get(linkedKey) : undefined;
+			if (smHome) consumedHomes.add(homePathKey(smHome));
 			const herdr = smHome ? resolveHomePane(smHome, homes, herdrByPane, herdrAll) : a.meta.pane ? herdrByPane.get(a.meta.pane) : undefined;
 			if (herdr?.pane_id) usedPanes.add(herdr.pane_id);
 			mates.push({ name: a.id, role: "secondmate", herdrStatus: herdr?.agent_status, load: smHome ? smHome.backlog.inflight.length : 0 });
@@ -537,7 +573,7 @@ export function buildSnapshot(
 
 		// Registered secondmate homes with no linking meta (recovery transient).
 		for (const smHome of secondmateHomes) {
-			if (consumedHomes.has(normPath(smHome.path))) continue;
+			if (consumedHomes.has(homePathKey(smHome))) continue;
 			const own = resolveHomePane(smHome, homes, herdrByPane, herdrAll);
 			if (own?.pane_id) usedPanes.add(own.pane_id);
 			mates.push({ name: basename(smHome.path), role: "secondmate", herdrStatus: own?.agent_status, load: smHome.backlog.inflight.length });
@@ -550,11 +586,11 @@ export function buildSnapshot(
 	// TASK lens: flatten every home's backlog, tagging owner + project + live worker.
 	const tasks: TaskRow[] = [];
 	for (const home of homes) {
-		const owner = ownerByHome.get(normPath(home.path)) ?? home.label;
+		const owner = ownerByHome.get(homePathKey(home)) ?? home.label;
 		const workerById = new Map<string, ParsedAgent>();
 		for (const a of home.agents) if (a.meta.kind !== "secondmate") workerById.set(a.id, a);
-		const workerState = (worker: ParsedAgent | undefined, herdr: HerdrAgent | undefined): string | undefined => isTerminalStatus(worker?.status) ? worker?.status?.state : herdr?.agent_status;
-		const workerNote = (worker: ParsedAgent | undefined): string => isTerminalStatus(worker?.status) ? worker?.status?.text ?? "" : "";
+		const workerState = (worker: ParsedAgent | undefined, herdr: HerdrAgent | undefined): string | undefined => worker?.status && isTerminalStatus(worker.status) ? worker.status.state : herdr?.agent_status ?? worker?.status?.state;
+		const workerNote = (worker: ParsedAgent | undefined, herdr?: HerdrAgent): string => worker?.status && (isTerminalStatus(worker.status) || !herdr?.agent_status) ? worker.status.text : "";
 		for (const it of home.backlog.inflight) {
 			const w = workerById.get(it.id);
 			const herdr = w?.meta.pane ? herdrByPane.get(w.meta.pane) : undefined;
@@ -565,7 +601,7 @@ export function buildSnapshot(
 				owner,
 				project: parseProject(it.desc),
 				workerState: workerState(w, herdr),
-				note: workerNote(w),
+				note: workerNote(w, herdr),
 				topology: topologyFor(home, w?.meta, herdr),
 			});
 		}

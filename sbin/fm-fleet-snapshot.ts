@@ -6,12 +6,24 @@ const args = process.argv.slice(2);
 let includeMetrics = false;
 let statsFile: string | undefined;
 let home: string | undefined;
+function requiredValue(flag: string, index: number): string {
+	const value = args[index + 1];
+	if (!value || value.startsWith("-")) {
+		process.stderr.write(`fm-fleet-snapshot: ${flag} requires a value\n`);
+		process.exit(2);
+	}
+	return value;
+}
 for (let index = 0; index < args.length; index += 1) {
 	const arg = args[index];
 	if (arg === "--metrics") includeMetrics = true;
-	else if (arg === "--home") home = args[++index];
-	else if (arg === "--stats-file") statsFile = args[++index];
-	else if (arg === "--help" || arg === "-h") {
+	else if (arg === "--home") {
+		home = requiredValue(arg, index);
+		index += 1;
+	} else if (arg === "--stats-file") {
+		statsFile = requiredValue(arg, index);
+		index += 1;
+	} else if (arg === "--help" || arg === "-h") {
 		process.stdout.write("usage: fm-fleet-snapshot.ts [--metrics] [--home <path>] [--stats-file <path>]\n");
 		process.exit(0);
 	} else {

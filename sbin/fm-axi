@@ -103,6 +103,7 @@ async function main(argv: string[]): Promise<number> {
 	}
 
 	const command = argv[1];
+	if (command === "fleet") return validationError(`Unexpected argument: ${argv.slice(1).join(" ")}`, ["Run `fm-axi fleet --help` for available commands."]);
 	try {
 		if (command === "tasks") {
 			let state: TaskRow["state"] | undefined;
@@ -124,6 +125,7 @@ async function main(argv: string[]): Promise<number> {
 		}
 		if (command === "task" || command === "agent") {
 			if (argv[2] === "--help" || argv[2] === "-h") {
+				if (argv.length !== 3) return validationError(`Unexpected argument: ${argv.slice(3).join(" ")}`, [`Use \`fm-axi fleet ${command} --help\` without additional arguments.`]);
 				output({ command: `fleet ${command} get`, usage: `fm-axi fleet ${command} get <id>`, description: `Full ${command} record.` });
 				return 0;
 			}
@@ -143,7 +145,8 @@ async function main(argv: string[]): Promise<number> {
 			return 0;
 		}
 		if (command === "metrics") {
-			if (argv.length > 2 && (argv[2] === "--help" || argv[2] === "-h")) {
+			if (argv[2] === "--help" || argv[2] === "-h") {
+				if (argv.length !== 3) return validationError(`Unexpected argument: ${argv.slice(3).join(" ")}`, ["Use `fm-axi fleet metrics --help` without additional arguments."]);
 				output({ command: "fleet metrics", usage: "fm-axi fleet metrics", description: "Optional cost and productivity metrics." });
 				return 0;
 			}
