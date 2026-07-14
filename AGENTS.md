@@ -805,7 +805,9 @@ No section has a silent or null move: when no listed move obviously applies, the
    Silent parking with unblocked work still on the list is never a legal move.
    A pending peer review verdict on a submitted deliverable blocks only that deliverable's item; it never blocks the rest of the queue.
    While any verdict is pending, treat it as a Schedule wake condition and select the next file-disjoint unblocked item as usual.
+   Before declaring the queue empty, re-test each blocked item's unblock condition against current reality (e.g. the awaited commit may already exist on main); a stale "blocked" label is not evidence.
    (Amended 2026-07-14: observed incident - an agent parked "awaiting verdicts" with 13 unblocked queued items and zero active lanes.)
+   (Amended 2026-07-14b: observed incident - an agent idled "blocked on the correction being published" while the correction had been on main for 30 minutes.)
 5. **Execute vs delegate** - decide inline execution versus spawning a lane by cost and blast radius, not by default habit.
    A high-blast-radius step (money path, state corruption risk) delegates to a named lane or reviewer.
    A small, low-cost, low-risk step executes inline.
