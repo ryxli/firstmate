@@ -754,3 +754,32 @@ Rules for the operator view: plain language a non-reader can skim in ten seconds
 Everything below the operator view (Working / Evidence / Preserved / Reply sections, SHAs, evidence chains, exclusion rules) remains unconstrained agent detail - move precision down there, never delete it.
 The operator view is a verified deliverable: supervisors check it for presence, currency, and the line cap on their ticks and steer when it degrades, the same way artifact claims are verified.
 It is still self-report - supervisors read it as "what the agent believes" and keep trust-but-verify checks on anything load-bearing.
+
+
+## Peer bus discipline
+
+This extends the secondmate charter's fleet-peer-bus escalation rule in section 7.
+`done`, `blocked`, `needs-decision`, `failed`, and a material phase change are captain-relevant outcomes; the whiteboard records their state for the fleet.
+The fleet peer bus is not a second state channel.
+It carries only the action needed when a board update cannot itself cause the recipient to act.
+
+Send only:
+
+1. A handoff naming the artifact and the action required from the recipient.
+2. A blocking question that the recipient alone can answer.
+3. A safety interrupt requiring immediate intervention.
+
+Do not send acknowledgements, delivery receipts, routine status echoes, or FYI progress.
+The recipient's next board update is the receipt.
+Before every send, ask: **does this change what the peer does in their next step?**
+If no, put the fact on the whiteboard or drop it.
+Never resend a fact already sent or already recorded on the board.
+
+Observed anti-patterns:
+
+- Bear relayed "Bull reports `9f1909f5` landed, deployed and ARMED" to Keel and Plum without requesting an action.
+  That deployment state belonged on the whiteboard.
+- Bear sent "IDEA-2 evidence audit is complete" to Bull and Keel without an artifact handoff or requested next step.
+  The evidence status belonged on the whiteboard; a later handoff must name the artifact and exact action.
+- Bull repeated "Recovery remains HELD at ACK gate" after that hold and its next required review action were already recorded on the board.
+  The board state was sufficient until a new blocker, disposition, or safety interrupt changed the recipient's next step.
