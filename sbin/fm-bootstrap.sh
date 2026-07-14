@@ -101,13 +101,23 @@ install_cmd() {
   case "$1" in
     herdr) echo "mise install herdr  # or download from https://herdr.dev" ;;
     node|gh) echo "brew install $1  # or the platform's package manager" ;;
+    bun) echo "brew install oven-sh/bun/bun  # or https://bun.sh/docs/installation" ;;
     gh-axi|chrome-devtools-axi|lavish-axi) echo "npm install -g $1 && $1 setup hooks" ;;
     *) return 1 ;;
   esac
 }
 
+locked_dependency_sync() {
+  [ -f "$FM_ROOT/package.json" ] && [ -f "$FM_ROOT/bun.lock" ] || return 0
+  command -v bun >/dev/null 2>&1 || return 0
+  if (cd "$FM_ROOT" && bun install --frozen-lockfile >/dev/null 2>&1); then
+    return 0
+  fi
+  echo "BUN_DEPENDENCY: locked install failed in $FM_ROOT"
+}
+
 # herdr is the terminal/agent substrate and also manages secondmate home worktrees.
-TOOLS="herdr node gh gh-axi chrome-devtools-axi lavish-axi"
+TOOLS="herdr bun node gh gh-axi chrome-devtools-axi lavish-axi"
 
 herdr_server_running() {
   herdr status 2>/dev/null | grep -q 'status: running'
@@ -138,5 +148,6 @@ crew=
 [ -f "$CONFIG/crew-harness" ] && crew=$(tr -d '[:space:]' < "$CONFIG/crew-harness" || true)
 [ -n "$crew" ] && [ "$crew" != "default" ] && echo "CREW_HARNESS_OVERRIDE: $crew"
 fm_tasks_axi_compatible && echo "TASKS_AXI: available"
+locked_dependency_sync
 fleet_sync
 exit 0

@@ -28,7 +28,7 @@ make_fake_toolchain() {
   local dir=$1 fakebin tool
   fakebin="$dir/fakebin"
   mkdir -p "$fakebin"
-  for tool in node gh-axi chrome-devtools-axi lavish-axi; do
+  for tool in bun node gh-axi chrome-devtools-axi lavish-axi; do
     cat > "$fakebin/$tool" <<'SH'
 #!/usr/bin/env bash
 exit 0
