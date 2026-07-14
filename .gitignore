@@ -9,3 +9,4 @@ config/crew-harness
 config/identity
 worktrees/
 .wb_query.py
+node_modules/

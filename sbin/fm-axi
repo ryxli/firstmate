@@ -1,0 +1,120 @@
+#!/usr/bin/env bun
+// fm-axi - TOON-native agent interface for read-only firstmate primitives.
+//
+// Internal fleet programs retain JSON where other programs compose them.
+// This command is the sole agent-facing boundary and encodes every response
+// with the official @toon-format/toon package.
+
+import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { encode } from "@toon-format/toon";
+
+const scriptDir = dirname(realpathSync(fileURLToPath(import.meta.url)));
+const root = realpathSync(join(scriptDir, ".."));
+
+const fleetCommands = {
+  updated: {
+    description: "Report activation freshness, identity binding, and topology.",
+    run: () => runJson(
+      "bash",
+      [join(root, "sbin/fm-fleet-updated.sh"), "--json"],
+      { allowResultOnFailure: true },
+    ),
+  },
+  focus: {
+    description: "Rank current fleet attention items.",
+    run: () => runJson(process.execPath, [join(root, "sbin/fm-focus.mjs"), "--json", "--no-color"]),
+  },
+  kpi: {
+    description: "Report fleet productivity and outcome metrics.",
+    run: () => runJson("bash", [join(root, "sbin/fm-kpi.sh"), "--json"]),
+  },
+  lineage: {
+    description: "Report the current firstmate workspace and task lineage.",
+    run: () => runJson("bash", [join(root, "sbin/fm-lineage.sh"), "--json"]),
+  },
+};
+
+function output(value) {
+  process.stdout.write(encode(value, { keyFolding: "safe" }) + "\n");
+}
+
+function commandHelp(command = "fm-axi") {
+  return {
+    command,
+    usage: "fm-axi fleet <updated|focus|kpi|lineage>",
+    commands: Object.entries(fleetCommands).map(([name, { description }]) => ({
+      command: `fleet ${name}`,
+      description,
+    })),
+  };
+}
+
+function validationError(error, help) {
+  output({ error, code: "VALIDATION_ERROR", help: [help] });
+  return 2;
+}
+
+function operationalError(command, error) {
+  output({
+    error: `${command} failed: ${error || "no JSON result"}`,
+    code: "OPERATIONAL_ERROR",
+    help: ["Check the local fleet prerequisites, then retry the command."],
+  });
+  return 1;
+}
+
+function runJson(command, args, { allowResultOnFailure = false } = {}) {
+  const result = spawnSync(command, args, {
+    cwd: root,
+    encoding: "utf8",
+    env: process.env,
+  });
+  const text = result.stdout?.trim() || "";
+  if (result.error) return { error: result.error.message };
+  try {
+    const value = JSON.parse(text);
+    if (result.status === 0 || allowResultOnFailure) return { value };
+  } catch {
+    // Fall through to the structured operational error below.
+  }
+  return { error: result.stderr.trim() || `exit ${result.status ?? "unknown"}` };
+}
+
+function main(argv) {
+  if (!argv.length || argv[0] === "--help" || argv[0] === "-h") {
+    output(commandHelp());
+    return 0;
+  }
+  if (argv[0] !== "fleet") {
+    return validationError(`Unknown command: ${argv[0]}`, "Run `fm-axi --help` to see available commands.");
+  }
+  if (argv.length === 1 || argv[1] === "--help" || argv[1] === "-h") {
+    output(commandHelp("fm-axi fleet"));
+    return 0;
+  }
+  const name = argv[1];
+  const entry = fleetCommands[name];
+  if (!entry) {
+    return validationError(`Unknown fleet command: ${name}`, "Run `fm-axi fleet --help` to see available commands.");
+  }
+  if (argv.length > 2 && (argv[2] === "--help" || argv[2] === "-h") && argv.length === 3) {
+    output({
+      command: `fm-axi fleet ${name}`,
+      usage: `fm-axi fleet ${name}`,
+      description: entry.description,
+    });
+    return 0;
+  }
+  if (argv.length > 2) {
+    return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, `Run \`fm-axi fleet ${name} --help\` for usage.`);
+  }
+  const result = entry.run();
+  if (result.error) return operationalError(`fleet ${name}`, result.error);
+  output({ command: `fleet ${name}`, result: result.value });
+  return 0;
+}
+
+process.exit(main(process.argv.slice(2)));
