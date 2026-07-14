@@ -280,6 +280,8 @@ export interface MateRow {
 	load: number;
 }
 
+export type TaskClassification = "active" | "waiting" | "blocked" | "stale" | "queued" | "complete";
+
 /** One task in the ledger, tagged with its owner, project, and (in-flight) worker. */
 export interface TaskRow {
 	id: string;
@@ -290,6 +292,16 @@ export interface TaskRow {
 	project?: string;
 	/** Live worker status (in-flight only): the crewmate running it, for the glyph. */
 	workerState?: string;
+	/** Deterministic bridge-visible state derived from backlog/status/herdr/PR inputs. */
+	classification: TaskClassification;
+	/** The concrete signal supporting classification, rendered on the task board. */
+	evidence: string;
+	/** One concrete blocker when the task is blocked. */
+	blocker?: string;
+	/** One concrete next action when the task is blocked. */
+	nextAction?: string;
+	/** The ready queued task to pick up at a completion boundary. */
+	nextPriority?: string;
 	/** Glanceable detail: worker note (in-flight) / blocked-by or ready (queued) / merge state (done). */
 	note: string;
 	pr?: string;
@@ -323,6 +335,67 @@ function parseProject(desc: string): string | undefined {
 function blockedNote(desc: string): string {
 	const m = /blocked-by:?\s*([^\s,)]+)/i.exec(desc);
 	return m ? `blocked-by ${m[1].trim()}` : "ready";
+}
+
+function labeledValue(text: string, labelPattern: string): string | undefined {
+	const m = new RegExp(`\\b(?:${labelPattern})\\s*[:=]\\s*([^;\\n]+)`, "i").exec(text);
+	return m?.[1]?.trim() || undefined;
+}
+
+function blockerAndNext(text: string): { blocker?: string; nextAction?: string } {
+	const blocker = labeledValue(text, "blocker|blocked by") ?? /\bblocked by\s+([^;\n]+)/i.exec(text)?.[1]?.trim();
+	const nextAction = labeledValue(text, "next(?: action)?");
+	return { blocker, nextAction };
+}
+
+
+function classifyInflight(
+	it: BacklogItem,
+	worker: ParsedAgent | undefined,
+	herdr: HerdrAgent | undefined,
+	prByUrl: Map<string, PrInfo>,
+): Pick<TaskRow, "classification" | "evidence" | "blocker" | "nextAction"> {
+	if (!worker) {
+		return { classification: "stale", evidence: "missing worker metadata" };
+	}
+	if (worker.meta.pane && !herdr) {
+		return { classification: "stale", evidence: `recorded pane ${worker.meta.pane} is not live` };
+	}
+	if (herdr?.name && herdr.name !== it.id) {
+		return { classification: "stale", evidence: `pane ${worker.meta.pane ?? "?"} belongs to ${herdr.name}` };
+	}
+
+	const status = worker.status;
+	if (status?.state === "blocked" || status?.state === "failed" || status?.state === "needs-decision") {
+		const concrete = blockerAndNext(status.text);
+		return {
+			classification: "blocked",
+			evidence: concrete.blocker ? `blocked by ${concrete.blocker}` : status.text,
+			blocker: concrete.blocker,
+			nextAction: concrete.nextAction,
+		};
+	}
+
+	if (status?.state === "done") {
+		const urls = doneStatusPrUrls(status);
+		const waiting = urls.find(url => prByUrl.get(url)?.state !== "MERGED");
+		if (waiting) {
+			const pr = prByUrl.get(waiting);
+			const suffix = pr ? `${pr.state.toLowerCase()}, checks ${pr.checks}` : "PR state unknown";
+			return { classification: "waiting", evidence: `waiting on PR (${suffix})` };
+		}
+		return { classification: "waiting", evidence: status.text || "waiting at completion boundary" };
+	}
+
+	if (status?.state === "working" || herdr?.agent_status === "working") {
+		return { classification: "active", evidence: status?.text || "live worker is working" };
+	}
+
+	if (herdr?.agent_status === "idle") {
+		return { classification: "waiting", evidence: status?.text || "live worker is idle" };
+	}
+
+	return { classification: "stale", evidence: status?.text || "no live work signal" };
 }
 
 /**
@@ -391,17 +464,49 @@ export function buildSnapshot(
 		const owner = ownerByHome.get(normPath(home.path)) ?? home.label;
 		const workerById = new Map<string, ParsedAgent>();
 		for (const a of home.agents) if (a.meta.kind !== "secondmate") workerById.set(a.id, a);
+		const nextReady = home.backlog.queued.find(it => blockedNote(it.desc) === "ready");
 		for (const it of home.backlog.inflight) {
 			const w = workerById.get(it.id);
 			const herdr = w?.meta.pane ? herdrByPane.get(w.meta.pane) : undefined;
-			tasks.push({ id: it.id, state: "inflight", owner, project: parseProject(it.desc), workerState: w?.status?.state ?? herdr?.agent_status, note: w?.status?.text ?? "" });
+			const classification = classifyInflight(it, w, herdr, prByUrl);
+			tasks.push({
+				id: it.id,
+				state: "inflight",
+				owner,
+				project: parseProject(it.desc),
+				workerState: w?.status?.state ?? herdr?.agent_status,
+				note: w?.status?.text ?? "",
+				...classification,
+			});
 		}
 		for (const it of home.backlog.queued) {
-			tasks.push({ id: it.id, state: "queued", owner, project: parseProject(it.desc), note: blockedNote(it.desc) });
+			const note = blockedNote(it.desc);
+			const waitingOn = note.startsWith("blocked-by ") ? note.slice("blocked-by ".length) : "";
+			tasks.push({
+				id: it.id,
+				state: "queued",
+				owner,
+				project: parseProject(it.desc),
+				note,
+				classification: waitingOn ? "waiting" : "queued",
+				evidence: waitingOn ? `waiting on ${waitingOn}` : "ready next priority",
+			});
 		}
 		for (const it of home.backlog.done) {
 			const merged = it.resolved || (it.pr ? prByUrl.get(it.pr)?.state === "MERGED" : false);
-			tasks.push({ id: it.id, state: "done", owner, project: parseProject(it.desc), note: merged ? "merged" : it.pr ? "open PR" : "done", pr: it.pr, merged });
+			const note = merged ? "merged" : it.pr ? "open PR" : "done";
+			tasks.push({
+				id: it.id,
+				state: "done",
+				owner,
+				project: parseProject(it.desc),
+				note,
+				pr: it.pr,
+				merged,
+				classification: "complete",
+				evidence: merged ? "completed and merged" : it.pr ? "completion waiting on PR" : "completed",
+				nextPriority: merged || !it.pr ? nextReady?.id : undefined,
+			});
 		}
 	}
 
@@ -521,11 +626,26 @@ function emitRoster(out: string[], snap: FleetSnapshot): void {
 }
 
 function emitTaskRow(out: string[], t: TaskRow): void {
-	const g = t.state === "inflight" ? statusGlyph(t.workerState) : t.state === "done" ? GLYPH.done : GLYPH.none;
+	const cls = t.classification;
+	const g = cls === "blocked" || cls === "stale" ? GLYPH.blocked
+		: cls === "active" ? GLYPH.working
+			: cls === "waiting" ? GLYPH.idle
+				: cls === "complete" ? GLYPH.done
+					: t.state === "done" ? GLYPH.done : GLYPH.none;
+	const label = cls === "active" ? "ACTIVE"
+		: cls === "waiting" ? "WAIT"
+			: cls === "blocked" ? "BLOCKED"
+				: cls === "stale" ? "STALE"
+					: cls === "complete" ? "DONE" : "NEXT";
 	const project = t.project && t.project !== t.owner ? truncate(t.project, 12) : "";
 	const head = `${gutter(g)}${truncate(t.id, 20).padEnd(20)} ${project.padEnd(12)} ${truncate(t.owner, 10).padEnd(10)} `;
+	const detail = [`${label}: ${t.evidence || t.note}`];
+	if (t.nextAction) detail.push(`next: ${t.nextAction}`);
+	if (t.nextPriority) detail.push(`next priority: ${t.nextPriority}`);
+	const detailText = detail.join("; ");
 	const avail = BOARD_WIDTH - [...head].length;
-	out.push(head + (t.note && avail >= 8 ? truncate(t.note, avail) : ""));
+	out.push(head + (avail >= 8 ? truncate(detailText, avail) : ""));
+	if ([...detailText].length > avail) out.push(`${gutter(GLYPH.none)}${truncate(detailText, BOARD_WIDTH - 4)}`);
 }
 
 /** TASKS: every task, grouped by state (the volume lens, scales past the roster). */
