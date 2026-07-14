@@ -35,6 +35,7 @@ negative=(
   'still on an unmerged branch'
   'readying branch for a later push'
   'progress update before done: still running checks'
+  'working: PR merged in another branch'
 )
 
 for line in "${positive[@]}"; do assert_shell captain "$line"; done

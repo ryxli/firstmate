@@ -150,6 +150,8 @@ the remaining text:
         checks green
         ready in branch
         merged
+  EXCEPT ordinary "working" reports, which are internal even when they mention
+  one of the phrases above.
 Anything else is NOT relevant. A match inside a larger word does NOT count: "already"
 (contains "ready"), "unmerged" (contains "merged"), and "readying" are NOT relevant.
 `;
@@ -177,6 +179,8 @@ _TS = re.compile(r"^\\d{4}-\\d\\d-\\d\\dT[\\d:]+\\s+")
 
 def is_captain_relevant(line):
     core = _TS.sub("", line)
+    if re.match(r"^working(?:\\s|:)", core, re.IGNORECASE):
+        return False
     if core.startswith(_PREFIXES):
         return True
     for ph in _PHRASES:
@@ -200,6 +204,7 @@ const CLS_HELDOUT: [string, boolean][] = [
 	["unmerged changes still pending", false],
 	["readying the release now", false],
 	["working: still churning", false],
+	["working: PR merged in another branch", false],
 	["note: almost done here", false],
 	["2026-06-29T08:00:00 working: churn", false],
 ];
