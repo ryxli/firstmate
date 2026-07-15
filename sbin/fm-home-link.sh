@@ -61,14 +61,6 @@ link_points_to() {
   [ "$actual" = "$expected_real" ]
 }
 
-claude_link_ok() {
-  local link=$1
-  [ -L "$link" ] || return 1
-  link_points_to "$link" "$HOME_PATH/AGENTS.md" && return 0
-  link_points_to "$link" "$CODE_ROOT/AGENTS.md" && return 0
-  link_points_to "$link" "$CODE_ROOT/CLAUDE.md" && return 0
-  return 1
-}
 
 empty_regular_file() {
   [ -f "$1" ] && [ ! -L "$1" ] && [ ! -s "$1" ]
@@ -104,12 +96,28 @@ set_block() {
   STATUS="blocked:$1"
 }
 status_line() { printf '%s=%s\n' "$1" "$STATUS"; }
+check_claude_link() {
+  local link=$HOME_PATH/CLAUDE.md
+  if [ ! -e "$link" ] && [ ! -L "$link" ]; then
+    STATUS=ok
+    return 0
+  fi
+  if [ -L "$link" ]; then
+    if [ "$MODE" = check ]; then
+      set_block obsolete-link
+      return 0
+    fi
+    rm -f "$link" || { set_block repair-failed; return 0; }
+    STATUS=repaired
+    return 0
+  fi
+  STATUS=ok
+}
+
 
 repair_link() {
   local name=$1 target=$2 link=$HOME_PATH/$1 reason
-  if [ "$name" = CLAUDE.md ]; then
-    if claude_link_ok "$link"; then STATUS=ok; return 0; fi
-  elif link_points_to "$link" "$target"; then
+  if link_points_to "$link" "$target"; then
     STATUS=ok
     return 0
   fi
@@ -133,12 +141,8 @@ repair_link() {
     return 0
   fi
 
-  if [ "$name" = CLAUDE.md ]; then
-    ln -s AGENTS.md "$link" || { set_block repair-failed; return 0; }
-  else
-    [ -e "$target" ] || { set_block missing-target; return 0; }
-    ln -s "$target" "$link" || { set_block repair-failed; return 0; }
-  fi
+  [ -e "$target" ] || { set_block missing-target; return 0; }
+  ln -s "$target" "$link" || { set_block repair-failed; return 0; }
   STATUS=repaired
 }
 repair_extension_link() {
@@ -244,7 +248,7 @@ for op in data state config projects; do
 done
 
 repair_link AGENTS.md "$CODE_ROOT/AGENTS.md"; status_line link.AGENTS.md
-repair_link CLAUDE.md "$CODE_ROOT/CLAUDE.md"; status_line link.CLAUDE.md
+check_claude_link; status_line link.CLAUDE.md
 repair_link sbin "$CODE_ROOT/sbin"; status_line link.sbin
 if [ "$CURRENT_OMP" -eq 1 ]; then
   check_current_omp

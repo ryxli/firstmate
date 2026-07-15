@@ -413,9 +413,6 @@ validate_firstmate_home_for_spawn() {
   if [ ! -d "$abs_home/sbin" ] && [ ! -L "$abs_home/sbin" ]; then
     echo "error: $home is not a firstmate home (missing sbin/)" >&2; return 1
   fi
-  if home_has_shared_code_links "$abs_home" && [ ! -e "$abs_home/CLAUDE.md" ]; then
-    echo "error: $home is not a firstmate home (missing CLAUDE.md)" >&2; return 1
-  fi
   printf '%s\n' "$abs_home"
 }
 

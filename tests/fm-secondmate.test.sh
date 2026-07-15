@@ -1067,7 +1067,8 @@ test_secondmate_spawn_repairs_shared_links() {
     "$ROOT/sbin/fm-spawn.sh" link-sub "$subhome" codex --secondmate >/dev/null \
     || fail "secondmate spawn did not repair a symlink-backed home"
 
-  [ -L "$subhome/CLAUDE.md" ] || fail "link repair did not restore CLAUDE.md link"
+  { [ ! -e "$subhome/CLAUDE.md" ] && [ ! -L "$subhome/CLAUDE.md" ]; } \
+    || fail "link repair recreated CLAUDE.md"
   [ -L "$subhome/.tasks.toml" ] || fail "link repair did not restore .tasks.toml link"
   grep -F -- '--workspace w-link' "$log" >/dev/null || fail "repaired home did not launch"
   pass "secondmate spawn repairs shared code links"

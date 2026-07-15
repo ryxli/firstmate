@@ -232,6 +232,63 @@ test_current_layout_home_link_check_passes() {
   pass "current per-extension .omp layout passes home-link check"
 }
 
+# Contract: persistent homes no longer require a CLAUDE.md compatibility link.
+test_home_link_allows_missing_claude_link() {
+  require_slice_scripts
+  local code="$TMP_ROOT/missing-claude-code" home="$TMP_ROOT/missing-claude-home" out
+  make_code_root "$code"
+  make_link_home "$code" "$home" missingclaude
+  [ ! -e "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] \
+    || fail "home-link repair created CLAUDE.md"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check 2>&1) \
+    || fail "home-link check rejected a missing CLAUDE.md: $out"
+  assert_contains "$out" "link.CLAUDE.md=ok" "missing CLAUDE.md was not healthy"
+  pass "home-link check accepts a missing CLAUDE.md"
+}
+
+# Contract: repair removes a legacy CLAUDE.md symlink but never recreates it.
+test_home_link_removes_legacy_claude_symlink() {
+  require_slice_scripts
+  local code="$TMP_ROOT/legacy-claude-code" home="$TMP_ROOT/legacy-claude-home" out
+  make_code_root "$code"
+  make_link_home "$code" "$home" legacyclaude
+  ln -s "$code/CLAUDE.md" "$home/CLAUDE.md"
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null 2>&1; then
+    fail "home-link check accepted a legacy CLAUDE.md symlink"
+  fi
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair 2>&1) \
+    || fail "home-link repair failed to remove legacy CLAUDE.md symlink: $out"
+  [ ! -e "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] \
+    || fail "home-link repair left or recreated CLAUDE.md symlink"
+  pass "home-link repair removes a legacy CLAUDE.md symlink"
+}
+
+# Contract: non-symlink CLAUDE.md objects are user-owned and survive repair.
+test_home_link_preserves_non_symlink_claude_objects() {
+  require_slice_scripts
+  local code="$TMP_ROOT/object-claude-code" file_home="$TMP_ROOT/object-claude-file-home"
+  local dir_home="$TMP_ROOT/object-claude-dir-home"
+  make_code_root "$code"
+
+  make_link_home "$code" "$file_home" claudeFile
+  printf 'user-owned instructions\n' > "$file_home/CLAUDE.md"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$file_home" --repair >/dev/null \
+    || fail "home-link repair rejected a user-owned CLAUDE.md file"
+  [ -f "$file_home/CLAUDE.md" ] || fail "home-link repair removed a user-owned CLAUDE.md file"
+  [ "$(cat "$file_home/CLAUDE.md")" = 'user-owned instructions' ] \
+    || fail "home-link repair changed a user-owned CLAUDE.md file"
+
+  make_link_home "$code" "$dir_home" claudeDir
+  mkdir "$dir_home/CLAUDE.md"
+  printf 'keep\n' > "$dir_home/CLAUDE.md/owned"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$dir_home" --repair >/dev/null \
+    || fail "home-link repair rejected a user-owned CLAUDE.md directory"
+  [ -d "$dir_home/CLAUDE.md" ] || fail "home-link repair removed a user-owned CLAUDE.md directory"
+  [ "$(cat "$dir_home/CLAUDE.md/owned")" = keep ] \
+    || fail "home-link repair changed a user-owned CLAUDE.md directory"
+  pass "home-link repair preserves non-symlink CLAUDE.md objects"
+}
+
 test_current_layout_broken_extension_link_fails() {
   require_slice_scripts
   local code="$TMP_ROOT/current-broken-code" home="$TMP_ROOT/current-broken-home"
@@ -539,6 +596,10 @@ test_migration_respawn_blocks_when_default_resume_session_is_missing() {
   [ "$(git -C "$old_home" rev-parse HEAD)" = "$before" ] || fail "missing-session migration moved the old home HEAD"
   pass "fm-mate-home-migrate --respawn blocks before stopping live work when no omp session can be resumed"
 }
+
+test_home_link_allows_missing_claude_link
+test_home_link_removes_legacy_claude_symlink
+test_home_link_preserves_non_symlink_claude_objects
 
 test_current_layout_home_link_check_passes
 test_current_layout_broken_extension_link_fails
