@@ -226,6 +226,8 @@ test_current_layout_home_link_check_passes() {
   local code="$TMP_ROOT/current-pass-code" home="$TMP_ROOT/current-pass-home" out
   make_code_root "$code"
   make_current_home "$code" "$home" currentpass
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null \
+    || fail "current-layout repair failed before check"
   out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check 2>&1) \
     || fail "current-layout check failed: $out"
   assert_contains "$out" "result=ok" "current-layout check did not report result=ok"
@@ -317,6 +319,44 @@ test_current_layout_repairs_extension_link() {
     || fail "current-layout check failed after repair"
   pass "current per-extension broken link is repaired"
 }
+# Contract: a freshly repaired current-layout home discovers the canonical
+# shared skills through .agents without replacing its real, home-owned .omp.
+test_current_layout_repair_discovers_shared_skills() {
+  require_slice_scripts
+  local code="$TMP_ROOT/current-skills-code" home="$TMP_ROOT/current-skills-home" out
+  local skill skill_file
+  make_code_root "$code"
+  code=$(canonical "$code")
+  for skill in firstmate-harness-adapters firstmate-task-lifecycle; do
+    mkdir -p "$code/.agents/skills/$skill"
+    printf 'name: %s\n' "$skill" > "$code/.agents/skills/$skill/SKILL.md"
+  done
+  make_current_home "$code" "$home" currentskills
+
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check 2>&1); then
+    fail "current-layout check accepted a home missing the shared .agents link"
+  fi
+  assert_contains "$out" "result=blocked" \
+    "current-layout check did not report the shared .agents link failure"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null \
+    || fail "current-layout repair failed to link shared .agents"
+
+  [ -d "$home/.omp" ] && [ ! -L "$home/.omp" ] \
+    || fail "current-layout repair replaced the home-owned .omp directory"
+  assert_link_points "$home/.omp/extensions/test-ext.ts" "$code/.omp/extensions/test-ext.ts" \
+    "current-layout extension link after skill repair"
+  assert_link_points "$home/.agents" "$code/.agents" "shared .agents link"
+  for skill in firstmate-harness-adapters firstmate-task-lifecycle; do
+    skill_file="$home/.agents/skills/$skill/SKILL.md"
+    [ -f "$skill_file" ] || fail "shared skill is not discoverable from repaired home: $skill"
+    assert_contains "$(cat "$skill_file")" "name: $skill" \
+      "repaired home discovered the wrong content for $skill"
+  done
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null \
+    || fail "current-layout check failed after shared-skill repair"
+  pass "current-layout repair links .agents and discovers shared skills"
+}
+
 
 test_legacy_whole_omp_link_still_passes() {
   require_slice_scripts
@@ -604,6 +644,7 @@ test_home_link_preserves_non_symlink_claude_objects
 test_current_layout_home_link_check_passes
 test_current_layout_broken_extension_link_fails
 test_current_layout_repairs_extension_link
+test_current_layout_repair_discovers_shared_skills
 test_legacy_whole_omp_link_still_passes
 test_home_link_repairs_shared_code_without_moving_operational_dirs
 test_home_link_removes_broken_legacy_bin_without_clobbering_user_file
