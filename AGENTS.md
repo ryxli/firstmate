@@ -96,6 +96,14 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
   An observation or theory is a HYPOTHESIS until verified; label it as such and cite the evidence before you call it "the reason."
   If prior knowledge exists but you could not find it, improving that retrieval is part of the work, not a reason to re-derive from scratch.
   Supervisors independently enforce this on a subordinate's blocker/reason claims: an unverified "the cause is X" is sent back for evidence, not acted on.
+- **No fault clear without verified cause fix.**
+  Failure: faults, blockers, halts, alarms, and RED verdicts were cleared after a green restart or quiet symptom while the causal chain was still unproven.
+  Root cause: symptom absence was treated as cause evidence.
+  Prevention: keep the fault open until the causal chain is verified and the cause is fixed, or explicitly recorded as accepted external behavior with evidence that local recurrence is impossible or safely absorbed.
+- **Accepted scope is not unwound by inference.**
+  Failure: accepted work was silently narrowed after a later note was inferred as a new prohibition.
+  Root cause: ambiguous safety language was treated as stronger than the already accepted contract.
+  Prevention: preserve accepted scope unless the captain gives an explicit prohibition or a hard rule forbids it; a safety concern changes the path, and a genuine conflict gets one concise question instead of a silent scope drop.
 - **Work in conclusive slices; at each milestone expand paths and take the best bounded one.**
   Work continuously through slices that each narrow the search space to a conclusion.
   At a critical milestone, enumerate the evidence-backed next paths and immediately take the best bounded one - milestone completion is never a reason to stop or block on the captain.
@@ -336,6 +344,10 @@ Reconcile reality with your records before doing anything else:
     A restart must not leave an open artifact unattended.
 
 A firstmate restart must be a non-event.
+Recovery and restore fail closed.
+Failure: restore or restart was treated as proof that live state was safe.
+Root cause: absence of a visible error was used as evidence that invariants were restored.
+Prevention: after restart or restore, keep any lane, board safety claim, or state-changing action blocked until the authoritative source for that invariant has been read and named; unknowns remain off.
 All truth lives in herdr (pane status), state files, data/backlog.md, data/secondmates.md, persistent secondmate homes, and worktrees; your conversation memory is a cache.
 
 ## 6. Project management
@@ -533,6 +545,21 @@ Use chat for yes/no decisions; use lavish-axi when there are multiple findings o
 Freeze the contract into a semantic matrix before the next implementation attempt: each row states the input or event, expected behavior, acceptable exceptions, and observable proof.
 The finished report must include the approved matrix, a representative live fleet scenario, and attribution for whether each observed session was unchanged since the miss or freshly restarted.
 If live evidence contradicts the matrix, roll the change back or keep the task open; contradictory live evidence beats a passing isolated check.
+
+**Boundary, verdict, and review contracts.**
+Failure: deploy and restore lanes interpreted triggers and blessed scope from prose.
+Root cause: lane boundaries were not machine-checkable.
+Prevention: before parallel lane work, publish an edge table with producer, consumer, artifact path, allowed trigger, prohibited interpretation, and machine check for every handoff.
+Deploy lanes consume only named artifacts and commands; they never decide whether a trigger, verdict, or safety condition is satisfied.
+Failure: consumers overrode the producer's pass or fail.
+Root cause: verdict authority was not attached to the evidence producer.
+Prevention: each edge-table row names one verdict producer; other lanes report execution evidence only.
+Failure: review cycles burned on defects already published in prior rejections.
+Root cause: rejection criteria were treated as prose instead of a red-first matrix.
+Prevention: reviewers publish RED rows first with row id, evidence, required fix, and proof command; authors resubmit only with row-by-row PASS evidence against that matrix.
+Failure: edge cases drifted between lanes.
+Root cause: boundaries were described as intent rather than checked interfaces.
+Prevention: keep the edge table current until the handoff is green; any new edge discovered during review becomes a table row before more code moves.
 
 ### PR ready
 
@@ -767,6 +794,10 @@ Everything below the operator view (Working / Evidence / Preserved / Reply secti
 The operator view is a verified deliverable: supervisors check it for presence, currency, and the line cap on their ticks and steer when it degrades, the same way artifact claims are verified.
 It is still self-report - supervisors read it as "what the agent believes" and keep trust-but-verify checks on anything load-bearing.
 
+Failure: board safety claims outlived their evidence.
+Root cause: the board recorded a conclusion without the contemporaneous command that produced it.
+Prevention: every board claim that says reconcile clean, no divergence, armed safe, restored, or equivalent must name a timestamped evidence line below the operator view with the exact read-only command that produced it, for example `curl -fsS "$STATUS_URL" | jq '{reconcile_seq,divergences,halt_causes}'`.
+
 
 ## Peer bus discipline
 
@@ -851,12 +882,18 @@ No section has a silent or null move: when no listed move obviously applies, the
    "No new state" is itself state: when nothing changed, update a single "Last turn" line (timestamp, wake cause, one-word outcome, what you are waiting on) rather than skipping the write.
    `whiteboard_checkpoint` never substitutes for the write; write the board first, checkpoint after.
    The checkable invariant is that the board mtime advances on every turn; a pane turn that ends without a board write is a section-6 incident by definition.
+   Failure: board history went stale or backward when agents rewrote settled lines.
+   Root cause: board writes were treated as a scratchpad instead of an operator ledger.
+   Prevention: board writes are monotonic: append or supersede with timestamped current state, preserve prior accepted decisions and evidence references, and never delete a missed or failed state without a superseding line.
    (Amended 2026-07-14d: both crew self-diagnosed identical mechanics - writes were manual rather than exit-hooked, and "non-event" turns silently skipped them, leaving boards stale exactly while delegated lanes ran.)
    See "Whiteboard operator-view contract" and "Peer bus discipline" above for the artifact and handoff shape this must take.
 7. **Schedule** - name what wakes you next: a tick, a specific message, or an unblock condition.
    Ending a turn with nothing named to wake it is not a legal move.
    Parking on external blocks is bounded, never open-ended: a parked turn names a self-recheck interval of at most 10 minutes, and each recheck re-tests every blocked item's unblock condition against current reality.
    If idleness persists past one recheck while any queue anywhere is non-empty (own queue, the captain's stated priorities, docs/PLAN.md backlog), the next turn MUST either pull new work from it or write an explicit escalating work request addressed to the captain on the board.
+   Failure: deadlines were missed silently.
+   Root cause: liveness deadlines were private promises instead of operator-visible contracts.
+   Prevention: when a named lane or self-recheck deadline is missed, the next board write says `missed <deadline>: <cause>; next <action/time>` before any further waiting.
    Waiting more than ~10 minutes with nothing in flight and no work request on the board is a section-7 incident.
    (Amended 2026-07-14e: operator observation - "legitimately blocked" idle had no re-check, no refill, and no upper bound; an agent could park for hours beside a non-empty backlog.)
 
@@ -864,5 +901,37 @@ No section has a silent or null move: when no listed move obviously applies, the
 
 Every observed suboptimal turn is attributed to exactly one of the seven sections above.
 The fix is amending that section's rule in this file, never a one-off steer to the agent.
+Failure: container or runtime incidents were attributed from symptoms.
+Root cause: process-source attribution was skipped.
+Prevention: incident forensics start by naming the emitting source and time window; for container incidents, capture Docker events with the exact read-only command in the artifact, for example `docker events --since <iso> --until <iso> --filter container=<name>`, before blaming app code.
 Incidents-per-section per day trending down is the convergence metric.
 The supervisor's monitor firing rate measures convergence; it is not itself the correction mechanism.
+
+### Retrospective safeguards - 2026-07-15
+
+- **Stale-verdict replay** - Failure: a previously rejected pacing change was nearly emitted through a new fan-out after every named cure condition had landed.
+  Root cause: the delivery path treated a verdict as immutable rather than treating its cure conditions as part of that verdict's validity.
+  Rule: every verdict delivery MUST run a cure-condition guard against authoritative current state.
+  When every named cure condition holds, suppress the old event, return the item to an independent fresh review, and deliver only that review's event.
+- **Terminal-event delay** - Failure: a boundary verdict sat unstarted after its terminal callback and all inputs had already arrived.
+  Root cause: terminal events were treated as optional notifications and manually rechecked instead of consumed as work.
+  Rule: a terminal event is a same-turn obligation: read its named artifact, take its lifecycle action, and write the resulting board state before any unrelated inspection.
+  Check: a terminal report with a present artifact must produce a named disposition or explicit escalation in that same turn.
+- **Unnecessarily unpublished evidence** - Failure: a re-arm gate waited on an evidence packet that already existed at a stable readable path.
+  Root cause: "not delivered" was mistaken for "not observable."
+  Rule: before recording an evidence blocker, enumerate and try every read-only authoritative path named by state, status, reports, session artifacts, source, and peer handoffs.
+  Check: the blocker record names each attempted path and its observed result; otherwise it is not a legal blocker.
+- **Large-evidence context jam** - Failure: a review accumulated bulk evidence in the conversation until recovery required image-based compaction.
+  Root cause: raw output was retained in turns instead of stable artifacts with bounded retrieval.
+  Rule: mirror large command output, reports, matrices, and browser captures to named artifacts at production time; consume them through bounded range reads and cite paths plus ranges in communications.
+  Check: if a review needs bulk pasted output or a context recovery, stop, persist the artifact, and resume from that artifact rather than carrying the bulk forward.
+- **Repeated review criteria** - Failure: correction rounds repeated defects already identified in prior review packets.
+  Root cause: the first rejection did not expose a frozen, machine-checkable acceptance matrix that the author had to self-certify before resubmission.
+  Rule: every first rejection publishes criterion IDs, required proof, and named cures in a machine-checkable matrix.
+  Check: every correction handoff attaches a row-by-row self-check against that exact matrix; a missing self-check is rejected before review.
+
+### Retrospective practices to preserve - 2026-07-15
+
+- Keep rejecting only on concrete, evidenced defects. This session's rejections each found a real contract or UX failure rather than inventing a gate.
+- Keep rejection reports narrow and procedural: name the failed criterion, the evidence, and the exact cure without expanding scope.
+- Keep nonconforming verdict deliveries non-admitting. Producer, event, artifact, SHA, and consumer provenance are part of a verdict contract, not optional metadata.
