@@ -824,6 +824,10 @@ No section has a silent or null move: when no listed move obviously applies, the
    See "Whiteboard operator-view contract" and "Peer bus discipline" above for the artifact and handoff shape this must take.
 7. **Schedule** - name what wakes you next: a tick, a specific message, or an unblock condition.
    Ending a turn with nothing named to wake it is not a legal move.
+   Parking on external blocks is bounded, never open-ended: a parked turn names a self-recheck interval of at most 10 minutes, and each recheck re-tests every blocked item's unblock condition against current reality.
+   If idleness persists past one recheck while any queue anywhere is non-empty (own queue, the captain's stated priorities, docs/PLAN.md backlog), the next turn MUST either pull new work from it or write an explicit escalating work request addressed to the captain on the board.
+   Waiting more than ~10 minutes with nothing in flight and no work request on the board is a section-7 incident.
+   (Amended 2026-07-14e: operator observation - "legitimately blocked" idle had no re-check, no refill, and no upper bound; an agent could park for hours beside a non-empty backlog.)
 
 ### Incident-attribution protocol
 
