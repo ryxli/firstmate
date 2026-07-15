@@ -814,6 +814,8 @@ No section has a silent or null move: when no listed move obviously applies, the
    Delegation carries no callback guarantee: a crewmate lane can die or park silently, so every delegated lane gets a named deadline at spawn time.
    Each bounded self-recheck (section 7) must verify delegated-lane LIVENESS (evidence of progress: output growth, artifact delta, lane status), not just unblock conditions.
    A lane silent past its deadline is not "still working": restart it, reclaim the work inline, or report the stall on the board - waiting longer is not a legal move.
+   Deferring a spawn to "next turn" is illegal when nothing is named to cause that turn: spawn accepted-handoff lanes in the SAME turn as the acceptance, or name the exact wake that will perform the spawn.
+   (Amended 2026-07-14g: observed incident - two reviews queued "for next turn" sat unspawned 20+ minutes because no wake was scheduled to produce that turn.)
    (Amended 2026-07-14f: operator-observed deadlock chain - supervisor waited on an agent that waited on a crewmate with no guaranteed callback; every layer looked "busy" while nothing moved.)
 6. **Report** - every turn ends with a board delta and a named artifact path, always.
    A claim with no named artifact is this section's failure mode.
