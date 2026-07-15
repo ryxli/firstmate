@@ -73,6 +73,8 @@
  *   - state/<task>.meta: key=value lines; pane=, kind=, pr= consumed
  *     (last pr= wins, matching bash `tail -1`).
  *   - state/<task>.status: status lines; the last non-empty line is the signal.
+ *   - dependency-bearing meta records producer, named consumers, artifact path/SHA,
+ *     and wake action; completed artifacts wake those consumers directly.
  *   - state/<task>.check.sh: per-task poll; non-empty stdout == a wake.
  *   - state/.afk: when present, batch relevant events over a short window and
  *     inject ONE combined digest.
@@ -104,6 +106,8 @@ import { capabilityForHome, readCapabilityRegistry, readSourceRevision } from ".
 import { sourceRootForHome } from "./bridge/collect";
 import { connect, type Socket } from "node:net";
 
+import { dependencyDeliveries, parseDependencyEdge, prioritizeDependencyEdges, validateBlockedReport, type DependencyEdge } from "./dependency-handoff";
+
 // ============================== PURE SEAM ==============================
 // No I/O, no omp/herdr imports. Bun-importable on its own. Mirrors the shared
 // contract in local://supervisor-redesign.md and benchmarks/{types,relevance}.ts.
@@ -121,6 +125,7 @@ export type FleetEvent = {
 	herdr_from?: HerdrStatus; // kind=herdr
 	herdr_to?: HerdrStatus;
 	check_out?: string; // kind=check: stdout of a *.check.sh (empty = no wake)
+	dependency?: DependencyEdge;
 	relevant: boolean; // GROUND TRUTH: should this wake the supervisor?
 };
 
@@ -369,6 +374,7 @@ interface Crewmate {
 	worker?: string;
 	harness?: string;
 	agent_identity?: string;
+	dependency?: DependencyEdge;
 }
 
 interface MetaFields {
@@ -378,6 +384,7 @@ interface MetaFields {
 	worker?: string;
 	harness?: string;
 	agent_identity?: string;
+	dependency?: DependencyEdge;
 }
 
 export interface ActivationManifestEntry {
@@ -738,6 +745,7 @@ async function parseMeta(path: string): Promise<MetaFields> {
 	const meta: MetaFields = { kind: "ship" };
 	try {
 		const txt = await readFile(path, "utf8");
+		meta.dependency = parseDependencyEdge(txt);
 		for (const line of txt.split("\n")) {
 			const eq = line.indexOf("=");
 			if (eq < 0) continue;
@@ -751,7 +759,7 @@ async function parseMeta(path: string): Promise<MetaFields> {
 					if (value === "ship" || value === "scout" || value === "secondmate") meta.kind = value;
 					break;
 				case "pr":
-					if (value) meta.pr = value; // last pr= wins (bash tail -1)
+					if (value) meta.pr = value;
 					break;
 				case "worker":
 					meta.worker = value;
@@ -762,7 +770,6 @@ async function parseMeta(path: string): Promise<MetaFields> {
 				case "agent_identity":
 					meta.agent_identity = value;
 					break;
-				// unknown keys ignored
 			}
 		}
 	} catch {
@@ -1211,20 +1218,24 @@ async function onStatusFileChange(sup: Supervisor, filename: string): Promise<vo
 
 	const crew = findCrewByTask(sup, task);
 	const pane = crew?.pane ?? "?";
-
 	if (captainRelevantStatusLine(last)) {
-		clearStaleTimer(sup, pane); // a real status supersedes the stale backstop
+		if (!validateBlockedReport(last).valid) {
+			await appendInternalLog(sup, task, `rejected malformed blocked report: ${last}`);
+			return;
+		}
+		clearStaleTimer(sup, pane);
 		enqueueEvent(sup, {
 			t: Date.now(),
 			kind: "status",
 			pane,
 			task,
 			...(crew?.worker ? { worker: crew.worker } : {}),
+			...(crew?.dependency ? { dependency: crew.dependency } : {}),
 			status_line: last,
 			relevant: true,
 		});
 	} else {
-		await appendInternalLog(sup, task, last); // non-relevant: log, no wake
+		await appendInternalLog(sup, task, last);
 	}
 }
 
@@ -1348,30 +1359,57 @@ function isAfkActive(sup: Supervisor): boolean {
 
 async function flush(sup: Supervisor): Promise<void> {
 	if (sup.abort.signal.aborted) return;
-	// A merge check may sit in the grace queue while teardown removes its meta.
-	// Revalidate before classification so the queued event cannot wake afterward.
 	const events = sup.pendingEvents.splice(0).filter(
 		(e) => e.kind !== "check" || existsSync(join(sup.stateDir, `${e.task}.meta`)),
 	);
 	const stale = sup.pendingStale.splice(0);
 	if (events.length === 0 && stale.length === 0) return;
-
 	const afk = isAfkActive(sup);
 	const { digests } = classifyAndDigest(events, { afk });
 	const checkTasks = [...new Set(events.filter((e) => e.kind === "check").map((e) => e.task))];
 	const requiredMetaTasksFor = (content: string): string[] =>
 		checkTasks.filter((task) => content.includes(`] ${task} `) || content.includes(`- ${task} `));
 	const all = [...digests, ...stale];
-	if (all.length === 0) return;
+	if (all.length > 0) {
+		if (afk) {
+			const content = all.length === 1 ? (all[0] ?? "") : all.join("\n");
+			inject(sup, content, digests.length > 0, requiredMetaTasksFor(content), true);
+		} else {
+			for (const digest of digests) inject(sup, digest, true, requiredMetaTasksFor(digest));
+			for (const staleDigest of stale) inject(sup, staleDigest, false);
+		}
+	}
+	await deliverDependencyWakes(sup, prioritizeDependencyEdges(
+		events.flatMap((event) => event.dependency ? [event.dependency] : []),
+	), events);
+}
 
-	if (afk) {
-		// classifyAndDigest already combined events. A stale nudge is intentionally
-		// not an OS notification, even when it is folded into an AFK batch.
-		const content = all.length === 1 ? (all[0] ?? "") : all.join("\n");
-		inject(sup, content, digests.length > 0, requiredMetaTasksFor(content), true);
-	} else {
-		for (const digest of digests) inject(sup, digest, true, requiredMetaTasksFor(digest));
-		for (const staleDigest of stale) inject(sup, staleDigest, false);
+async function deliverDependencyWakes(sup: Supervisor, edges: readonly DependencyEdge[], events: readonly FleetEvent[]): Promise<void> {
+	const seen = new Set<string>();
+	for (const edge of edges) {
+		const terminal = events.some((event) => event.task === edge.producer && event.kind === "status" && /\b(done|merged|ready in branch|pr ready|checks green):?/i.test(event.status_line ?? ""));
+		if (!terminal || seen.has(edge.producer)) continue;
+		seen.add(edge.producer);
+		let matches = true;
+		try {
+			const bytes = await readFile(edge.artifactPath);
+			if (edge.artifactSha) matches = createHash("sha256").update(bytes).digest("hex") === edge.artifactSha;
+		} catch {
+			matches = false;
+		}
+		for (const delivery of dependencyDeliveries(edge, matches, matches)) {
+			if (delivery.target !== "consumer" || !delivery.consumer) continue;
+			const message = `dependency ${edge.producer} completed; artifact ${edge.artifactPath} exists${edge.artifactSha ? ` sha=${edge.artifactSha}` : ""}; action: ${delivery.action}`;
+			try {
+				await sup.pi.exec("bash", [join(sup.ctx.cwd, "sbin/fm-send.sh"), `fm-${delivery.consumer}`, message], {
+					timeout: sup.tunables.busyReadTimeoutMs,
+					signal: sup.abort.signal,
+					cwd: sup.ctx.cwd,
+				});
+			} catch (err) {
+				logWarn(sup, `fm-supervisor: dependency wake failed for ${delivery.consumer}: ${String(err)}`);
+			}
+		}
 	}
 }
 
