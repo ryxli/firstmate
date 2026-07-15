@@ -1,6 +1,6 @@
 ---
 name: updatefirstmate
-description: Synchronize the firstmate fleet and explicitly requested personal infrastructure repositories through an observed-state, fast-forward-only workflow. Use when the captain asks to update, pull, rebase, or sync firstmate, dotfiles, oh-my-pi, lavish, linear-axi, or related personal tooling.
+description: Synchronize the firstmate fleet and optional captain-configured local infrastructure through an observed-state, fast-forward-only workflow. Use when the captain asks to update, pull, rebase, or sync firstmate or configured local tooling.
 user-invocable: true
 ---
 
@@ -10,20 +10,33 @@ Use this skill as a deterministic synchronization procedure, not as a prose-only
 Never decide that a repository is current from a status captured before fetching its remote.
 Never batch independent repositories into one opaque command.
 
-## Sync set
+## Firstmate fleet
 
-When the captain asks to sync the personal infrastructure set, inspect these known checkouts one at a time:
+Always run the generic firstmate fleet update before reading optional local targets:
 
-```text
-/Users/ryan/code/firstmate
-/Users/ryan/.local/share/chezmoi
-/Users/ryan/code/harness/oh-my-pi
-/Users/ryan/code/harness/lavish-axi
-/Users/ryan/code/harness/linear-axi
+```sh
+sbin/fm-update.sh
 ```
 
-Also inspect explicitly named related checkouts.
-Do not infer that an unrelated directory is part of the set.
+This fast-forwards firstmate and registered secondmate homes only.
+It must remain fast-forward-only, never stash, force, create merge commits, or touch project worktrees.
+Observe and report every target line.
+If it prints `reread-firstmate: yes`, re-read `AGENTS.md` before further work.
+If it prints updated secondmate targets, send each one a short re-read nudge and observe its resulting pane state.
+
+## Personal infrastructure update set
+
+After the generic firstmate fleet update, read the optional `## Personal infrastructure update set` section in local `data/captain.md`.
+Each bullet in that section names one additional checkout to synchronize through this procedure.
+
+```markdown
+## Personal infrastructure update set
+- /path/to/checkout
+```
+
+Add repository-specific policy beneath its checkout bullet when needed.
+If the section is missing or has no entries, update no optional repositories.
+Do not infer unrelated directories as optional targets.
 Never touch anything under `firstmate/projects/`.
 
 ## Mechanical state machine
@@ -47,32 +60,15 @@ For every repository, complete and observe each state before taking the next act
    Re-read branch status and worktree cleanliness immediately after every fast-forward or rebase.
    Do not proceed to the next repository until the current result is recorded.
 
-## Firstmate fleet
+## Optional local infrastructure
 
-Run:
-
-```sh
-sbin/fm-update.sh
-```
-
-This fast-forwards firstmate and registered secondmate homes only.
-It must remain fast-forward-only, never stash, force, create merge commits, or touch project worktrees.
-Observe and report every target line.
-If it prints `reread-firstmate: yes`, re-read `AGENTS.md` before further work.
-If it prints updated secondmate targets, send each one a short re-read nudge and observe its resulting pane state.
-
-## Personal infrastructure
-
-For clean default branches in dotfiles, lavish-axi, or linear-axi, synchronize against `origin/main` using the state machine above.
-After dotfiles advances, run `chezmoi apply` and then `chezmoi verify`; observe both results.
-
-For oh-my-pi or any fork with both `origin` and `upstream`, treat the fork patch as protected work.
-Fetch and compare both remotes first.
-Do not reset to `origin/main`, rebase onto `upstream/main`, or force-push until the repository's explicit fork policy and the observed ancestry justify that action.
+For every configured local target, use the state machine above.
+Honor any repository-specific policy documented alongside that target in `data/captain.md`.
+If a configured target is a protected fork or has both `origin` and `upstream`, fetch and compare both remotes first.
+Do not reset, silently rebase, or force-push until its documented fork policy and observed ancestry justify that action.
 A diverged or ambiguous fork is a report, not an automatic repair.
 
-Feature branches, scratch checkouts, local-only scaffolds, and dirty worktrees are not synced by this skill unless the captain names them and approves the branch-specific action.
-
+Feature branches, scratch checkouts, local-only scaffolds, and dirty worktrees are not synchronized unless the captain names them and approves the branch-specific action.
 ## Reporting contract
 
 Report one line per repository:
@@ -95,5 +91,5 @@ Never report “already current” until after the remote fetch and post-fetch o
 - Never force-push, reset, stash, create a merge commit, or discard unlanded work.
 - Never operate on more than one repository in a single opaque command.
 - Never treat a stale pre-fetch status as current truth.
-- Personal dotfiles changes must be applied and verified after source synchronization.
+- Configured local source changes that require a documented post-sync action must complete and verify that action after source synchronization.
 - Firstmate and secondmate operational state remains local and untouched by tracked-file updates.
