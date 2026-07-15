@@ -811,6 +811,10 @@ No section has a silent or null move: when no listed move obviously applies, the
 5. **Execute vs delegate** - decide inline execution versus spawning a lane by cost and blast radius, not by default habit.
    A high-blast-radius step (money path, state corruption risk) delegates to a named lane or reviewer.
    A small, low-cost, low-risk step executes inline.
+   Delegation carries no callback guarantee: a crewmate lane can die or park silently, so every delegated lane gets a named deadline at spawn time.
+   Each bounded self-recheck (section 7) must verify delegated-lane LIVENESS (evidence of progress: output growth, artifact delta, lane status), not just unblock conditions.
+   A lane silent past its deadline is not "still working": restart it, reclaim the work inline, or report the stall on the board - waiting longer is not a legal move.
+   (Amended 2026-07-14f: operator-observed deadlock chain - supervisor waited on an agent that waited on a crewmate with no guaranteed callback; every layer looked "busy" while nothing moved.)
 6. **Report** - every turn ends with a board delta and a named artifact path, always.
    A claim with no named artifact is this section's failure mode.
    Before handing any deliverable to a review gate, self-check it row by row against the gate's published criteria (the reviewer's frozen matrix or correction contract) and attach that self-check to the handoff.
