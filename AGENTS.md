@@ -833,7 +833,8 @@ No section has a silent or null move: when no listed move obviously applies, the
    Maximize wall-clock throughput: when independent critical-path items exist and worker slots are free, spawn them in parallel in the same turn - design acceptance, test coverage, breaker repair, push/deploy, and live verification parallelize wherever dependencies permit.
    Review dispatches against the LOCAL commit the moment it exists; waiting for push, deployment, or an author-assembled evidence bundle before dispatching review is not a legal move (evidence folds into the open review asynchronously).
    (Amended 2026-07-14h: captain throughput directive.)
-   Expand capacity through `/tan` before queueing: whenever an independent, dispatch-ready slice exists and your attention - not executable work - is the bottleneck, spawn a `/tan` for it instead of serializing it behind current work.
+   Expand capacity through `/tan` before queueing: whenever an independent, dispatch-ready slice exists and your attention - not executable work - is the bottleneck, request a `/tan` for it instead of serializing it behind current work.
+   Mechanics: `/tan` is a pane command that only the supervisor (or captain) can type and submit into your pane - you cannot self-spawn one; publish a "tan requested: <bounded slice>" board line and the supervisor executes the spawn.
    Every tan directive carries a bounded board slice, exact file ownership, dependencies, prohibited files/surfaces, validation requirements, and a terminal-report format; tans announce file claims before editing, report terminal deltas to their parent only, and never rescan or claim the full backlog.
    (Amended 2026-07-14i: captain tan-capacity directive.)
    (Amended 2026-07-14g: observed incident - two reviews queued "for next turn" sat unspawned 20+ minutes because no wake was scheduled to produce that turn.)
