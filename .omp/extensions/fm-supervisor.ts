@@ -674,9 +674,8 @@ function logWarn(sup: Supervisor, msg: string): void {
 
 async function startSupervision(sup: Supervisor): Promise<void> {
 	await refreshFleet(sup);
-	// Establish the startup baseline before subscribing. Otherwise a replayed
-	// idle observation can race the seed and be mistaken for a completion edge.
 	await seedStatuses(sup);
+	await reconcileDependencyArtifacts(sup);
 	openSocket(sup);
 	await diagnoseOmpUnknown(sup);
 	startWatch(sup);
@@ -1381,10 +1380,29 @@ async function flush(sup: Supervisor): Promise<void> {
 	}
 	await deliverDependencyWakes(sup, prioritizeDependencyEdges(
 		events.flatMap((event) => event.dependency ? [event.dependency] : []),
-	), events);
+	), events, true);
 }
 
-async function deliverDependencyWakes(sup: Supervisor, edges: readonly DependencyEdge[], events: readonly FleetEvent[]): Promise<void> {
+async function reconcileDependencyArtifacts(sup: Supervisor): Promise<void> {
+	const events: FleetEvent[] = [];
+	for (const crew of sup.crewByPane.values()) {
+		if (!crew.dependency) continue;
+		const status = await lastStatusLine(sup, crew.task);
+		if (!status || !/\b(done|merged|ready in branch|pr ready|checks green):?/i.test(status)) continue;
+		events.push({
+			t: Date.now(),
+			kind: "status",
+			pane: crew.pane,
+			task: crew.task,
+			status_line: status,
+			dependency: crew.dependency,
+			relevant: true,
+		});
+	}
+	await deliverDependencyWakes(sup, prioritizeDependencyEdges(events.flatMap((event) => event.dependency ? [event.dependency] : [])), events, false);
+}
+
+async function deliverDependencyWakes(sup: Supervisor, edges: readonly DependencyEdge[], events: readonly FleetEvent[], parentAlreadyDelivered: boolean): Promise<void> {
 	const seen = new Set<string>();
 	for (const edge of edges) {
 		const terminal = events.some((event) => event.task === edge.producer && event.kind === "status" && /\b(done|merged|ready in branch|pr ready|checks green):?/i.test(event.status_line ?? ""));
@@ -1393,13 +1411,17 @@ async function deliverDependencyWakes(sup: Supervisor, edges: readonly Dependenc
 		let matches = true;
 		try {
 			const bytes = await readFile(edge.artifactPath);
-			if (edge.artifactSha) matches = createHash("sha256").update(bytes).digest("hex") === edge.artifactSha;
+			matches = createHash("sha256").update(bytes).digest("hex") === edge.artifactSha;
 		} catch {
 			matches = false;
 		}
 		for (const delivery of dependencyDeliveries(edge, matches, matches)) {
-			if (delivery.target !== "consumer" || !delivery.consumer) continue;
-			const message = `dependency ${edge.producer} completed; artifact ${edge.artifactPath} exists${edge.artifactSha ? ` sha=${edge.artifactSha}` : ""}; action: ${delivery.action}`;
+			const message = `dependency ${edge.producer} completed; artifact ${edge.artifactPath} exists sha=${edge.artifactSha}; action: ${delivery.action}`;
+			if (delivery.target === "parent") {
+				if (!parentAlreadyDelivered) inject(sup, message, true);
+				continue;
+			}
+			if (!delivery.consumer) continue;
 			try {
 				await sup.pi.exec("bash", [join(sup.ctx.cwd, "sbin/fm-send.sh"), `fm-${delivery.consumer}`, message], {
 					timeout: sup.tunables.busyReadTimeoutMs,
