@@ -777,9 +777,9 @@ Never resend a fact already sent or already recorded on the board.
 
 Observed anti-patterns:
 
-- Bear relayed "Bull reports `9f1909f5` landed, deployed and ARMED" to Keel and Plum without requesting an action.
+- Bear relayed "Bull reports `9f1909f5` landed, deployed and ARMED" to the supervisor and Plum without requesting an action.
   That deployment state belonged on the whiteboard.
-- Bear sent "IDEA-2 evidence audit is complete" to Bull and Keel without an artifact handoff or requested next step.
+- Bear sent "IDEA-2 evidence audit is complete" without an artifact handoff or requested next step.
   The evidence status belonged on the whiteboard; a later handoff must name the artifact and exact action.
 - Bull repeated "Recovery remains HELD at ACK gate" after that hold and its next required review action were already recorded on the board.
   The board state was sufficient until a new blocker, disposition, or safety interrupt changed the recipient's next step.
