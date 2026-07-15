@@ -58,6 +58,9 @@ Commit durable changes to the shared, tracked material with terse messages.
 This repo follows a main-only workflow for the captain's personal harness work. Commit durable shared changes directly to `main`, verify them proportionately, and push `origin main` unless the captain explicitly asks for a branch or PR.
 This repo does not use no-mistakes unless the captain explicitly requests it; the main-only workflow and fast-forward-only constraints subsume its assurance.
 Note: dotfiles and oh-my-pi harness customizations follow a different landing model from firstmate's own infrastructure, but as of 2026-07-12 (captain directive) they are NOT deferred to an evolving bank: any dotfiles / oh-my-pi harness change is committed, applied (`chezmoi apply`), and pushed to the remote immediately on each completed, verified change - no evolving-bank deferral. Keep each commit scoped to your own change and verify proportionately before pushing.
+**Shared-template push audit.** Before pushing this reusable firstmate repository, inspect the tracked change set for personal names, fleet identities, absolute home paths, hostnames, and tracked operational directories.
+Scrub genuine leaks to the repository's generic default, confirm local `config/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.lavish/` material is untracked, and state whether the remote update is fast-forward or would require a force.
+Never force-push a shared template without the captain's explicit approval.
 Never add an agent name as co-author.
 
 ### Thinking and execution discipline
@@ -141,6 +144,8 @@ These rules govern when and whether to send work to a mate. They apply before ev
 - **'Wait / hold / let things finish' = global dispatch freeze.**
   Any captain instruction to wait, hold, or let things finish halts all outbound dispatch immediately.
   No new work leaves this turn or any subsequent turn until the captain explicitly unfreezes (e.g. "go ahead", "resume", names a new task).
+**Ground before allocation.** Before estimating or assigning code work, perform one short source pass that identifies the target component, owning symbol, one line-level proof of the mechanism, the smallest worker class, and a focused verification path.
+If the mechanism remains unknown, route a scout instead of guessing at complexity or compensating with parallel workers.
 
 ## 2. Layout and state
 
@@ -489,6 +494,9 @@ After compaction or interruption, take one aggregated fleet snapshot, reconcile 
 Parallelize design acceptance, test coverage, breaker repair, push/deploy, and live verification whenever their dependencies permit.
 
 Write the brief per section 11.
+**Parallel fanout safety.** Freeze shared contracts before implementation fanout, assign exclusive file ownership including an owner for every overlap, and give each lane a focused check plus a salvage-patch path.
+Use cheap or capped capacity only for bounded, one-file mechanical work or read-only collection; implementation that spans files, tests, coordination, live safety, uncertain interfaces, or uncommitted state requires a strong tier.
+After a cap death, save the partial diff only as untrusted reference, reset the owned files clean, and relaunch on a suitable tier; after a second death in the same wave, correct the tier for the entire wave rather than retrying cheap capacity.
 
 ### Spawn
 
@@ -512,6 +520,8 @@ For `kind=secondmate`, the script launches directly in the persistent home inste
 Project worktrees start on a fresh branch off the default; ship briefs tell the crewmate to use that branch, while scout briefs keep the worktree scratch.
 After spawning, peek the pane to confirm the crewmate is processing the brief (and handle any trust dialog per section 4).
 Add the task to `data/backlog.md` under In flight.
+For omp, the `herdr agent start` slot must be globally unique per task, while the integration-reported identity remains `omp`; use `herdr pane rename` only for the display label and NEVER `herdr agent rename`, which breaks status binding.
+Before raw typing into a human shell pane, read its prompt for a pending draft; “type” means text only and never implies Enter.
 
 ### Supervise
 
@@ -519,6 +529,8 @@ Covered by section 8.
 Steer a crewmate only with short single lines via `sbin/fm-send.sh`; anything long belongs in a file the crewmate can read.
 Steer a secondmate the same way.
 Its charter escalates only captain-relevant outcomes - `done`, `blocked`, `needs-decision`, `failed`, or a material phase change - to the main firstmate through the fleet peer bus, so routine internal churn stays inside the secondmate home and never touches the supervisor channel.
+A successful steer send proves only queued delivery, not that the target consumed or acted on it.
+For time-sensitive steers, peek promptly and distinguish sent, queued, observed, and acted-on; nudge once or use the existing stuck-crewmate ladder only when the queued instruction is urgent, rather than duplicating steers or interrupting productive work.
 
 ### Delivery modes and yolo
 
@@ -637,6 +649,9 @@ Herdr's native agent status is the ground truth, so the omp<->herdr integration 
 Lean-loop discipline: keep your own loop lean for reasoning and decisions - fork self-contained side-work to a disposable `task` subagent (or route domain work to a secondmate) rather than burning your context on it.
 Once a decision is settled, execute or hold it; never re-derive, re-confirm, or re-list a conclusion already reached, and report only what changed since the last line.
 If you are restating rather than advancing, you are churning - end the turn.
+**Autonomous-loop incident triage.** When notification spam, 429s, repeated blocked wakes, and cost growth cluster, inspect the scheduler for zero-delay or unconditional re-arms before patching prompts or per-channel configuration.
+Stop the live loop first, then enforce scheduler backoff that grows on idle or rate-limited turns and resets only after real work; validate the delay function and a no-zero-delay regression in a fresh session before clearing the fault.
+If notification configuration is involved, inspect every live herdr server because each holds its own in-memory configuration.
 
 ### Away-mode (`/afk`)
 
@@ -697,6 +712,8 @@ Open Lavish artifacts worth a captain review via `sbin/fm-lavish-open.sh`; it op
 Whenever you reference a PR to the captain - review-ready work, a requested status answer, or a recent-work summary - give its full `https://...` URL, never a bare `#number`: the captain's terminal makes a full URL clickable.
 A shorthand `#number` is fine only as a back-reference after the full URL has already appeared in the same message.
 As a courtesy, mention cost when unusually much work is running (more than ~8 concurrent jobs); never block on it.
+**Reviewed visual artifacts.** A collapsed section must remove its hidden content from layout, and browser verification must prove zero closed height, positive open height, and no horizontal overflow.
+Motion must be pinned, respect reduced motion, and fail open so content remains visible when JavaScript or the CDN fails; verify both fallback and animation paths in a real browser before review.
 
 ## 10. Backlog format
 
@@ -766,6 +783,8 @@ The status-reporting protocol is intentionally sparse: crewmates append status o
 For any generated brief that still contains `{TASK}`, replace it with a clear task description, acceptance criteria, and any constraints or context the crewmate needs before spawning or seeding.
 When the task hands the crewmate a compiled action (an exact command or procedure), always pair it with an explicit return-shape contract - what the final report/output must literally contain - or the crewmate may act and report "done" without the data (measured: data/research/fm-panes-ab).
 Adjust the other sections only when the task genuinely deviates from the standard ship-a-new-PR shape (e.g. fixing an existing external PR); the scaffold is the contract, not a suggestion.
+**OMP status writes.** Do not instruct an omp agent to append status or logs with top-level shell redirection, because the harness blocks it.
+Generated briefs and charters MUST invoke `sbin/fm-report.sh` with quoted paths, and any changed reporting mechanism requires a live-agent proof plus a refresh of already-seeded charters.
 
 ## 12. Self-update
 
@@ -777,6 +796,8 @@ A tracked-files fast-forward leaves the gitignored operational dirs untouched, s
 `sbin/fm-update.sh` does only the git mechanics and prints a summary plus two action lines, `reread-firstmate: yes|no` and `nudge-secondmates: <pane-targets...>|none`.
 The skill then performs the parts a script cannot: when the running firstmate's instruction surface changed it re-reads `AGENTS.md`, and for each updated live secondmate with metadata it sends a gentle one-line re-read nudge via `sbin/fm-send.sh <pane-target>` so the whole tree converges on the latest `sbin/` and instructions.
 This is a sanctioned self-write to the firstmate repo and its own worktrees only, exactly like the fleet sync, and never touches anything under `projects/`.
+**Global tool replacement.** Before repointing a global axi CLI to a fork, stop every live consumer, build the fork, replace the global package path, and pin the global manifest to the link.
+Verify both the bare and `bunx` entrypoints resolve to the intended path and run a real command; version text alone is not proof of the selected source.
 
 ## Whiteboard operator-view contract
 
