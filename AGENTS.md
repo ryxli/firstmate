@@ -808,6 +808,9 @@ No section has a silent or null move: when no listed move obviously applies, the
 2. **Read state** - read the board, the Working list, and every in-flight lane.
    Note what changed since the last turn before deciding anything.
    Acting on stale memory instead of a fresh read is not a legal move.
+   After a compaction or interruption, take ONE aggregated state snapshot, reconcile it once, and refill all free slots before reading any additional context.
+   Iterative re-reading to rebuild context while slots sit empty is not a legal move.
+   (Amended 2026-07-14h: captain throughput directive.)
 3. **Consume** - process every queued message before anything else.
    Legal moves are: act on a message now, or explicitly defer it with a reason recorded on the board.
    Waiting instead of draining the queue first is not a legal move.
@@ -827,10 +830,16 @@ No section has a silent or null move: when no listed move obviously applies, the
    Each bounded self-recheck (section 7) must verify delegated-lane LIVENESS (evidence of progress: output growth, artifact delta, lane status), not just unblock conditions.
    A lane silent past its deadline is not "still working": restart it, reclaim the work inline, or report the stall on the board - waiting longer is not a legal move.
    Deferring a spawn to "next turn" is illegal when nothing is named to cause that turn: spawn accepted-handoff lanes in the SAME turn as the acceptance, or name the exact wake that will perform the spawn.
+   Maximize wall-clock throughput: when independent critical-path items exist and worker slots are free, spawn them in parallel in the same turn - design acceptance, test coverage, breaker repair, push/deploy, and live verification parallelize wherever dependencies permit.
+   Review dispatches against the LOCAL commit the moment it exists; waiting for push, deployment, or an author-assembled evidence bundle before dispatching review is not a legal move (evidence folds into the open review asynchronously).
+   (Amended 2026-07-14h: captain throughput directive.)
    (Amended 2026-07-14g: observed incident - two reviews queued "for next turn" sat unspawned 20+ minutes because no wake was scheduled to produce that turn.)
    (Amended 2026-07-14f: operator-observed deadlock chain - supervisor waited on an agent that waited on a crewmate with no guaranteed callback; every layer looked "busy" while nothing moved.)
 6. **Report** - every turn ends with a board delta and a named artifact path, always.
    A claim with no named artifact is this section's failure mode.
+   Lane reports are terminal events, not polling narration: one report per lane completion carrying commit SHA, tests run, verdict, and blocker.
+   Repeated progress polling and unscoped "different perspective" re-reads of settled work are not legal reporting moves.
+   (Amended 2026-07-14h: captain throughput directive.)
    Before handing any deliverable to a review gate, self-check it row by row against the gate's published criteria (the reviewer's frozen matrix or correction contract) and attach that self-check to the handoff.
    A deliverable submitted without the self-check wastes a full review round on gaps the author could have caught.
    (Amended 2026-07-14c: observed incident - three consecutive review rejections on one work item, each on criteria already published in the prior rejection artifact.)
