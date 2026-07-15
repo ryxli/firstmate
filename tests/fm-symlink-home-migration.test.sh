@@ -358,6 +358,8 @@ test_current_layout_repair_discovers_shared_skills() {
 }
 
 
+
+
 test_legacy_whole_omp_link_still_passes() {
   require_slice_scripts
   local code="$TMP_ROOT/legacy-pass-code" home="$TMP_ROOT/legacy-pass-home"

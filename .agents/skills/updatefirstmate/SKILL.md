@@ -93,3 +93,9 @@ Never report “already current” until after the remote fetch and post-fetch o
 - Never treat a stale pre-fetch status as current truth.
 - Configured local source changes that require a documented post-sync action must complete and verify that action after source synchronization.
 - Firstmate and secondmate operational state remains local and untouched by tracked-file updates.
+
+## Global tool replacement
+
+Before repointing a global AXI CLI to a fork, stop every live consumer, build the fork, replace the global package path, and pin the global manifest to the link.
+Verify both the bare and `bunx` entrypoints resolve to the intended path and run a real command.
+Version text alone is not proof of the selected source.

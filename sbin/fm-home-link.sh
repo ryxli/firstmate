@@ -250,14 +250,13 @@ done
 repair_link AGENTS.md "$CODE_ROOT/AGENTS.md"; status_line link.AGENTS.md
 check_claude_link; status_line link.CLAUDE.md
 repair_link sbin "$CODE_ROOT/sbin"; status_line link.sbin
+repair_link .agents "$CODE_ROOT/.agents"; status_line link..agents
+repair_link .tasks.toml "$CODE_ROOT/.tasks.toml"; status_line link..tasks.toml
 if [ "$CURRENT_OMP" -eq 1 ]; then
-  repair_link .agents "$CODE_ROOT/.agents"; status_line link..agents
   check_current_omp
 else
-  repair_link .agents "$CODE_ROOT/.agents"; status_line link..agents
   repair_link .claude "$CODE_ROOT/.claude"; status_line link..claude
   repair_link .omp "$CODE_ROOT/.omp"; status_line link..omp
-  repair_link .tasks.toml "$CODE_ROOT/.tasks.toml"; status_line link..tasks.toml
 fi
 if [ "$RESULT" != ok ]; then STATUS=$RESULT; fi
 status_line result
