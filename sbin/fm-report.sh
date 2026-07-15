@@ -71,6 +71,24 @@ append_once() {
   printf '%s\n' "$2" >> "$1"
 }
 
+# BLOCKED reports must reach their primary destination and every dependency
+# consumer. Validation always happens before this function is called.
+fan_out_blocked() {
+  local report_line=$1
+  local consumers dest
+  local -a dests
+
+  append_once "$primary" "$report_line"
+  consumers=$(token consumers)
+  if [ -n "$consumers" ]; then
+    IFS=',' read -r -a dests <<< "$consumers"
+    for dest in "${dests[@]}"; do
+      [ -n "$dest" ] || continue
+      append_once "$dest" "$report_line"
+    done
+  fi
+}
+
 # --- BLOCKED contract --------------------------------------------------------
 case $line in
   BLOCKED*)
@@ -81,18 +99,18 @@ case $line in
       echo "fm-report: malformed BLOCKED line: waiting_on=, owner=, and callback= are required" >&2
       exit 3
     fi
-    append_once "$primary" "$line"
+    fan_out_blocked "$line"
     if [ -e "$waiting_on" ]; then
       pinned_sha=$(token waiting_on_sha)
       if [ -n "$pinned_sha" ]; then
         actual_sha=$(shasum -a 256 "$waiting_on" | cut -d' ' -f1)
         if [ "$actual_sha" != "$pinned_sha" ]; then
-          append_once "$primary" "ARTIFACT_STALE waiting_on=$waiting_on expected=$pinned_sha actual=$actual_sha event=$event_id"
+          fan_out_blocked "ARTIFACT_STALE waiting_on=$waiting_on expected=$pinned_sha actual=$actual_sha event=$event_id"
           exit 0
         fi
       fi
       # The awaited artifact already exists: wake the blocked consumer now.
-      append_once "$primary" "ARTIFACT_READY waiting_on=$waiting_on owner=$owner callback=$callback event=$event_id"
+      fan_out_blocked "ARTIFACT_READY waiting_on=$waiting_on owner=$owner callback=$callback event=$event_id"
     fi
     exit 0
     ;;

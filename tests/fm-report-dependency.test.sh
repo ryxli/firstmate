@@ -16,6 +16,7 @@ fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
 count() { local c; c=$(grep -Fc "$1" "$2" 2>/dev/null) || true; printf '%s' "${c:-0}"; }
+count_match() { local c; c=$(grep -Ec "$1" "$2" 2>/dev/null) || true; printf '%s' "${c:-0}"; }
 
 PARENT="$TMP/state/bull-parent.status"
 BEAR="$TMP/state/bear.status"
@@ -57,40 +58,58 @@ rm -f "$OTHER"
 pass 'consumer gone before delivery: harmless append, no crash'
 
 # --- BLOCKED contract ------------------------------------------------------
-# Well-formed BLOCKED on an artifact that ALREADY exists -> immediate wake.
-"$REPORT" "$BEAR" "BLOCKED waiting_on=$ARTIFACT owner=bull-witness callback=rereview event=blk-1 detail: awaiting witness"
-[ "$(count 'ARTIFACT_READY' "$BEAR")" -eq 1 ] || fail "consumer blocked on an existing artifact is woken immediately (incident: it never was)"
-pass 'BLOCKED on existing artifact wakes immediately'
+# Valid BLOCKED reports fan out both the BLOCKED state and any immediate
+# artifact wake. Existing artifact -> ARTIFACT_READY at every destination.
+BLOCKED_CONSUMERS="$BEAR,$OTHER"
+BLOCKED_READY="BLOCKED waiting_on=$ARTIFACT owner=bull-witness callback=rereview event=blk-1 consumers=$BLOCKED_CONSUMERS detail: awaiting witness"
+"$REPORT" "$PARENT" "$BLOCKED_READY"
+for dest in "$PARENT" "$BEAR" "$OTHER"; do
+  [ "$(count_match '^BLOCKED.*event=blk-1' "$dest")" -eq 1 ] || fail "valid BLOCKED reaches each destination"
+  [ "$(count_match '^ARTIFACT_READY.*event=blk-1' "$dest")" -eq 1 ] || fail "ready wake reaches each destination"
+done
+pass 'BLOCKED and ready wake fan out to primary and consumers'
 
-# Idempotent: same BLOCKED replay does not stack wakes.
-"$REPORT" "$BEAR" "BLOCKED waiting_on=$ARTIFACT owner=bull-witness callback=rereview event=blk-1 detail: awaiting witness"
-[ "$(count 'ARTIFACT_READY' "$BEAR")" -eq 1 ] || fail "replayed BLOCKED does not create a wake storm"
-pass 'no wake storm on replayed BLOCKED'
+# Replaying a valid BLOCKED event must not duplicate its state or wake anywhere.
+"$REPORT" "$PARENT" "$BLOCKED_READY"
+for dest in "$PARENT" "$BEAR" "$OTHER"; do
+  [ "$(count_match '^BLOCKED.*event=blk-1' "$dest")" -eq 1 ] || fail "replayed BLOCKED is idempotent at each destination"
+  [ "$(count_match '^ARTIFACT_READY.*event=blk-1' "$dest")" -eq 1 ] || fail "replayed ready wake is idempotent at each destination"
+done
+pass 'replayed BLOCKED fan-out delivers exactly once'
 
-# Missing artifact -> stays blocked, no phantom wake.
-"$REPORT" "$BEAR" "BLOCKED waiting_on=$TMP/data/absent.md owner=bull callback=rereview event=blk-2 detail: not yet"
-[ "$(count "event=blk-2 detail" "$BEAR")" -eq 1 ] || fail "BLOCKED on missing artifact is recorded"
-[ "$(grep -c 'ARTIFACT_READY.*absent.md' "$BEAR" 2>/dev/null || true)" -eq 0 ] || fail "no phantom wake for a missing artifact"
-pass 'BLOCKED on missing artifact stays blocked'
+# Stale identity fans out ARTIFACT_STALE, never ARTIFACT_READY, and remains
+# idempotent when replayed.
+STALE="BLOCKED waiting_on=$ARTIFACT waiting_on_sha=deadbeef owner=bull callback=rereview event=blk-2 consumers=$BLOCKED_CONSUMERS detail: pinned"
+"$REPORT" "$PARENT" "$STALE"
+"$REPORT" "$PARENT" "$STALE"
+for dest in "$PARENT" "$BEAR" "$OTHER"; do
+  [ "$(count_match '^BLOCKED.*event=blk-2' "$dest")" -eq 1 ] || fail "stale BLOCKED reaches each destination once"
+  [ "$(count_match '^ARTIFACT_STALE.*event=blk-2' "$dest")" -eq 1 ] || fail "stale wake reaches each destination once"
+  [ "$(count_match '^ARTIFACT_READY.*event=blk-2' "$dest")" -eq 0 ] || fail "stale artifact never emits ready at any destination"
+done
+pass 'stale artifact fans out without a ready wake'
 
-# Stale artifact identity: declared sha does not match the file on disk.
-GOOD_SHA=$(shasum -a 256 "$ARTIFACT" | cut -d' ' -f1)
-"$REPORT" "$BEAR" "BLOCKED waiting_on=$ARTIFACT waiting_on_sha=deadbeef owner=bull callback=rereview event=blk-3 detail: pinned"
-[ "$(count 'ARTIFACT_STALE' "$BEAR")" -eq 1 ] || fail "sha mismatch marks the artifact stale instead of waking"
-[ "$(count 'ARTIFACT_READY' "$BEAR")" -eq 1 ] || fail "sha mismatch must not emit a ready wake"
-# Matching sha -> ready wake.
-"$REPORT" "$BEAR" "BLOCKED waiting_on=$ARTIFACT waiting_on_sha=$GOOD_SHA owner=bull callback=rereview event=blk-4 detail: pinned"
-[ "$(count 'ARTIFACT_READY' "$BEAR")" -eq 2 ] || fail "matching sha wakes"
-pass 'stale artifact sha blocks the wake; matching sha wakes'
+# Missing artifact -> stays blocked at every destination, with no phantom wake.
+MISSING="BLOCKED waiting_on=$TMP/data/absent.md owner=bull callback=rereview event=blk-3 consumers=$BLOCKED_CONSUMERS detail: not yet"
+"$REPORT" "$PARENT" "$MISSING"
+for dest in "$PARENT" "$BEAR" "$OTHER"; do
+  [ "$(count_match '^BLOCKED.*event=blk-3' "$dest")" -eq 1 ] || fail "missing-artifact BLOCKED reaches each destination"
+  [ "$(count_match '^ARTIFACT_READY.*event=blk-3' "$dest")" -eq 0 ] || fail "missing artifact does not emit ready"
+done
+pass 'missing artifact remains blocked without a wake'
 
-# Malformed BLOCKED (missing waiting_on/owner/callback) is rejected, exit 3.
+# Malformed BLOCKED is rejected before any destination, including consumers, is
+# created or appended to.
+REJECT_PRIMARY="$TMP/state/reject-primary.status"
+REJECT_CONSUMER="$TMP/state/reject-consumer.status"
 set +e
-"$REPORT" "$BEAR" "BLOCKED event=blk-5 detail: no fields at all"
+"$REPORT" "$REJECT_PRIMARY" "BLOCKED waiting_on=$ARTIFACT event=blk-4 consumers=$REJECT_CONSUMER detail: missing owner and callback"
 rc=$?
 set -e
 [ "$rc" -eq 3 ] || fail "malformed BLOCKED is rejected with exit 3 (got $rc)"
-[ "$(count 'event=blk-5' "$BEAR")" -eq 0 ] || fail "malformed BLOCKED is not recorded"
-pass 'malformed BLOCKED rejected'
+[ ! -e "$REJECT_PRIMARY" ] || fail "malformed BLOCKED must not create the primary destination"
+[ ! -e "$REJECT_CONSUMER" ] || fail "malformed BLOCKED must not create consumer destinations"
+pass 'malformed BLOCKED atomically rejects all destinations'
 
 # --- frozen base interface -------------------------------------------------
 # Plain two-arg reporting without dependency grammar is byte-compatible.
