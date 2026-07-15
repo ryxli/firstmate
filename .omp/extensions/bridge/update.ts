@@ -250,13 +250,13 @@ function normalizeSurface(value: string): string | undefined {
 	return surface;
 }
 
-interface TopologyCandidate {
+export interface TopologyCandidate {
 	id: string;
 	role: string;
 	home: string;
 }
 
-function topologyCandidates(root: string): TopologyCandidate[] {
+export function topologyCandidates(root: string): TopologyCandidate[] {
 	const candidates: TopologyCandidate[] = [{ id: "firstmate", role: "firstmate", home: canonicalPath(root) }];
 	const seenHomes = new Set<string>([canonicalPath(root)]);
 	const seenRegistries = new Set<string>();
