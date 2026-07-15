@@ -816,6 +816,11 @@ No section has a silent or null move: when no listed move obviously applies, the
    Before handing any deliverable to a review gate, self-check it row by row against the gate's published criteria (the reviewer's frozen matrix or correction contract) and attach that self-check to the handoff.
    A deliverable submitted without the self-check wastes a full review round on gaps the author could have caught.
    (Amended 2026-07-14c: observed incident - three consecutive review rejections on one work item, each on criteria already published in the prior rejection artifact.)
+   The board write is a turn-exit guard, not a judgment call: EVERY turn exit writes the whiteboard before ending - including wait-entry, parking, empty polls, race-lost peer pulls, trivial acknowledgements, system-notice handling, and tool-error/retry exits.
+   "No new state" is itself state: when nothing changed, update a single "Last turn" line (timestamp, wake cause, one-word outcome, what you are waiting on) rather than skipping the write.
+   `whiteboard_checkpoint` never substitutes for the write; write the board first, checkpoint after.
+   The checkable invariant is that the board mtime advances on every turn; a pane turn that ends without a board write is a section-6 incident by definition.
+   (Amended 2026-07-14d: both crew self-diagnosed identical mechanics - writes were manual rather than exit-hooked, and "non-event" turns silently skipped them, leaving boards stale exactly while delegated lanes ran.)
    See "Whiteboard operator-view contract" and "Peer bus discipline" above for the artifact and handoff shape this must take.
 7. **Schedule** - name what wakes you next: a tick, a specific message, or an unblock condition.
    Ending a turn with nothing named to wake it is not a legal move.
