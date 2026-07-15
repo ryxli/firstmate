@@ -55,9 +55,8 @@ Hands-on firstmate work competes with live supervision for the same single threa
 This repo is a shared template, not the captain's personal project.
 The tracking principle: shared, tracked material is tracked under git; anything personal to this captain's fleet (data/, state/, config/, projects/, .no-mistakes/) is not.
 Commit durable changes to the shared, tracked material with terse messages.
-This repo follows a main-only workflow for the captain's personal harness work. Commit durable shared changes directly to `main`, verify them proportionately, and push `origin main` unless the captain explicitly asks for a branch or PR.
+This repo follows a main-only workflow for shared firstmate infrastructure. Commit durable shared changes directly to `main`, verify them proportionately, and push `origin main` unless a branch or PR is explicitly requested.
 This repo does not use no-mistakes unless the captain explicitly requests it; the main-only workflow and fast-forward-only constraints subsume its assurance.
-Note: dotfiles and oh-my-pi harness customizations follow a different landing model from firstmate's own infrastructure, but as of 2026-07-12 (captain directive) they are NOT deferred to an evolving bank: any dotfiles / oh-my-pi harness change is committed, applied (`chezmoi apply`), and pushed to the remote immediately on each completed, verified change - no evolving-bank deferral. Keep each commit scoped to your own change and verify proportionately before pushing.
 **Shared-template push audit.** Before pushing this reusable firstmate repository, inspect the tracked change set for personal names, fleet identities, absolute home paths, hostnames, and tracked operational directories.
 Scrub genuine leaks to the repository's generic default, confirm local `config/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.lavish/` material is untracked, and state whether the remote update is fast-forward or would require a force.
 Never force-push a shared template without the captain's explicit approval.
@@ -256,9 +255,7 @@ If the captain asks for a new harness, propose verifying it first: spawn a trivi
 On `unknown`, ask the captain instead of guessing; a captain override always beats detection.
 When you verify a new adapter, record its env marker and command name in that script.
 
-### omp (oh-my-pi) (VERIFIED 2026-06-24, omp v16.1.16)
-
-This workstation runs omp inside herdr, so omp is the default own-harness here.
+### omp (oh-my-pi)
 
 | Fact | Value |
 |---|---|
@@ -271,7 +268,7 @@ The launch template is `omp --auto-approve "$(cat <brief>)"`; `--auto-approve` i
 No trust or permission dialog blocks a fresh worktree launch (an onboarding splash shows briefly, then the brief processes); still peek the pane within ~20s as for any spawn.
 Composer: omp draws a full rounded box (`╭── … ──╮` over `╰── … ──╯`) whose last visible line is the bottom border; `sbin/fm-herdr-lib.sh` strips the full box-drawing set so a border-only idle composer reads as empty rather than pending input.
 
-### claude (VERIFIED)
+### claude
 
 | Fact | Value |
 |---|---|
@@ -285,7 +282,7 @@ After every spawn, peek the pane within ~20s; if such a dialog is showing, accep
 Ghost text: claude renders a predicted-next-prompt suggestion in an otherwise-empty composer after a turn completes.
 Firstmate launches every claude crewmate with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (env prefix in `sbin/fm-spawn.sh`) to suppress it; `sbin/fm-herdr-lib.sh` strips box-drawing borders as defense-in-depth for panes that flag cannot reach.
 
-### codex (VERIFIED 2026-06-11, codex-cli 0.139.0)
+### codex
 
 | Fact | Value |
 |---|---|
@@ -296,7 +293,7 @@ Firstmate launches every claude crewmate with `CLAUDE_CODE_ENABLE_PROMPT_SUGGEST
 Directory trust dialog on first run per repo root ("Do you trust the contents of this directory?") - accept with Enter; the decision persists for the repo, so later worktrees of the same project skip it.
 Resume after exit: `codex resume <session-id>` (printed on quit).
 
-### opencode (VERIFIED 2026-06-11, v1.15.7-1.17.3)
+### opencode
 
 | Fact | Value |
 |---|---|
@@ -304,10 +301,10 @@ Resume after exit: `codex resume <session-id>` (printed on quit).
 | Interrupt | double Escape; known flaky while a long shell command runs - a wedged pane may need `/exit` and relaunch |
 
 No trust dialog.
-Caution: opencode auto-upgrades itself in the background and the running TUI can exit mid-task (observed live: 1.15.7 -> 1.17.3).
+Opencode may auto-upgrade in the background, which can exit a running TUI mid-task.
 If a pane shows the exit banner, relaunch with `--continue` to resume the session - but `--prompt` does NOT auto-submit alongside `--continue`; send the next instruction via fm-send once the TUI is up.
 
-### pi (VERIFIED 2026-06-11)
+### pi
 
 | Fact | Value |
 |---|---|
@@ -839,15 +836,6 @@ Before every send, ask: **does this change what the peer does in their next step
 If no, put the fact on the whiteboard or drop it.
 Never resend a fact already sent or already recorded on the board.
 
-Observed anti-patterns:
-
-- Bear relayed "Bull reports `9f1909f5` landed, deployed and ARMED" to the supervisor and Plum without requesting an action.
-  That deployment state belonged on the whiteboard.
-- Bear sent "IDEA-2 evidence audit is complete" without an artifact handoff or requested next step.
-  The evidence status belonged on the whiteboard; a later handoff must name the artifact and exact action.
-- Bull repeated "Recovery remains HELD at ACK gate" after that hold and its next required review action were already recorded on the board.
-  The board state was sufficient until a new blocker, disposition, or safety interrupt changed the recipient's next step.
-
 ## Turn decision sections
 
 A crew agent's turn is a finite sequence of decision sections.
@@ -862,7 +850,6 @@ No section has a silent or null move: when no listed move obviously applies, the
    Acting on stale memory instead of a fresh read is not a legal move.
    After a compaction or interruption, take ONE aggregated state snapshot, reconcile it once, and refill all free slots before reading any additional context.
    Iterative re-reading to rebuild context while slots sit empty is not a legal move.
-   (Amended 2026-07-14h: captain throughput directive.)
 3. **Consume** - process every queued message before anything else.
    Legal moves are: act on a message now, or explicitly defer it with a reason recorded on the board.
    Waiting instead of draining the queue first is not a legal move.
@@ -873,8 +860,6 @@ No section has a silent or null move: when no listed move obviously applies, the
    A pending peer review verdict on a submitted deliverable blocks only that deliverable's item; it never blocks the rest of the queue.
    While any verdict is pending, treat it as a Schedule wake condition and select the next file-disjoint unblocked item as usual.
    Before declaring the queue empty, re-test each blocked item's unblock condition against current reality (e.g. the awaited commit may already exist on main); a stale "blocked" label is not evidence.
-   (Amended 2026-07-14: observed incident - an agent parked "awaiting verdicts" with 13 unblocked queued items and zero active lanes.)
-   (Amended 2026-07-14b: observed incident - an agent idled "blocked on the correction being published" while the correction had been on main for 30 minutes.)
 5. **Execute vs delegate** - decide inline execution versus spawning a lane by cost and blast radius, not by default habit.
    A high-blast-radius step (money path, state corruption risk) delegates to a named lane or reviewer.
    A small, low-cost, low-risk step executes inline.
@@ -884,75 +869,52 @@ No section has a silent or null move: when no listed move obviously applies, the
    Deferring a spawn to "next turn" is illegal when nothing is named to cause that turn: spawn accepted-handoff lanes in the SAME turn as the acceptance, or name the exact wake that will perform the spawn.
    Maximize wall-clock throughput: when independent critical-path items exist and worker slots are free, spawn them in parallel in the same turn - design acceptance, test coverage, breaker repair, push/deploy, and live verification parallelize wherever dependencies permit.
    Review dispatches against the LOCAL commit the moment it exists; waiting for push, deployment, or an author-assembled evidence bundle before dispatching review is not a legal move (evidence folds into the open review asynchronously).
-   (Amended 2026-07-14h: captain throughput directive.)
    Expand capacity through `/tan` before queueing: whenever an independent, dispatch-ready slice exists and your attention - not executable work - is the bottleneck, request a `/tan` for it instead of serializing it behind current work.
    Mechanics: `/tan` is a pane command that only the supervisor (or captain) can type and submit into your pane - you cannot self-spawn one; publish a "tan requested: <bounded slice>" board line and the supervisor executes the spawn.
    Every tan directive carries a bounded board slice, exact file ownership, dependencies, prohibited files/surfaces, validation requirements, and a terminal-report format; tans announce file claims before editing, report terminal deltas to their parent only, and never rescan or claim the full backlog.
-   (Amended 2026-07-14i: captain tan-capacity directive.)
-   (Amended 2026-07-14g: observed incident - two reviews queued "for next turn" sat unspawned 20+ minutes because no wake was scheduled to produce that turn.)
-   (Amended 2026-07-14f: operator-observed deadlock chain - supervisor waited on an agent that waited on a crewmate with no guaranteed callback; every layer looked "busy" while nothing moved.)
 6. **Report** - every turn ends with a board delta and a named artifact path, always.
    A claim with no named artifact is this section's failure mode.
    Lane reports are terminal events, not polling narration: one report per lane completion carrying commit SHA, tests run, verdict, and blocker.
    Repeated progress polling and unscoped "different perspective" re-reads of settled work are not legal reporting moves.
-   (Amended 2026-07-14h: captain throughput directive.)
    Before handing any deliverable to a review gate, self-check it row by row against the gate's published criteria (the reviewer's frozen matrix or correction contract) and attach that self-check to the handoff.
    A deliverable submitted without the self-check wastes a full review round on gaps the author could have caught.
-   (Amended 2026-07-14c: observed incident - three consecutive review rejections on one work item, each on criteria already published in the prior rejection artifact.)
    The board write is a turn-exit guard, not a judgment call: EVERY turn exit writes the whiteboard before ending - including wait-entry, parking, empty polls, race-lost peer pulls, trivial acknowledgements, system-notice handling, and tool-error/retry exits.
    "No new state" is itself state: when nothing changed, update a single "Last turn" line (timestamp, wake cause, one-word outcome, what you are waiting on) rather than skipping the write.
    `whiteboard_checkpoint` never substitutes for the write; write the board first, checkpoint after.
    The checkable invariant is that the board mtime advances on every turn; a pane turn that ends without a board write is a section-6 incident by definition.
-   Failure: board history went stale or backward when agents rewrote settled lines.
-   Root cause: board writes were treated as a scratchpad instead of an operator ledger.
-   Prevention: board writes are monotonic: append or supersede with timestamped current state, preserve prior accepted decisions and evidence references, and never delete a missed or failed state without a superseding line.
-   (Amended 2026-07-14d: both crew self-diagnosed identical mechanics - writes were manual rather than exit-hooked, and "non-event" turns silently skipped them, leaving boards stale exactly while delegated lanes ran.)
+   Board writes are monotonic: append or supersede with timestamped current state, preserve prior accepted decisions and evidence references, and never delete a missed or failed state without a superseding line.
    See "Whiteboard operator-view contract" and "Peer bus discipline" above for the artifact and handoff shape this must take.
 7. **Schedule** - name what wakes you next: a tick, a specific message, or an unblock condition.
    Ending a turn with nothing named to wake it is not a legal move.
    Parking on external blocks is bounded, never open-ended: a parked turn names a self-recheck interval of at most 10 minutes, and each recheck re-tests every blocked item's unblock condition against current reality.
    If idleness persists past one recheck while any queue anywhere is non-empty (own queue, the captain's stated priorities, docs/PLAN.md backlog), the next turn MUST either pull new work from it or write an explicit escalating work request addressed to the captain on the board.
-   Failure: deadlines were missed silently.
-   Root cause: liveness deadlines were private promises instead of operator-visible contracts.
-   Prevention: when a named lane or self-recheck deadline is missed, the next board write says `missed <deadline>: <cause>; next <action/time>` before any further waiting.
+   When a named lane or self-recheck deadline is missed, the next board write says `missed <deadline>: <cause>; next <action/time>` before any further waiting.
    Waiting more than ~10 minutes with nothing in flight and no work request on the board is a section-7 incident.
-   (Amended 2026-07-14e: operator observation - "legitimately blocked" idle had no re-check, no refill, and no upper bound; an agent could park for hours beside a non-empty backlog.)
 
 ### Incident-attribution protocol
 
 Every observed suboptimal turn is attributed to exactly one of the seven sections above.
 The fix is amending that section's rule in this file, never a one-off steer to the agent.
-Failure: container or runtime incidents were attributed from symptoms.
-Root cause: process-source attribution was skipped.
-Prevention: incident forensics start by naming the emitting source and time window; for container incidents, capture Docker events with the exact read-only command in the artifact, for example `docker events --since <iso> --until <iso> --filter container=<name>`, before blaming app code.
+Incident forensics start by naming the emitting source and time window.
+For container incidents, capture Docker events with the exact read-only command in the artifact, for example `docker events --since <iso> --until <iso> --filter container=<name>`, before blaming app code.
 Incidents-per-section per day trending down is the convergence metric.
 The supervisor's monitor firing rate measures convergence; it is not itself the correction mechanism.
 
-### Retrospective safeguards - 2026-07-15
+### Review and evidence safeguards
 
-- **Stale-verdict replay** - Failure: a previously rejected pacing change was nearly emitted through a new fan-out after every named cure condition had landed.
-  Root cause: the delivery path treated a verdict as immutable rather than treating its cure conditions as part of that verdict's validity.
-  Rule: every verdict delivery MUST run a cure-condition guard against authoritative current state.
+- **Cure-condition guard:** Every verdict delivery MUST check named cure conditions against authoritative current state.
   When every named cure condition holds, suppress the old event, return the item to an independent fresh review, and deliver only that review's event.
-- **Terminal-event delay** - Failure: a boundary verdict sat unstarted after its terminal callback and all inputs had already arrived.
-  Root cause: terminal events were treated as optional notifications and manually rechecked instead of consumed as work.
-  Rule: a terminal event is a same-turn obligation: read its named artifact, take its lifecycle action, and write the resulting board state before any unrelated inspection.
+- **Terminal events:** A terminal event is a same-turn obligation: read its named artifact, take its lifecycle action, and write the resulting board state before any unrelated inspection.
   Check: a terminal report with a present artifact must produce a named disposition or explicit escalation in that same turn.
-- **Unnecessarily unpublished evidence** - Failure: a re-arm gate waited on an evidence packet that already existed at a stable readable path.
-  Root cause: "not delivered" was mistaken for "not observable."
-  Rule: before recording an evidence blocker, enumerate and try every read-only authoritative path named by state, status, reports, session artifacts, source, and peer handoffs.
+- **Evidence blockers:** Before recording an evidence blocker, enumerate and try every read-only authoritative path named by state, status, reports, session artifacts, source, and peer handoffs.
   Check: the blocker record names each attempted path and its observed result; otherwise it is not a legal blocker.
-- **Large-evidence context jam** - Failure: a review accumulated bulk evidence in the conversation until recovery required image-based compaction.
-  Root cause: raw output was retained in turns instead of stable artifacts with bounded retrieval.
-  Rule: mirror large command output, reports, matrices, and browser captures to named artifacts at production time; consume them through bounded range reads and cite paths plus ranges in communications.
+- **Large evidence:** Mirror large command output, reports, matrices, and browser captures to named artifacts at production time; consume them through bounded range reads and cite paths plus ranges in communications.
   Check: if a review needs bulk pasted output or a context recovery, stop, persist the artifact, and resume from that artifact rather than carrying the bulk forward.
-- **Repeated review criteria** - Failure: correction rounds repeated defects already identified in prior review packets.
-  Root cause: the first rejection did not expose a frozen, machine-checkable acceptance matrix that the author had to self-certify before resubmission.
-  Rule: every first rejection publishes criterion IDs, required proof, and named cures in a machine-checkable matrix.
+- **Repeated criteria:** Every first rejection publishes criterion IDs, required proof, and named cures in a machine-checkable matrix.
   Check: every correction handoff attaches a row-by-row self-check against that exact matrix; a missing self-check is rejected before review.
 
-### Retrospective practices to preserve - 2026-07-15
+### Review practices to preserve
 
-- Keep rejecting only on concrete, evidenced defects. This session's rejections each found a real contract or UX failure rather than inventing a gate.
+- Reject only concrete, evidenced defects rather than inventing a gate.
 - Keep rejection reports narrow and procedural: name the failed criterion, the evidence, and the exact cure without expanding scope.
 - Keep nonconforming verdict deliveries non-admitting. Producer, event, artifact, SHA, and consumer provenance are part of a verdict contract, not optional metadata.
