@@ -33,6 +33,9 @@ SECONDMATES_MD="$FM_HOME/data/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
 REPAIR_LINKS=0
 
+# shellcheck source=sbin/fm-ff-lib.sh
+. "$SCRIPT_DIR/fm-ff-lib.sh"
+
 usage() { echo "usage: fm-update.sh [--repair-links] [--help]" >&2; }
 
 while [ "$#" -gt 0 ]; do
@@ -46,18 +49,11 @@ done
 
 # --- helpers ---------------------------------------------------------------
 
-first_line() {
-  printf '%s\n' "$1" | sed -n '1s/[[:space:]]\{1,\}/ /g;1p'
-}
-
 default_branch() {
-  local dir=$1 ref branch
-  ref=$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
-  if [ -n "$ref" ]; then
-    echo "${ref#origin/}"
-    return 0
-  fi
-  # origin/HEAD not cached locally; query the remote directly.
+  local dir=$1 branch
+  # Shared core: the locally cached origin/HEAD (identical in both callers).
+  ff_resolve_default_branch "$dir" && return 0
+  # Distinct fallback: origin/HEAD not cached locally; query the remote.
   branch=$(git -C "$dir" remote show origin 2>/dev/null | awk '/HEAD branch:/{print $NF}')
   if [ -n "$branch" ] && [ "$branch" != "(unknown)" ]; then
     echo "$branch"
@@ -206,7 +202,7 @@ fetch_once() {
       *" $common "*) return 0 ;;
     esac
   fi
-  if git -C "$dir" fetch origin --prune --quiet 2>/dev/null; then
+  if ff_refresh_origin "$dir"; then
     # Refresh cached origin/HEAD so a renamed default branch is detected correctly.
     git -C "$dir" remote set-head origin --auto >/dev/null 2>&1 || true
     [ -n "$common" ] && FETCHED="$FETCHED $common"
@@ -264,7 +260,7 @@ ff_target() {
     return 0
   fi
 
-  local default base cur instr local_rev remote_rev before after out
+  local default base cur instr
   default=$(default_branch "$dir") || {
     echo "$label: skipped: cannot determine default branch"
     return 0
@@ -301,37 +297,37 @@ ff_target() {
     return 0
   fi
 
-  local_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || {
-    echo "$label: skipped: cannot read HEAD"
-    return 0
-  }
-  remote_rev=$(git -C "$dir" rev-parse "$base" 2>/dev/null) || {
-    echo "$label: skipped: cannot read $base"
-    return 0
-  }
-  if [ "$local_rev" = "$remote_rev" ]; then
-    FF_STATUS="current"
-    echo "$label: already current"
-    return 0
-  fi
-  if ! git -C "$dir" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
-    echo "$label: skipped: diverged from $base"
-    return 0
-  fi
-
   instr=$(changed_instr "$dir" "$base")
-  before=$(git -C "$dir" rev-parse --short HEAD)
-  if ! out=$(git -C "$dir" merge --ff-only "$base" 2>&1); then
-    echo "$label: skipped: fast-forward failed: $(first_line "$out")"
-    return 0
-  fi
-  after=$(git -C "$dir" rev-parse --short HEAD)
+  ff_safe_fast_forward "$dir" HEAD "$base" || true
+  case "$FF_RESULT" in
+    read-error)
+      if [ "$FF_WHICH" = local ]; then
+        ff_skip "$label" "cannot read HEAD"
+      else
+        ff_skip "$label" "cannot read $base"
+      fi
+      return 0
+      ;;
+    current)
+      FF_STATUS="current"
+      echo "$label: already current"
+      return 0
+      ;;
+    diverged)
+      ff_skip "$label" "diverged from $base"
+      return 0
+      ;;
+    ff-failed)
+      ff_skip "$label" "fast-forward failed: $FF_DETAIL"
+      return 0
+      ;;
+  esac
   FF_STATUS="updated"
   FF_INSTR="$instr"
   if [ -n "$instr" ]; then
-    echo "$label: updated $before..$after (instructions changed: $instr)"
+    echo "$label: updated $FF_BEFORE..$FF_AFTER (instructions changed: $instr)"
   else
-    echo "$label: updated $before..$after"
+    echo "$label: updated $FF_BEFORE..$FF_AFTER"
   fi
   return 0
 }

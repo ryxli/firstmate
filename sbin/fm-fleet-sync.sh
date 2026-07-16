@@ -15,6 +15,9 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 
+# shellcheck source=sbin/fm-ff-lib.sh
+. "$SCRIPT_DIR/fm-ff-lib.sh"
+
 usage() {
   echo "usage: fm-fleet-sync.sh [<project-dir>]" >&2
 }
@@ -34,12 +37,10 @@ project_label() {
 }
 
 default_branch() {
-  local ref branch
-  ref=$(git -C "$PROJ" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
-  if [ -n "$ref" ]; then
-    echo "${ref#origin/}"
-    return 0
-  fi
+  local branch
+  # Shared core: the locally cached origin/HEAD (identical in both callers).
+  ff_resolve_default_branch "$PROJ" && return 0
+  # Distinct fallback: origin/HEAD not cached; guess the local default branch.
   for branch in main master; do
     if git -C "$PROJ" show-ref --verify --quiet "refs/heads/$branch"; then
       echo "$branch"
@@ -47,10 +48,6 @@ default_branch() {
     fi
   done
   return 1
-}
-
-first_line() {
-  printf '%s\n' "$1" | sed -n '1s/[[:space:]]\{1,\}/ /g;1p'
 }
 
 prune_gone_branches() {
@@ -110,12 +107,12 @@ sync_project() {
     return 0
   fi
 
-  if ! fetch_output=$(git -C "$PROJ" fetch origin --prune --quiet 2>&1); then
+  if ! ff_refresh_origin "$PROJ"; then
     reason="fetch failed"
-    if [ -n "$fetch_output" ]; then
-      reason="$reason: $(first_line "$fetch_output")"
+    if [ -n "$FF_FETCH_OUTPUT" ]; then
+      reason="$reason: $(ff_first_line "$FF_FETCH_OUTPUT")"
     fi
-    echo "$label: skipped: $reason"
+    ff_skip "$label" "$reason"
     return 0
   fi
 
@@ -146,40 +143,34 @@ sync_project() {
     return 0
   fi
 
-  local_rev=$(git -C "$PROJ" rev-parse "$DEFAULT") || {
-    echo "$label: skipped: cannot read local $DEFAULT"
-    return 0
-  }
-  remote_rev=$(git -C "$PROJ" rev-parse "$BASE") || {
-    echo "$label: skipped: cannot read $BASE"
-    return 0
-  }
-  if [ "$local_rev" = "$remote_rev" ]; then
-    echo "$label: already current"
-    return 0
-  fi
-  if ! git -C "$PROJ" merge-base --is-ancestor "$DEFAULT" "$BASE"; then
-    echo "$label: skipped: local $DEFAULT has diverged from $BASE"
-    return 0
-  fi
-
-  before=$(git -C "$PROJ" rev-parse --short "$DEFAULT") || {
-    echo "$label: skipped: cannot read local $DEFAULT"
-    return 0
-  }
-  if ! merge_output=$(git -C "$PROJ" merge --ff-only "$BASE" 2>&1); then
-    reason="fast-forward failed"
-    if [ -n "$merge_output" ]; then
-      reason="$reason: $(first_line "$merge_output")"
-    fi
-    echo "$label: skipped: $reason"
-    return 0
-  fi
-  after=$(git -C "$PROJ" rev-parse --short "$DEFAULT") || {
-    echo "$label: skipped: fast-forward completed but cannot read local $DEFAULT"
-    return 0
-  }
-  echo "$label: synced $before..$after"
+  ff_safe_fast_forward "$PROJ" "$DEFAULT" "$BASE" || true
+  case "$FF_RESULT" in
+    read-error)
+      if [ "$FF_WHICH" = local ]; then
+        ff_skip "$label" "cannot read local $DEFAULT"
+      else
+        ff_skip "$label" "cannot read $BASE"
+      fi
+      return 0
+      ;;
+    current)
+      echo "$label: already current"
+      return 0
+      ;;
+    diverged)
+      ff_skip "$label" "local $DEFAULT has diverged from $BASE"
+      return 0
+      ;;
+    ff-failed)
+      reason="fast-forward failed"
+      if [ -n "$FF_DETAIL" ]; then
+        reason="$reason: $FF_DETAIL"
+      fi
+      ff_skip "$label" "$reason"
+      return 0
+      ;;
+  esac
+  echo "$label: synced $FF_BEFORE..$FF_AFTER"
   return 0
 }
 
