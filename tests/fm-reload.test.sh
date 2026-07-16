@@ -178,11 +178,22 @@ case "${1:-}" in
             fi
           fi
           case "$screen_status" in
-            working|blocked) printf '⠁ Working\n' ;;
-            idle|done) printf 'idle composer\n' ;;
-            stale-spinner) printf '⠁ Working\nidle composer\n' ;;
-            idle-then-spinner) printf 'idle composer\n⠁ Working\n' ;;
-            idle-then-active) printf 'idle composer\n⠁ ⟨esc⟩\n' ;;
+            # Exact OMP idle compositor frame: a metadata header followed by
+            # the bottom border, with no intermediate interior row.
+            idle|done|empty-box) printf '╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n╰─                          ─╯\n' ;;
+            # ANSI styling around the exact idle frame must be ignored.
+            ansi-empty-box) printf '\033[1;36m╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\033[0m\n╰─                          ─╯\n' ;;
+            # A historical spinner is safe only when another nonblank line
+            # separates it from the final empty compositor frame.
+            stale-spinner) printf '⠁ Working\nprevious output\n╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n╰─                          ─╯\n' ;;
+            # The active spinner is nearest the frame after a blank line.
+            working|blocked|spinner-box|esc-box|idle-then-active|idle-then-spinner) printf '⠇ Working ⟦esc⟧\n\n╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n╰─                          ─╯\n' ;;
+            # Non-empty or malformed frame interiors are unsafe.
+            tab-box) printf '╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n╰─\t                          ─╯\n' ;;
+            nonascii-space-box) printf '╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n╰─                         ─╯\n' ;;
+            malformed-box) printf '╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n╰───────────────────────────╯\n' ;;
+            nonempty-box) printf '╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n│ prompt                   │\n╰─                          ─╯\n' ;;
+            unknown-box|unknown) printf 'unrecognized visible output\n' ;;
             *) printf '' ;;
           esac
           exit 0
@@ -1039,12 +1050,12 @@ test_unknown_refuses_quit() {
   mkdir -p "$CASE"
   make_fake_herdr "$CASE" >/dev/null
   local sid="abcd1234-0000-0000-0000-000000000015"
-  FM_FAKE_HERDR_AGENT=omp FM_FAKE_HERDR_STATUS=unknown FM_FAKE_HERDR_SESSION="$sid" \
+  FM_FAKE_HERDR_AGENT=omp FM_FAKE_HERDR_STATUS=unknown FM_FAKE_HERDR_SCREEN=empty-box FM_FAKE_HERDR_SESSION="$sid" \
     run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
-    && fail "(v) unknown pane unexpectedly reloaded"
+    && fail "(v) top-level unknown pane unexpectedly reloaded"
   herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
-    && fail "(v) unknown pane received /quit"
-  pass "(v) unknown pane waits then refuses /quit"
+    && fail "(v) top-level unknown pane received /quit"
+  pass "(v) top-level unknown pane waits then refuses /quit"
 }
 test_self_reload_legacy_agent_session_idle_reloads() {
   local CASE="$TMP_ROOT/case-legacy-agent-session"
@@ -1054,6 +1065,7 @@ test_self_reload_legacy_agent_session_idle_reloads() {
   FM_RELOAD_NO_GUARD='' \
   FM_FAKE_HERDR_CURRENT=w1:p1 \
   FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+  FM_FAKE_HERDR_AGENT_SESSION_ID=legacy-agent-session \
   FM_FAKE_HERDR_STATUS=unknown \
   FM_FAKE_HERDR_SCREEN=stale-spinner \
   FM_FAKE_HERDR_SESSION="$sid" \
@@ -1067,36 +1079,82 @@ test_self_reload_legacy_agent_session_idle_reloads() {
     || fail "(legacy) idle legacy agent_session target did not receive /quit"
   herdr_log "$CASE" | grep -q "pane run w1:p1 omp --resume $sid" \
     || fail "(legacy) idle legacy agent_session target did not resume exactly"
-  pass "(legacy) self-reload accepts fresh idle composer after historical spinner"
+  pass "(legacy) self-reload accepts exact empty box after historical spinner"
 }
-test_legacy_agent_session_refuses_working_or_replaced() {
-  local CASE sid
+test_legacy_agent_session_identity_byte_exact() {
+  local CASE="$TMP_ROOT/case-legacy-byte-exact"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-000000000022"
+  local legacy_identity='legacy-agent-session-µ'
+  FM_RELOAD_NO_GUARD=1 \
+  FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+  FM_FAKE_HERDR_AGENT_SESSION_ID="$legacy_identity" \
+  FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID="$legacy_identity" \
+  FM_FAKE_HERDR_REPLACE_AFTER_GET=2 \
+  FM_FAKE_HERDR_STATUS=unknown \
+  FM_FAKE_HERDR_SCREEN=ansi-empty-box \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    || fail "(legacy/identity) unchanged byte-exact identity did not reload"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    || fail "(legacy/identity) unchanged byte-exact identity did not receive /quit"
+  pass "(legacy/identity) unchanged byte-exact legacy identity permits /quit"
+}
+
+test_legacy_agent_session_compositor_matrix() {
+  local CASE fixture sid
   sid="abcd1234-0000-0000-0000-000000000021"
-  for CASE in "$TMP_ROOT/case-legacy-working" "$TMP_ROOT/case-legacy-replaced"; do
+
+  # Every unsafe visible shape must fail closed before /quit.
+  for fixture in spinner-box esc-box tab-box nonascii-space-box idle-then-spinner unknown-box malformed-box nonempty-box; do
+    CASE="$TMP_ROOT/case-legacy-$fixture"
     mkdir -p "$CASE"
     make_fake_herdr "$CASE" >/dev/null
-    if [ "${CASE##*/}" = "case-legacy-working" ]; then
-      FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
-      FM_FAKE_HERDR_STATUS=unknown \
-      FM_FAKE_HERDR_SCREEN=idle-then-active \
-      FM_FAKE_HERDR_SESSION="$sid" \
-        run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
-        && fail "(legacy) visibly working target unexpectedly reloaded"
-    else
-      FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
-      FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original \
-      FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID=agent-session-replacement \
-      FM_FAKE_HERDR_REPLACE_AFTER_GET=2 \
-      FM_FAKE_HERDR_STATUS=unknown \
-      FM_FAKE_HERDR_SCREEN=idle \
-      FM_FAKE_HERDR_SESSION="$sid" \
-        run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
-        && fail "(legacy) replaced target unexpectedly reloaded"
-    fi
+    FM_RELOAD_NO_GUARD=1 \
+    FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+    FM_FAKE_HERDR_STATUS=unknown \
+    FM_FAKE_HERDR_SCREEN="$fixture" \
+    FM_FAKE_HERDR_SESSION="$sid" \
+      run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+      && fail "(legacy/$fixture) unsafe compositor unexpectedly reloaded"
     herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
-      && fail "(legacy) unsafe target received /quit"
+      && fail "(legacy/$fixture) unsafe compositor received /quit"
   done
-  pass "(legacy) visibly working or replaced legacy target refuses /quit"
+
+  # An ANSI-styled exact empty frame permits an unchanged legacy identity.
+  CASE="$TMP_ROOT/case-legacy-ansi-empty"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  FM_RELOAD_NO_GUARD=1 \
+  FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+  FM_FAKE_HERDR_AGENT_SESSION_ID=legacy-agent-session \
+  FM_FAKE_HERDR_STATUS=unknown \
+  FM_FAKE_HERDR_SCREEN=ansi-empty-box \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    || fail "(legacy/ansi-empty) unchanged identity did not reload"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    || fail "(legacy/ansi-empty) unchanged identity did not receive /quit"
+
+  # The same safe box must still refuse a replacement legacy identity.
+  CASE="$TMP_ROOT/case-legacy-replacement"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  FM_RELOAD_NO_GUARD=1 \
+  FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+  FM_FAKE_HERDR_AGENT_SESSION_ID=legacy-agent-session \
+  FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID=legacy-replacement-session \
+  FM_FAKE_HERDR_REPLACE_AFTER_GET=2 \
+  FM_FAKE_HERDR_STATUS=unknown \
+  FM_FAKE_HERDR_SCREEN=empty-box \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    && fail "(legacy/replacement) replacement identity unexpectedly reloaded"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    && fail "(legacy/replacement) replacement identity received /quit"
+
+  pass "(legacy) strict compositor matrix preserves identity and refuses unsafe shapes"
 }
 
 
@@ -1142,7 +1200,8 @@ test_durable_target_meta_rebound
 test_busy_refuses_quit
 test_unknown_refuses_quit
 test_self_reload_legacy_agent_session_idle_reloads
-test_legacy_agent_session_refuses_working_or_replaced
+test_legacy_agent_session_identity_byte_exact
+test_legacy_agent_session_compositor_matrix
 test_durable_target_meta_untouched_when_pane_survives
 test_self_reload_durable_target_meta_rebound
 test_stale_agent_shell_detection
