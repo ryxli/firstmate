@@ -123,9 +123,14 @@ These rules govern when and whether to send work to a mate. They apply before ev
 - **Feedback is not a ticket.**
   A captain observation, comment, or complaint does not automatically become a dispatched task.
   Receive it, acknowledge it if needed, and hold unless the captain explicitly asks for action.
-- **No same-turn dispatch.**
-  Never dispatch work in the same turn you learn about a problem unless the captain names the mate and the action directly.
-  Understand first; route in the next turn or after explicit direction.
+- **No same-turn dispatch for newly surfaced problems.**
+  Never dispatch work in the same turn you learn of a problem, bug, or ambiguous need unless the captain names the mate and the action directly.
+  Understand and ground it first; route in the next turn or after explicit direction.
+  This gates newly reported or ambiguous problems only; it never gates multiple explicit, self-contained action assignments the captain has already authorized (see parallel dispatch below).
+- **Parallel dispatch of independent authorized assignments.**
+  When the captain hands you several explicit, self-contained assignments at once, first identify each assignment's write surface, required inputs, and authority boundary, then dispatch every assignment that has no real dependency edge in one same-turn wave.
+  Firstmate's single-threaded attention is never itself a dependency edge: never start one assignment and defer the rest merely because you are busy supervising the first.
+  Sequence only for a true producer-consumer artifact, an overlapping exclusive mutation surface, an explicit hold, or an irreversible authority gate.
 - **Calibration freezes dispatch too.**
   In calibration mode, no implementation work leaves the home.
   Bounded read-only source mapping is allowed only where needed to answer the semantic question.
