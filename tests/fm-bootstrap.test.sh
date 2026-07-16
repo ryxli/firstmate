@@ -55,7 +55,20 @@ SH
   printf '%s\n' "$fakebin"
 }
 
+seed_handoff() {
+  local home=$1
+  mkdir -p "$home/data/handoff"
+  cp "$ROOT/data/handoff/current-actions.md" "$home/data/handoff/current-actions.md"
+  cp "$ROOT/data/handoff/firstmate-readback.md" "$home/data/handoff/firstmate-readback.md"
+}
+
 run_bootstrap() {
+  local home=$1 fakebin=$2
+  seed_handoff "$home"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" "$ROOT/sbin/fm-bootstrap.sh"
+}
+
+run_bootstrap_existing() {
   local home=$1 fakebin=$2
   PATH="$fakebin:$BASE_PATH" FM_HOME="$home" "$ROOT/sbin/fm-bootstrap.sh"
 }
@@ -109,6 +122,27 @@ SH
   pass "bootstrap ignores incompatible optional tasks-axi"
 }
 
+test_bootstrap_surfaces_handoff_failure() {
+  local case_dir fakebin out
+  case_dir="$TMP_ROOT/handoff-failure"
+  mkdir -p "$case_dir/home"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  seed_handoff "$case_dir/home"
+  awk 'NR == 7 { print "3. Pursue an unrelated completed request."; next } { print }' \
+    "$case_dir/home/data/handoff/firstmate-readback.md" > "$case_dir/home/data/handoff/readback.tmp"
+  mv "$case_dir/home/data/handoff/readback.tmp" "$case_dir/home/data/handoff/firstmate-readback.md"
+
+  if out=$(run_bootstrap_existing "$case_dir/home" "$fakebin"); then
+    fail "bootstrap unexpectedly continued with a contradictory handoff: $out"
+  fi
+  case "$out" in
+    *'FAIL: current-actions.md:13'*'firstmate-readback.md:7'*) ;;
+    *) fail "bootstrap did not surface handoff diagnostics: $out" ;;
+  esac
+  pass "bootstrap surfaces handoff validation failure before normal sync"
+}
+
 test_bootstrap_silent_without_no_mistakes
 test_bootstrap_reports_tasks_axi_when_available
 test_bootstrap_ignores_incompatible_tasks_axi
+test_bootstrap_surfaces_handoff_failure

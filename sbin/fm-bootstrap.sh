@@ -150,6 +150,12 @@ crew=
 [ -f "$CONFIG/crew-harness" ] && crew=$(tr -d '[:space:]' < "$CONFIG/crew-harness" || true)
 [ -n "$crew" ] && [ "$crew" != "default" ] && echo "CREW_HARNESS_OVERRIDE: $crew"
 fm_tasks_axi_compatible && echo "TASKS_AXI: available"
+# Do not sync dependencies or fleet state from an unchecked captain handoff.
+handoff_check_output=$("$FM_ROOT/sbin/fm-handoff-check.sh" 2>&1) || {
+  printf '%s\n' "$handoff_check_output"
+  exit 1
+}
+
 locked_dependency_sync
 fleet_sync
 exit 0
