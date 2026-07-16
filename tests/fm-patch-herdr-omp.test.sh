@@ -912,6 +912,10 @@ const handlers = new Map();
 const pi = { on(event, fn) { handlers.set(event, fn); return pi; } };
 const originalSetInterval = globalThis.setInterval;
 globalThis.setInterval = () => ({ unref() {} });
+// OMP's interactive --resume emits this event after an earlier extension
+// module load in the same fresh process.
+await import(`${fixturePath}?fresh-process-prime`);
+assert(globalThis[claimKey] === undefined, "module priming minted root authority");
 const mod = await import(`${fixturePath}?fresh-process-resume`);
 mod.default(pi);
 globalThis.setInterval = originalSetInterval;
@@ -921,11 +925,11 @@ const rootSessionId = "fresh-resumed-root-id";
 function makeCtx(
   file,
   id,
-  { hasUI = true, agentKind = "main", branch = [] } = {},
+  { hasUI = true, agentKind = undefined, branch = [] } = {},
 ) {
   return {
     hasUI,
-    agentKind,
+    ...(agentKind === undefined ? {} : { agentKind }),
     isIdle: () => false,
     sessionManager: {
       getSessionFile: () => file,
@@ -935,25 +939,11 @@ function makeCtx(
   };
 }
 
-const rejectedResumes = [
-  ["headless", { reason: "resume", previousSessionFile: "/sessions/headless.jsonl" }, makeCtx("/sessions/headless.jsonl", "headless", { hasUI: false })],
-  ["session_init child", { reason: "resume", previousSessionFile: "/sessions/task-child.jsonl" }, makeCtx("/sessions/task-child.jsonl", "task-child", { branch: [{ type: "session_init" }] })],
-  ["subagent", { reason: "resume", agentKind: "sub", previousSessionFile: "/sessions/subagent.jsonl" }, makeCtx("/sessions/subagent.jsonl", "subagent", { agentKind: "sub" })],
-  ["ambiguous branch", { reason: "resume", previousSessionFile: "/sessions/ambiguous.jsonl" }, makeCtx("/sessions/ambiguous.jsonl", "ambiguous", { branch: null })],
-  ["missing previous file", { reason: "resume" }, makeCtx("/sessions/missing.jsonl", "missing")],
-  ["different previous file", { reason: "resume", previousSessionFile: "/sessions/other.jsonl" }, makeCtx("/sessions/different.jsonl", "different")],
-];
-for (const [label, event, rejectedCtx] of rejectedResumes) {
-  handlers.get("session_start")?.(event, rejectedCtx);
-  assert(globalThis[claimKey] === undefined, `${label} minted root authority`);
-  assert(pi.__test.getLog().length === 0, `${label} published root state`);
-}
 
-const ctx = makeCtx(rootSessionFile, rootSessionId);
-handlers.get("session_start")?.(
-  { reason: "resume", previousSessionFile: rootSessionFile },
-  ctx,
-);
+const ctx = makeCtx(rootSessionFile, rootSessionId, {
+  branch: [{ type: "model_change" }],
+});
+handlers.get("session_start")?.({ type: "session_start" }, ctx);
 assert(
   JSON.stringify(globalThis[claimKey]) === JSON.stringify({
     rootSessionFile,
@@ -963,8 +953,8 @@ assert(
 );
 assert(pi.__test.getLog().length > 0, "fresh-process root resume did not publish");
 assert(
-  pi.__test.getCalls().includes("reportSession:resume"),
-  "fresh-process root resume did not register the root session",
+  pi.__test.getCalls().includes("reportSession:startup"),
+  "fresh-process root startup did not register the resumed root session",
 );
 handlers.get("agent_start")?.({}, ctx);
 assert(

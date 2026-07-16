@@ -15,9 +15,10 @@
 # claim also supports interactive in-memory sessions that have no file and
 # survives extension module reloads but dies with the OMP process. A fresh
 # process may reacquire an absent claim only through a top-level interactive
-# resume with an exact session tuple. Only interactive startup/new/resume/fork/
-# handoff events can establish or replace it; reload, session_init, agentKind=sub,
-# and headless contexts cannot mint or overwrite authority.
+# startup event, which OMP emits for --resume with an exact session tuple.
+# Only interactive startup/new/resume/fork/handoff events can establish or
+# replace it; reload, session_init, agentKind=sub, and headless contexts
+# cannot mint or overwrite authority.
 #
 # herdr owns this file ("reinstalling or updating overwrites this file"), so we
 # cannot fix it upstream and cannot expect edits to survive an update. This
@@ -117,7 +118,7 @@ def is_patched(text: str) -> bool:
         "const rootSessionReporterToken = {};",
         "function ownsRootSessionClaim(): boolean",
         "function setRootSessionClaim(claim: RootSessionClaim): void",
-        'Symbol.for("herdr:omp:root-session-reporter-loaded:v1")',
+        "const effectiveSessionStartSource = sessionStartSource;",
         "function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined",
         "rootSessionFile?: string;",
         "const tuple: RootSessionClaim =",
@@ -182,10 +183,6 @@ type RootSessionClaim = {{
 const rootSessionClaimKey = Symbol.for("herdr:omp:root-session-claim:v1");
 const rootSessionClaimOwnerKey = Symbol.for("herdr:omp:root-session-claim-owner:v1");
 const rootSessionReporterToken = {{}};
-const rootSessionReporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
-const rootSessionModuleReload =
-  (globalThis as any)[rootSessionReporterLoadKey] === true;
-(globalThis as any)[rootSessionReporterLoadKey] = true;
 const allowedRootStartReasons = new Set(["startup", "new", "resume", "fork", "handoff"]);
 
 function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined {{
@@ -324,10 +321,7 @@ activation = '''  function validateRootSession(
     sessionStartSource = "startup",
     mayClaim = false,
   ): boolean {
-    const effectiveSessionStartSource =
-      sessionStartSource === "startup" && rootSessionModuleReload
-        ? "reload"
-        : sessionStartSource;
+    const effectiveSessionStartSource = sessionStartSource;
     const allowStableId =
       mayClaim &&
       allowedRootStartReasons.has(effectiveSessionStartSource);
