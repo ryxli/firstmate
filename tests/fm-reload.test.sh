@@ -194,6 +194,7 @@ case "${1:-}" in
             # Exact OMP idle compositor frame: a metadata header followed by
             # the bottom border, with no intermediate interior row.
             idle|done|empty-box) printf '╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n╰─                          ─╯\n' ;;
+            v17-empty-box) printf '╭── ⬢ OMP · ◔ low ▶────╮\n╰─                          ─╯\n' ;;
             # ANSI styling around the exact idle frame must be ignored.
             ansi-empty-box) printf '\033[1;36m╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\033[0m\n╰─                          ─╯\n' ;;
             # A historical spinner is safe only when another nonblank line
@@ -1115,6 +1116,24 @@ test_legacy_agent_session_identity_byte_exact() {
   pass "(legacy/identity) unchanged byte-exact legacy identity permits /quit"
 }
 
+test_legacy_agent_session_v17_idle_frame_reloads() {
+  local CASE="$TMP_ROOT/case-legacy-v17-idle-frame"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-000000000023"
+  FM_RELOAD_NO_GUARD=1 \
+  FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+  FM_FAKE_HERDR_AGENT_SESSION_ID=legacy-agent-session \
+  FM_FAKE_HERDR_STATUS=unknown \
+  FM_FAKE_HERDR_SCREEN=v17-empty-box \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+    || fail "(legacy/v17-idle-frame) unchanged identity did not reload"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    || fail "(legacy/v17-idle-frame) unchanged identity did not receive /quit"
+  pass "(legacy/v17-idle-frame) exact OMP v17 empty frame permits /quit"
+}
+
 test_legacy_agent_session_compositor_matrix() {
   local CASE fixture sid
   sid="abcd1234-0000-0000-0000-000000000021"
@@ -1251,6 +1270,7 @@ test_busy_refuses_quit
 test_unknown_refuses_quit
 test_self_reload_legacy_agent_session_idle_reloads
 test_legacy_agent_session_identity_byte_exact
+test_legacy_agent_session_v17_idle_frame_reloads
 test_legacy_agent_session_compositor_matrix
 test_allow_fresh_post_reload_legacy_agent_session_proof
 test_post_reload_invalid_legacy_agent_session_refuses_proof

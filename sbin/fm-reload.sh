@@ -244,7 +244,7 @@ if len(lines) < 2:
     print("unknown")
     raise SystemExit
 header, bottom = lines[-2:]
-header_match = re.fullmatch(r"╭── .+ ──╮", header)
+header_match = re.fullmatch(r"╭── .+(?: ──|▶────)╮", header)
 bottom_match = re.fullmatch(r"╰─( +)─╯", bottom)
 prior = len(lines) - 3
 while prior >= 0 and not lines[prior].strip():
