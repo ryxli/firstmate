@@ -473,6 +473,8 @@ No section has a silent or null move: when no listed move obviously applies, the
 5. **Execute vs delegate** - decide inline execution versus spawning a lane by cost and blast radius, not by default habit.
    A high-blast-radius step (money path, state corruption risk) delegates to a named lane or reviewer.
    A small, low-cost, low-risk step executes inline.
+   Before any multi-command diagnostic sequence, name the exact predicate and choose the highest-level command that directly returns it.
+   Decompose only when that command is unavailable or insufficient; stop once the predicate and required artifact contract are satisfied.
    Delegation carries no callback guarantee: a crewmate lane can die or park silently, so every delegated lane gets a named deadline at spawn time.
    Each bounded self-recheck in the Schedule step below must verify delegated-lane LIVENESS (evidence of progress: output growth, artifact delta, lane status), not just unblock conditions.
    A lane silent past its deadline is not "still working": restart it, reclaim the work inline, or report the stall on the board - waiting longer is not a legal move.
