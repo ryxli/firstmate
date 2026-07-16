@@ -19,6 +19,7 @@
 # For ship tasks, the definition of done is shaped by the project's delivery mode
 # (data/projects.md via fm-project-mode.sh; see AGENTS.md sections 6-7):
 #   direct-PR    implement, focused review + tests, push + open PR via gh-axi -> captain merge (default)
+#   direct-main  implement, focused review + tests, guarded non-force push to origin/main, no PR
 #   local-only   implement on branch, stop and report "ready in branch" (no push/PR);
 #                firstmate reviews, captain approves, firstmate merges to local main
 # Scout tasks ignore mode - their deliverable is a report, not a merge.
@@ -202,6 +203,38 @@ Before you finish, run the focused checks the project already uses (the tests an
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
 When it is implemented and committed, append \`done: ready in branch fm/$ID; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 Firstmate then reviews your branch diff, the captain approves, and firstmate merges it into local \`main\`.
+EOF
+)
+    ;;
+  direct-main)
+    SETUP2=""
+    RULE1='1. Never open a PR, never force-push, and never push any commit except the reviewed `fm/'"$ID"'` head to `origin/main` after every direct-main delivery check below passes.'
+    DOD=$(cat <<EOF
+# Definition of done
+This project ships **direct-main**: the captain has authorized this project to land by guarded direct push to \`origin/main\`. Do NOT open a PR under any circumstances. Do NOT force-push.
+The task is complete only when your \`fm/$ID\` branch is clean, reviewed by you, committed, delivered as the exact remote \`origin/main\` SHA, and fetch-back verified. The \`+yolo\` flag never relaxes these safeguards.
+Before delivery, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
+Deliver with exactly one writer and a fresh remote proof. Acquire the shared delivery lock, fetch \`origin/main\` immediately before the ancestry check, prove that fetched \`origin/main\` is an ancestor of your intended head, push that exact head normally to \`origin/main\`, fetch back, and verify the remote SHA:
+\`\`\`sh
+test -z "\$(git status --porcelain)"
+branch=\$(git branch --show-current)
+test "\$branch" = "fm/$ID"
+head=\$(git rev-parse HEAD)
+lock_dir="\$(git rev-parse --git-common-dir)/fm-direct-main-delivery.lock"
+if ! mkdir "\$lock_dir"; then
+  echo "direct-main delivery already in progress" >&2
+  exit 1
+fi
+trap 'rmdir "\$lock_dir"' EXIT
+git fetch origin main
+base=\$(git rev-parse origin/main)
+git merge-base --is-ancestor "\$base" "\$head"
+git push origin "\$head:refs/heads/main"
+git fetch origin main
+remote=\$(git rev-parse origin/main)
+test "\$remote" = "\$head"
+\`\`\`
+If any command fails, stop and report blocked with the failed safeguard; do not retry by forcing. When delivery is verified, append \`done: direct-main origin/main \$head; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 EOF
 )
     ;;

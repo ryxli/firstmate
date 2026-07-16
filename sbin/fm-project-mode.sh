@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Resolve a project's delivery mode and yolo flag from the data/projects.md registry.
 # Prints two words to stdout: "<mode> <yolo>" where mode is one of
-# direct-PR|local-only and yolo is on|off.
+# direct-PR|direct-main|local-only and yolo is on|off.
 #
 # Registry line format (data/projects.md):
 #   - <name> - <desc> (added <date>)                  -> direct-PR off  (default)
@@ -10,15 +10,16 @@
 #
 # mode = how a finished change reaches main:
 #   direct-PR    push + PR via gh-axi, focused review + tests, no pipeline -> captain merge (default)
+#   direct-main  captain-authorized project mode: reviewed clean branch -> guarded direct push to origin/main, no PR
 #   no-mistakes  legacy registry alias; canonicalized to direct-PR on output, so
-#                consumers only ever see direct-PR|local-only
+#                consumers only ever see direct-PR|direct-main|local-only
 #   local-only   local branch, no remote/PR -> firstmate review -> captain approve -> local merge
 # yolo (orthogonal) = when on, firstmate makes approval decisions itself (PR merges,
 #   ask-user findings, local-only merge approval) without checking the captain - except
 #   anything destructive/irreversible/security-sensitive, which still escalates.
 #
 # An unknown/missing project or unknown mode falls back to "direct-PR off" and warns
-# to stderr, so a typo never silently selects a stricter mode.
+# to stderr, so a typo never silently selects a direct-to-main mode.
 # Usage: fm-project-mode.sh <project-name>
 set -eu
 
@@ -61,7 +62,7 @@ mode=${parsed%% *}
 yolo=${parsed##* }
 case "$mode" in
   no-mistakes) mode=direct-PR ;;  # legacy alias: canonicalize so consumers never see it
-  direct-PR|local-only) ;;
+  direct-PR|direct-main|local-only) ;;
   *) echo "warn: unknown mode \"$mode\" for $NAME; defaulting to direct-PR off" >&2; mode=direct-PR; yolo=off ;;
 esac
 case "$yolo" in on|off) ;; *) yolo=off ;; esac
