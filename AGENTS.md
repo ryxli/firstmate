@@ -310,7 +310,7 @@ It blocks (zero tokens while idle) on three sources and wakes you only when some
 - `fs.watch` on `state/*.status` - a crewmate's appended status line;
 - a timer firing each `state/*.check.sh` (e.g. a merged-PR poll).
 
-For each event the extension applies the captain-relevance rule (the `sbin/fm-classify-status.sh` regex `done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged`; a `check` with non-empty output; a herdr `->blocked`/`->done`).
+For each event the extension applies the captain-relevance rule (the relevance regex defined in `.omp/extensions/fm-supervisor.ts` - `done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged`; a `check` with non-empty output; a herdr `->blocked`/`->done`).
 A relevant event becomes ONE dense, self-contained wake digest injected into your session via `pi.sendMessage` - it renders as an `fm-wake` message carrying the task, pane, state, and recommended action.
 Act on it directly; it is self-contained and needs no follow-up read.
 Non-relevant status lines are appended to `state/.status-internal.log` and never wake you.

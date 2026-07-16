@@ -2313,7 +2313,7 @@ test_home_seed_writes_versioned_identity() {
 
 test_shared_templates_do_not_embed_supervisor_name() {
   local path
-  for path in "$ROOT/AGENTS.md" "$ROOT/sbin/fm-brief.sh" "$ROOT/sbin/fm-capture-demo.sh"; do
+  for path in "$ROOT/AGENTS.md" "$ROOT/sbin/fm-brief.sh"; do
     if grep -Eqi 'keel' "$path"; then
       fail "shared template embeds the local supervisor name: $path"
     fi

@@ -5,7 +5,6 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOME_LINK="$ROOT/sbin/fm-home-link.sh"
-MIGRATE="$ROOT/sbin/fm-mate-home-migrate.sh"
 SPAWN="$ROOT/sbin/fm-spawn.sh"
 UPDATE="$ROOT/sbin/fm-update.sh"
 TMP_ROOT=
@@ -47,7 +46,6 @@ canonical() {
 
 require_slice_scripts() {
   [ -x "$HOME_LINK" ] || fail "missing executable $HOME_LINK"
-  [ -x "$MIGRATE" ] || fail "missing executable $MIGRATE"
 }
 
 make_code_root() {
@@ -520,125 +518,6 @@ test_update_repairs_non_git_symlink_home() {
   pass "fm-update --repair-links repairs and verifies non-git symlink homes without git-updating them"
 }
 
-make_legacy_mate() {
-  local home=$1 id=$2
-  mkdir -p "$home/sbin" "$home/data" "$home/state" "$home/config" "$home/projects"
-  printf '# Legacy mate\n' > "$home/AGENTS.md"
-  printf '%s\n' "$id" > "$home/.fm-secondmate-home"
-  printf 'charter for %s\n' "$id" > "$home/data/charter.md"
-  git -C "$home" init -q
-  git -C "$home" add AGENTS.md .fm-secondmate-home data/charter.md
-  git -C "$home" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
-}
-
-write_migration_fixture() {
-  local case_dir=$1 id=$2 old_home=$3 main_home=$4
-  make_main_home "$main_home"
-  make_legacy_mate "$old_home" "$id"
-  printf -- '- %s - migration test (home: %s; scope: migrate; projects: alpha; added 2026-07-08)\n' \
-    "$id" "$old_home" > "$main_home/data/secondmates.md"
-  {
-    printf 'pane=wM:p1\n'
-    printf 'kind=secondmate\n'
-    printf 'home=%s\n' "$old_home"
-    printf 'harness=omp\n'
-  } > "$main_home/state/$id.meta"
-}
-
-run_migration() {
-  local case_dir=$1 main_home=$2 session=$3
-  shift 3
-  local fakebin log session_store home_dir
-  fakebin="$case_dir/fakebin"
-  log="$case_dir/herdr.log"
-  session_store="$case_dir/omp-sessions"
-  home_dir="$case_dir/user-home"
-  mkdir -p "$case_dir/mates"
-  mkdir -p "$session_store" "$home_dir/.omp/sessions"
-  if [ -n "$session" ]; then
-    printf '{"session_id":"%s"}\n' "$session" > "$session_store/$session.jsonl"
-    printf '{"session_id":"%s"}\n' "$session" > "$home_dir/.omp/sessions/$session.jsonl"
-  fi
-  HOME="$home_dir" \
-    FM_HOME="$main_home" \
-    FM_CODE_ROOT_OVERRIDE="$ROOT" \
-    FM_ROOT_OVERRIDE="$ROOT" \
-    FM_OMP_SESSION_STORE="$session_store" \
-    FM_HERDR_SM_BASE="$case_dir/mates" \
-    FM_MIGRATION_TIMESTAMP=20260708010203 \
-    FM_FAKE_HERDR_LOG="$log" \
-    FM_FAKE_HERDR_SESSION="$session" \
-    PATH="$fakebin:$BASE_PATH" \
-    "$MIGRATE" "$@"
-}
-
-# Contract: migration respawn preserves an existing omp conversation by default.
-test_migration_respawn_resumes_existing_omp_session_by_default() {
-  require_slice_scripts
-  local case_dir main_home old_home fakebin sid out log
-  case_dir="$TMP_ROOT/migrate-resume"
-  main_home="$case_dir/main-home"
-  old_home="$case_dir/mates/design"
-  fakebin=$(make_fake_toolchain "$case_dir")
-  : "$fakebin"
-  sid='session-default-123'
-  write_migration_fixture "$case_dir" design "$old_home" "$main_home"
-
-  out=$(run_migration "$case_dir" "$main_home" "$sid" design --execute --stop-live --respawn 2>&1) \
-    || fail "migration default respawn failed: $out"
-  log=$(cat "$case_dir/herdr.log")
-  assert_contains "$log" "agent> <start" "migration did not respawn an agent"
-  assert_contains "$log" "omp --auto-approve -c" "migration did not continue the pre-migration omp session"
-  assert_not_contains "$log" "--fresh-session" "default respawn used a fresh-session flag"
-  pass "fm-mate-home-migrate --respawn resumes the existing omp session by default"
-}
-
-# Contract: fresh-session respawn is explicit and does not accidentally resume.
-test_migration_respawn_fresh_session_opt_in_starts_from_charter() {
-  require_slice_scripts
-  local case_dir main_home old_home fakebin sid out log
-  case_dir="$TMP_ROOT/migrate-fresh"
-  main_home="$case_dir/main-home"
-  old_home="$case_dir/mates/design"
-  fakebin=$(make_fake_toolchain "$case_dir")
-  : "$fakebin"
-  sid='session-fresh-456'
-  write_migration_fixture "$case_dir" design "$old_home" "$main_home"
-
-  out=$(run_migration "$case_dir" "$main_home" "$sid" design --execute --stop-live --respawn --fresh-session 2>&1) \
-    || fail "migration fresh respawn failed: $out"
-  log=$(cat "$case_dir/herdr.log")
-  assert_contains "$log" "agent> <start" "fresh migration did not start an agent"
-  assert_not_contains "$log" "--resume $sid" "fresh-session opt-in still resumed the old omp session"
-  assert_contains "$log" "charter.md" "fresh-session respawn did not launch from the migrated charter"
-  pass "fm-mate-home-migrate --respawn --fresh-session starts from the charter instead of resuming"
-}
-
-# Contract: without an explicit fresh-session opt-in, missing omp continuity blocks
-# before stopping the live pane or mutating the old home.
-test_migration_respawn_blocks_when_default_resume_session_is_missing() {
-  require_slice_scripts
-  local case_dir main_home old_home fakebin out rc log before
-  case_dir="$TMP_ROOT/migrate-missing"
-  main_home="$case_dir/main-home"
-  old_home="$case_dir/mates/design"
-  fakebin=$(make_fake_toolchain "$case_dir")
-  : "$fakebin"
-  write_migration_fixture "$case_dir" design "$old_home" "$main_home"
-  before=$(git -C "$old_home" rev-parse HEAD)
-
-  out=$(run_migration "$case_dir" "$main_home" "" design --execute --stop-live --respawn 2>&1); rc=$?
-  [ "$rc" -ne 0 ] || fail "migration without resumable omp session should fail"
-  assert_contains "$out" "execute=blocked:omp-session-missing" "missing session did not produce the fail-closed reason"
-  log=$(cat "$case_dir/herdr.log")
-  assert_not_contains "$log" "agent> <start" "missing-session migration started a fresh agent"
-  assert_not_contains "$log" "pane> <close> <wM:p1" "missing-session migration closed the live pane"
-  assert_not_contains "$log" "pane> <run> <wM:p1> </quit" "missing-session migration sent quit before blocking"
-  [ -d "$old_home" ] || fail "missing-session migration removed the old home"
-  [ "$(git -C "$old_home" rev-parse HEAD)" = "$before" ] || fail "missing-session migration moved the old home HEAD"
-  pass "fm-mate-home-migrate --respawn blocks before stopping live work when no omp session can be resumed"
-}
-
 test_home_link_allows_missing_claude_link
 test_home_link_removes_legacy_claude_symlink
 test_home_link_preserves_non_symlink_claude_objects
@@ -653,8 +532,5 @@ test_home_link_removes_broken_legacy_bin_without_clobbering_user_file
 
 test_symlink_home_spawn_lifecycle
 test_update_repairs_non_git_symlink_home
-test_migration_respawn_resumes_existing_omp_session_by_default
-test_migration_respawn_fresh_session_opt_in_starts_from_charter
-test_migration_respawn_blocks_when_default_resume_session_is_missing
 
 echo "# all symlink home migration tests passed"

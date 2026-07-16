@@ -90,9 +90,9 @@
  *     subscribing, and an idle backstop confirms that the pane still exists and
  *     is not rendering a busy banner before waking.
  * The PURE export `classifyAndDigest` below is the single source of truth for
- * relevance + digest building (mirrors sbin/fm-classify-status.sh and
- * benchmarks/relevance.ts exactly). It has no I/O and no omp/herdr imports, so
- * the benchmark imports it standalone under Bun. The live loop calls it too.
+ * relevance + digest building (the canonical definition; benchmarks/relevance.ts
+ * mirrors it exactly). It has no I/O and no omp/herdr imports, so the benchmark
+ * imports it standalone under Bun. The live loop calls it too.
  */
 
 import { createHash } from "node:crypto";
@@ -133,7 +133,7 @@ export interface ClassifyResult {
 	detected: number; // distinct relevant events that produced a wake
 }
 
-// Matches sbin/fm-classify-status.sh: optional ISO-ish timestamp prefix, then
+// Canonical captain-relevance classifier: optional ISO-ish timestamp prefix, then
 // captain-relevant status prefixes or whole status phrases. Avoid substring
 // matches such as "already", "unmerged", or "readying". Working reports are
 // internal even when they mention a completed merge elsewhere.
