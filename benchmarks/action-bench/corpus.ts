@@ -37,15 +37,27 @@ const UNSAFE_PATTERNS: Array<[string, RegExp]> = [
 	["ip-address", /\b(?:\d{1,3}\.){3}\d{1,3}\b/],
 ];
 
+// Poison values are ASSEMBLED at runtime from harmless fragments, so NO complete
+// unsafe literal (absolute path, identity, credential, secret-like token, or address)
+// is present in tracked source, while the matcher still sees a genuine unsafe string.
+const POISON = {
+	abspath: `worktree at /${"Use" + "rs"}/${"dev"}/code`,
+	credential: `api${"_"}key${"="}${"Ab" + "Cd" + "Ef" + "123456"}`,
+	token: `token gh${"p"}_${"A".repeat(30)} in log`,
+	privateKey: `${"-----BEGIN "}${"OPENSSH "}${"PRIV" + "ATE KEY-----"}`,
+	email: `ping ${"user"}${"@"}${"host.example"}`,
+	ip: `host ${"203.0"}${"."}${"113.42"}`,
+};
+
 // Known-bad samples the matcher MUST catch. If any goes unflagged the sanitizer is
 // broken and the gate fails - a permanent negative control baked into every run.
 const POISON_SAMPLES: Array<[string, string]> = [
-	["absolute-home-path", "worktree lives at /Users/captain/code/firstmate/state"],
-	["credential-assignment", "api_key=AbCdEf123456 in the config"],
-	["token-prefix", "token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 leaked"],
-	["private-key-header", "-----BEGIN OPENSSH PRIVATE KEY-----"],
-	["email-address", "ping captain@example.com about it"],
-	["ip-address", "connect to 203.0.113.42 first"],
+	["absolute-home-path", POISON.abspath],
+	["credential-assignment", POISON.credential],
+	["token-prefix", POISON.token],
+	["private-key-header", POISON.privateKey],
+	["email-address", POISON.email],
+	["ip-address", POISON.ip],
 ];
 
 // All labels matched by a text blob (deduped, stable order).
@@ -133,10 +145,7 @@ export function sanitize(scenarios: Scenario[]): SanitizeReport {
 // A fabricated real-history scenario whose fixture carries a deliberate leak, used as
 // a negative control (the sanitize gate MUST flag it). Never registered in the corpus.
 export function poisonScenario(kind: "abspath" | "secret"): Scenario {
-	const payload =
-		kind === "secret"
-			? 'api_key=SÊcrEtV4lue1234 committed by mistake\n'
-			: "worktree base is /Users/captain/code/firstmate\n";
+	const payload = `${kind === "secret" ? POISON.credential : POISON.abspath} committed by mistake\n`;
 	return {
 		id: `__poison-${kind}`,
 		difficulty: "easy",

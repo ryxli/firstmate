@@ -4,11 +4,10 @@
 // paths, hostnames, identities, credentials, or answer leakage is committed.
 //
 //   fm-done-blocker-scan   source class: backlog Done entries (data/backlog.md ## Done).
-//                          A finished task can still record an ESCALATED / remaining
-//                          blocker (the real firstmate-gate-base-fix Done entry did:
-//                          "SEPARATE remaining blocker escalated to captain ... review
-//                          cannot complete"). Treating every [x] as fully closed loses
-//                          that open thread. Classify each Done entry clean vs open-blocker.
+//                          A finished task can still record an escalated / remaining
+//                          blocker in its completion note; treating every done entry as
+//                          fully closed loses that open thread. Classify each Done entry
+//                          clean vs open-blocker.
 //
 //   fm-status-escalation   source class: state/*.status (crewmate-appended "<state>: <note>"
 //                          lines). The supervisor must escalate captain-relevant lines and
