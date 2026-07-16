@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# Tests for fm-send's atomic, fail-closed text submission.
+set -u
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP_ROOT=
+
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
+pass() { printf 'ok - %s\n' "$1"; }
+
+cleanup() {
+  if [ -n "${TMP_ROOT:-}" ]; then
+    rm -rf "$TMP_ROOT"
+  fi
+}
+trap cleanup EXIT
+
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-send-tests.XXXXXX")
+
+make_fake_herdr() {
+  local dir=$1 fb="$1/fakebin"
+  mkdir -p "$fb"
+  cat > "$fb/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf 'herdr %s\n' "$*" >> "${FM_FAKE_HERDR_LOG:-/dev/null}"
+case "${1:-}" in
+  agent)
+    case "${2:-}" in
+      get)
+        printf '{"agent_status":"%s","pane_id":"w1:p1"}\n' "${FM_FAKE_AGENT_STATUS:-idle}"
+        exit 0 ;;
+    esac ;;
+  pane)
+    case "${2:-}" in
+      read)
+        printf '%s\n' "${FM_FAKE_PANE_LINES:-}"
+        exit 0 ;;
+      run)
+        exit "${FM_FAKE_RUN_RC:-0}" ;;
+      send-keys)
+        exit 0 ;;
+    esac ;;
+esac
+exit 1
+SH
+  chmod +x "$fb/herdr"
+  printf '%s\n' "$fb"
+}
+
+make_home() {
+  local home=$1
+  mkdir -p "$home/state"
+  cat > "$home/state/task.meta" <<EOF
+pane=w1:p1
+kind=ship
+EOF
+}
+
+assert_no_sendq() {
+  local home=$1
+  [ ! -e "$home/state/sendq" ] || fail "fm-send created a send queue"
+}
+
+test_send_submits_once() {
+  local dir home fb count
+  dir="$TMP_ROOT/once"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="unknown" FM_FAKE_PANE_LINES="" \
+    "$ROOT/sbin/fm-send.sh" fm-task "atomic work" \
+    || fail "fm-send rejected a successful atomic submission"
+
+  count=$(grep -cF 'herdr pane run w1:p1 atomic work' "$dir/herdr.log")
+  [ "$count" = "1" ] || fail "expected one pane run, got $count"
+  assert_no_sendq "$home"
+  pass "fm-send submits text exactly once"
+}
+
+test_send_blocks_human_draft() {
+  local dir home fb rc count
+  dir="$TMP_ROOT/draft"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ captain draft │" \
+    "$ROOT/sbin/fm-send.sh" fm-task "must not land" >/dev/null 2>"$dir/err" \
+    || rc=$?
+
+  [ "$rc" = "75" ] || fail "expected unsent draft to exit 75, got $rc"
+  count=$(grep -cF 'herdr pane run ' "$dir/herdr.log" || true)
+  [ "$count" = "0" ] || fail "fm-send wrote into a human draft"
+  grep -F 'text was not sent' "$dir/err" >/dev/null \
+    || fail "fm-send did not report fail-closed draft handling"
+  assert_no_sendq "$home"
+  pass "fm-send blocks on a human draft without queueing"
+}
+
+test_send_failure_is_not_retried() {
+  local dir home fb rc count
+  dir="$TMP_ROOT/failure"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="" FM_FAKE_RUN_RC=1 \
+    "$ROOT/sbin/fm-send.sh" fm-task "failing work" >/dev/null 2>"$dir/err" \
+    || rc=$?
+
+  [ "$rc" = "1" ] || fail "expected failed pane run to exit 1, got $rc"
+  count=$(grep -cF 'herdr pane run w1:p1 failing work' "$dir/herdr.log")
+  [ "$count" = "1" ] || fail "failed submission was attempted $count times"
+  assert_no_sendq "$home"
+  pass "fm-send fails after one rejected submission"
+}
+
+test_sequential_sends_do_not_amplify() {
+  local dir home fb i count
+  dir="$TMP_ROOT/sequential"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  i=1
+  while [ "$i" -le 20 ]; do
+    PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+      FM_FAKE_AGENT_STATUS="unknown" FM_FAKE_PANE_LINES="" \
+      "$ROOT/sbin/fm-send.sh" fm-task "instruction $i" \
+      || fail "sequential send $i failed"
+    i=$((i + 1))
+  done
+
+  count=$(grep -cF 'herdr pane run w1:p1 instruction ' "$dir/herdr.log")
+  [ "$count" = "20" ] || fail "20 sends produced $count pane runs"
+  assert_no_sendq "$home"
+  pass "20 sequential sends produce exactly 20 submissions"
+}
+
+test_key_bypasses_composer_guard() {
+  local dir home fb
+  dir="$TMP_ROOT/key"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ captain draft │" \
+    "$ROOT/sbin/fm-send.sh" fm-task --key Escape \
+    || fail "control key unexpectedly blocked"
+  grep -F 'herdr pane send-keys w1:p1 Escape' "$dir/herdr.log" >/dev/null \
+    || fail "control key was not sent"
+  pass "fm-send preserves explicit control-key sends"
+}
+
+test_sendq_runtime_is_removed() {
+  [ ! -e "$ROOT/sbin/fm-sendq-drain.sh" ] \
+    || fail "obsolete background send queue still exists"
+  pass "background send queue is removed"
+}
+
+test_send_submits_once
+test_send_blocks_human_draft
+test_send_failure_is_not_retried
+test_sequential_sends_do_not_amplify
+test_key_bypasses_composer_guard
+test_sendq_runtime_is_removed

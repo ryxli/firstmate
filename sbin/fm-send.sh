@@ -11,13 +11,10 @@
 # state/.focus-<id> exists for the target mate. Bypass with --steer or
 # FM_DISPATCH_OVERRIDE=1.
 #
-# Text submissions first inspect the composer. A human's unsent draft is never
-# passed to `herdr pane run`: the message is durably deferred with exit 75
-# instead. If a submitted message is still stuck after retries, fm-send writes
-# a durable sendq item and starts a background drain loop; the drain retries on
-# a timer and appends state/sendq.status if the item is still pending after
-# FM_SENDQ_ALERT_SECS (default 300). Tune direct retries with FM_SEND_RETRIES
-# (default 3) and FM_SEND_SLEEP (0.4).
+# Text submission is fail-closed. A human's unsent draft causes exit 75.
+# Otherwise one "herdr pane run" call atomically sends the text and Enter.
+# The command is never retried or queued: retrying can duplicate one logical
+# instruction in the harness steering queue.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,35 +25,6 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 # shellcheck source=sbin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
 
-fm_sendq_enqueue() {
-  local state=$1 target=$2 pane=$3 text=$4 dir id tmp out existing
-  dir="$state/sendq"
-  mkdir -p "$dir"
-  for existing in "$dir"/*.json; do
-    [ -e "$existing" ] || continue
-    if SENDQ_FILE="$existing" SENDQ_TARGET="$target" SENDQ_PANE="$pane" SENDQ_TEXT="$text" \
-      python3 -c 'import json, os, sys
-with open(os.environ["SENDQ_FILE"], encoding="utf-8") as fh:
-    item = json.load(fh)
-sys.exit(0 if all(item.get(key) == os.environ[env] for key, env in (("target", "SENDQ_TARGET"), ("pane", "SENDQ_PANE"), ("text", "SENDQ_TEXT"))) else 1)'; then
-      id=${existing##*/}
-      printf '%s\n' "${id%.json}"
-      return 0
-    fi
-  done
-  id="$(date +%s)-$$-$RANDOM"
-  tmp="$dir/$id.tmp"
-  out="$dir/$id.json"
-  SENDQ_ID="$id" SENDQ_CREATED_AT="$(date +%s)" SENDQ_TARGET="$target" SENDQ_PANE="$pane" SENDQ_TEXT="$text" \
-    python3 -c 'import json, os, sys; json.dump({"id": os.environ["SENDQ_ID"], "created_at": int(os.environ["SENDQ_CREATED_AT"]), "target": os.environ["SENDQ_TARGET"], "pane": os.environ["SENDQ_PANE"], "text": os.environ["SENDQ_TEXT"]}, sys.stdout); print()' > "$tmp"
-  mv "$tmp" "$out"
-  printf '%s\n' "$id"
-}
-
-fm_sendq_start_background() {
-  [ "${FM_SENDQ_NO_BACKGROUND:-0}" = "1" ] && return 0
-  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-sendq-drain.sh" >/dev/null 2>&1 &
-}
 
 _target="$1"
 P=$(fm_resolve_live_pane "$1" "$STATE")
@@ -91,27 +59,14 @@ if [ "${1:-}" = "--key" ]; then
   herdr pane send-keys "$P" "$2"
 else
   if fm_pane_input_pending "$P"; then
-    qid=$(fm_sendq_enqueue "$STATE" "$_target" "$P" "$*")
-    echo "deferred: $P composer holds an unsent draft; queued message $qid without submitting it" >&2
+    echo "blocked: $P composer holds an unsent draft; text was not sent" >&2
     exit 75
   fi
-  # Slash commands open a completion popup in some TUIs; give them more time.
-  case "$*" in /*) settle=1.2 ;; *) settle=0.3 ;; esac
-  retries=${FM_SEND_RETRIES:-3}
-  sleep_s=${FM_SEND_SLEEP:-0.4}
   text="$*"
-  verdict=$(fm_herdr_submit_core "$P" "$text" "$retries" "$sleep_s" "$settle")
-  case "$verdict" in
-    pending)
-      qid=$(fm_sendq_enqueue "$STATE" "$_target" "$P" "$text")
-      fm_sendq_start_background
-      echo "queued: text not submitted to $P; sendq item $qid will retry in background" >&2
-      ;;
-    send-failed)
-      echo "error: text not sent to $P (herdr pane run failed)" >&2
-      exit 1
-      ;;
-  esac
+  if ! herdr pane run "$P" "$text" 2>/dev/null; then
+    echo "error: text not sent to $P (herdr pane run failed)" >&2
+    exit 1
+  fi
 fi
 
 # Capture steer events: log to the events journal when a steering message was sent.

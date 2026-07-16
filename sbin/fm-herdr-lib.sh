@@ -16,10 +16,9 @@
 #   3. fm_pane_input_pending: reads visible pane content to detect a
 #      half-typed human line in the composer; same semantics as before but
 #      simpler implementation (no ANSI parsing, no SGR stripping).
-#   4. fm_herdr_submit_core: sends text+Enter via "herdr pane run" and
-#      verifies the agent received it by waiting briefly for a working->idle
-#      transition or a clean idle state; returns a verdict string the caller
-#      can act on.
+#
+# Text submission lives in fm-send.sh and uses one atomic
+# "herdr pane run" call. This library never retries or queues text.
 #
 # All functions are set -u and set -e safe.
 
@@ -280,42 +279,3 @@ fm_pane_input_pending() {
   return 0
 }
 
-# fm_herdr_submit_core: submit <text> to <pane> and verify delivery, retrying
-# the submission when it cannot be confirmed. Returns a verdict string:
-#   empty       - delivered (agent accepted the message)
-#   pending     - could not confirm delivery after <retries> attempts
-#   send-failed - the herdr command itself failed
-#
-# Delivery is confirmed by the agent transitioning to working/done. After each
-# attempt, while the agent is still idle:
-#   - composer holds our text (Enter swallowed): re-send Enter only.
-#   - composer is empty (submission never landed): re-issue "herdr pane run".
-# Confirming via the working/done transition keeps delivery idempotent: once the
-# agent reacts we stop, so a swallowed first attempt still yields exactly one
-# landed submission. Slash commands open a completion popup; <settle> lets it
-# close before we judge the result.
-fm_herdr_submit_core() {
-  local pane=$1 text=$2 retries=${3:-3} sleep_s=${4:-0.4} settle=${5:-0.3}
-  local status i=0
-  herdr pane run "$pane" "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
-  while :; do
-    sleep "$settle"
-    status=$(fm_herdr_agent_status "$pane")
-    case "$status" in working|done) printf 'empty'; return 0 ;; esac
-    i=$((i + 1))
-    [ "$i" -lt "$retries" ] || break
-    if fm_pane_input_pending "$pane"; then
-      # Text landed but was not submitted: re-send Enter only.
-      herdr pane send-keys "$pane" enter 2>/dev/null || true
-    else
-      # Idle with a clear composer: the submission never landed; re-issue it.
-      herdr pane run "$pane" "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
-    fi
-    sleep "$sleep_s"
-  done
-  # Final arbitration: an idle agent with a clear composer is treated as
-  # delivered (a fast turn that already completed); a non-empty composer means
-  # the text is still stuck unsubmitted.
-  [ "$status" = idle ] && ! fm_pane_input_pending "$pane" && { printf 'empty'; return 0; }
-  printf 'pending'
-}

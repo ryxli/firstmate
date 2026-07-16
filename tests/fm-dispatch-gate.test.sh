@@ -19,9 +19,8 @@ trap cleanup EXIT
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-gate-tests.XXXXXX")
 
 # make_gate_case: create a temp dir with state/ and a minimal fake herdr.
-# The fake herdr always reports the pane alive, logs "pane run" text to
-# $FM_GATE_SENT_LOG when set, and returns idle agent status (so
-# fm_herdr_submit_core's final arbitration path confirms delivery).
+# The fake herdr logs each atomic "pane run" submission to
+# $FM_GATE_SENT_LOG when set.
 make_gate_case() {
   local name=$1 dir fakebin
   dir="$TMP_ROOT/$name"
