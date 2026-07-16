@@ -8,6 +8,7 @@
 # replay core, flag-gated live path). See benchmarks/action-bench/README.md.
 #
 #   sbin/fm-action-bench.sh gates                       # integrity gates only (pure; no tokens)
+#   sbin/fm-action-bench.sh corpus                      # corpus metrics + sanitize verdict (pure; no tokens)
 #   sbin/fm-action-bench.sh replay <runs.json>          # re-aggregate a recording (pure)
 #   sbin/fm-action-bench.sh run --live [flags]          # live A/B; costs tokens
 set -euo pipefail

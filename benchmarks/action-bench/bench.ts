@@ -9,6 +9,7 @@
 //
 // Subcommands:
 //   gates  [--only a,b]                     run the integrity gates and exit (pure; no tokens)
+//   corpus [--only a,b]                     print machine-readable corpus metrics + sanitize verdict (pure)
 //   replay <runs.json>                      re-aggregate a recorded run and print (pure)
 //   run    --live [flags]                   the LIVE A/B against the real harness (costs tokens)
 //
@@ -17,6 +18,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Arms, loadArms } from "./arms.ts";
+import { corpusMetrics } from "./corpus.ts";
 import { type Aggregate, type RunOpts, type RunPayload, type RunRecord, aggregate, attachOmpStats, renderMd, runOnce } from "./engine.ts";
 import { assertIntegrity, runGates } from "./gates.ts";
 import { loadScenarios } from "./scenarios/index.ts";
@@ -77,6 +79,15 @@ function cmdGates(flags: Record<string, string | true>): never {
 function cmdReplay(file: string): void {
 	const payload = JSON.parse(readFileSync(file, "utf8")) as { runs: RunRecord[] };
 	console.log(JSON.stringify(aggregate(payload.runs), null, 2));
+}
+
+// Deterministic corpus metrics (pure; no tokens): total, synthetic vs real-history,
+// per-source-class real-history counts, difficulty distribution, and the sanitize verdict.
+function cmdCorpus(flags: Record<string, string | true>): never {
+	const scns = loadScenarios(onlyFrom(flags));
+	const metrics = corpusMetrics(scns);
+	console.log(JSON.stringify(metrics, null, 2));
+	process.exit(metrics.sanitization.status === "clean" ? 0 : 2);
 }
 
 // A single live job: (scenario, arm, trial).
@@ -181,6 +192,9 @@ async function main(): Promise<void> {
 		case "gates":
 			cmdGates(flags);
 			break;
+		case "corpus":
+			cmdCorpus(flags);
+			break;
 		case "replay": {
 			const file = positionals[0];
 			if (!file) {
@@ -194,7 +208,7 @@ async function main(): Promise<void> {
 			await cmdRun(flags);
 			break;
 		default:
-			console.error("usage: bench.ts <gates|replay|run> [flags]  (see README.md)");
+			console.error("usage: bench.ts <gates|corpus|replay|run> [flags]  (see README.md)");
 			process.exit(1);
 	}
 }

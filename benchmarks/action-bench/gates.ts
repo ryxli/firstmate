@@ -16,10 +16,15 @@
 //                         return < 1.0 (the task is not trivially passable).
 //   - ground-truth-pinned applying the scenario's own oracle solution scores exactly
 //                         correct + clean + progress 1.0, and grading is deterministic.
+//   - real-history-safe   every real-history scenario's fixture/prompt/leak markers are
+//                         free of operational data (abs paths, secrets, PII); the
+//                         sanitizer self-tests against known poison so it cannot silently
+//                         pass unsafe content (corpus.ts).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Arms } from "./arms.ts";
+import { poisonScenario, realHistoryScenarios, sanitize } from "./corpus.ts";
 import { type Scenario, type Trace, type TraceArg, trace } from "./types.ts";
 
 // An empty / no-op agent: it ran, but did nothing - no tools, no output.
@@ -176,6 +181,24 @@ function gateGroundTruthPinned(scenarios: Scenario[], _arms: Arms): string[] {
 	return fails;
 }
 
+// real-history-safe: every REAL-HISTORY scenario's fixture, prompt, and leak markers
+// are free of operational data that must never be committed (absolute home paths,
+// emails, IPs, private-key headers, credential/secret-like tokens). The sanitizer
+// self-tests against known poison first, so a broken matcher fails here rather than
+// waving unsafe content through. Honors FM_ACTION_BENCH_POISON=abspath|secret, which
+// injects a deliberately-leaking real-history scenario into the scan as a negative
+// control (the gate MUST then fail), exercising the same path that guards the corpus.
+function gateRealHistorySafe(scenarios: Scenario[], _arms: Arms): string[] {
+	const fails: string[] = [];
+	const poison = process.env.FM_ACTION_BENCH_POISON;
+	const scan = poison === "abspath" || poison === "secret" ? [...scenarios, poisonScenario(poison)] : scenarios;
+	const rep = sanitize(scan);
+	for (const label of rep.selfTest.missed) fails.push(`sanitizer self-test: poison sample '${label}' went UNFLAGGED (matcher broken)`);
+	for (const f of rep.findings) fails.push(`${f.scenario}: unsafe real-history content in ${f.where} [${f.labels.join(", ")}]`);
+	if (!realHistoryScenarios(scenarios).length) fails.push("no real-history scenarios present to sanitize (REQUIRED)");
+	return fails;
+}
+
 function round6(x: number): number {
 	return Math.round(x * 1e6) / 1e6;
 }
@@ -188,6 +211,7 @@ const GATES: Array<[string, GateFn]> = [
 	["no-leak", gateNoLeak],
 	["real-difficulty", gateRealDifficulty],
 	["ground-truth-pinned", gateGroundTruthPinned],
+	["real-history-safe", gateRealHistorySafe],
 ];
 
 export interface GateReport {

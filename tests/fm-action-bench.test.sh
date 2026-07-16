@@ -46,8 +46,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/fm-action-bench.XXXXXX")"
 # --- integrity gates pass on the real corpus --------------------------------
 out="$("$RUN" gates)" || fail "gates exited nonzero on the real corpus"
 assert_contains "$out" "integrity gates: ALL PASS" "real corpus passes every integrity gate"
-assert_contains "$out" "x 5 gates" "reports the 5-gate suite"
-n=$(printf '%s\n' "$out" | sed -n 's/.*(\([0-9]\{1,\}\) scenarios x 5 gates).*/\1/p')
+assert_contains "$out" "x 6 gates" "reports the 6-gate suite"
+n=$(printf '%s\n' "$out" | sed -n 's/.*(\([0-9]\{1,\}\) scenarios x 6 gates).*/\1/p')
 [ -n "$n" ] && [ "$n" -ge 25 ] || fail "corpus has $n scenarios, want >= 25"
 pass "integrity gates ALL PASS on the real corpus ($n scenarios)"
 
@@ -59,6 +59,39 @@ if "$RUN" gates --arm-file "$TMP/leak-arm.txt" >/dev/null 2>&1; then
   fail "gates must FAIL when a solution marker leaks into an arm"
 fi
 pass "gates catch a leaked solution marker in the harness arm"
+
+# --- corpus metrics + sanitize verdict (deterministic, pure) ----------------
+cout="$("$RUN" corpus)" || fail "corpus exited nonzero on the real (clean) corpus"
+CORPUS="$cout" bun -e '
+const j = JSON.parse(process.env.CORPUS);
+const chk = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); } };
+chk(j.totalScenarios >= 25, "totalScenarios=" + j.totalScenarios);
+chk(j.synthetic + j.realHistory === j.totalScenarios, "split does not sum");
+chk(j.realHistory >= 5, "realHistory=" + j.realHistory);
+// at least one real-history scenario from EACH queued source class
+chk(j.bySourceClass["backlog-done"] >= 1, "backlog-done=" + j.bySourceClass["backlog-done"]);
+chk(j.bySourceClass["state-status"] >= 1, "state-status=" + j.bySourceClass["state-status"]);
+chk(j.bySourceClass["session-history"] >= 1, "session-history=" + j.bySourceClass["session-history"]);
+chk(typeof j.byDifficulty.medium === "number", "difficulty distribution missing");
+chk(j.sanitization.status === "clean", "sanitization status=" + j.sanitization.status);
+chk(j.sanitization.selfTest.passed === true, "sanitizer self-test failed");
+chk(j.sanitization.findings.length === 0, "unexpected sanitize findings");
+' || fail "corpus metrics wrong"
+pass "corpus metrics correct (counts, per-source-class coverage, clean sanitize verdict)"
+
+# --- sanitizer NEGATIVE CONTROL: unsafe real-history content aborts ---------
+# FM_ACTION_BENCH_POISON injects a real-history scenario whose fixture leaks an
+# absolute home path / secret-like value; the sanitize gate MUST catch it and abort.
+# Proves the gate fails on unsafe content, not only that a clean corpus passes.
+for kind in abspath secret; do
+  if FM_ACTION_BENCH_POISON="$kind" "$RUN" gates >/dev/null 2>&1; then
+    fail "sanitize gate must FAIL on a poisoned real-history scenario ($kind)"
+  fi
+  pout="$(FM_ACTION_BENCH_POISON="$kind" "$RUN" gates 2>&1 || true)"
+  assert_contains "$pout" "FAIL" "poison ($kind) reports a gate failure"
+  assert_contains "$pout" "real-history-safe" "poison ($kind) trips real-history-safe"
+  pass "sanitize gate catches a poisoned real-history $kind"
+done
 
 # --- replay aggregation math (synthetic runs.json, deterministic) -----------
 # 2 arms x easy tier. control: 1 correct + 1 miss. harness: 1 correct + 1 corrupt

@@ -229,6 +229,7 @@ export const SCENARIOS: Scenario[] = [
 		procedural: lcProc,
 		oracle: lcOracle,
 		leakMarkers: ['"landed": false', '"landed":false'],
+		history: { sourceClass: "backlog-done" },
 	},
 	{
 		id: "fm-triage-transient",
@@ -239,5 +240,6 @@ export const SCENARIOS: Scenario[] = [
 		procedural: trProc,
 		oracle: trOracle,
 		leakMarkers: ['"inc-auth": "escalate"', '"inc-usage": "retry"', '"inc-dep": "escalate"'],
+		history: { sourceClass: "session-history" },
 	},
 ];

@@ -79,6 +79,14 @@ export type Step = [string, Inject | null];
 // per-session list of Traces when `steps` is set. Oracles mirror this shape.
 export type TraceArg = Trace | Trace[];
 
+// ---- real-history provenance --------------------------------------------
+// A scenario is either SYNTHETIC (a hand-built puzzle) or REAL-HISTORY (derived
+// from sanitized firstmate operational history). Real-history scenarios carry a
+// `history` tag naming the source CLASS they were derived from; only sanitized,
+// generic building blocks are ever committed - never raw operational data.
+export const SOURCE_CLASSES = ["backlog-done", "state-status", "session-history"] as const;
+export type SourceClass = (typeof SOURCE_CLASSES)[number];
+
 // ---- scenario contract (what a corpus author implements) -----------------
 export interface Scenario {
 	id: string;
@@ -99,4 +107,8 @@ export interface Scenario {
 	leakMarkers: string[];
 	// When set, the run is a SEQUENCE of fresh sessions in one persisting fixture.
 	steps?: Step[];
+	// Set on REAL-HISTORY scenarios: the sanitized operational-history source class
+	// this scenario was derived from. Absent = SYNTHETIC. Real-history scenarios are
+	// scanned by the sanitize gate (corpus.ts) before any live run.
+	history?: { sourceClass: SourceClass };
 }

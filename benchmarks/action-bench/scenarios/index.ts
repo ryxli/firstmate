@@ -12,6 +12,7 @@ import { SCENARIOS as longhorizon } from "./longhorizon.ts";
 import { SCENARIOS as longhorizonHard } from "./longhorizon_hard.ts";
 import { SCENARIOS as procedural } from "./procedural.ts";
 import { SCENARIOS as reallog } from "./reallog.ts";
+import { SCENARIOS as reallogHistory } from "./reallog_history.ts";
 import { SCENARIOS as reference } from "./reference.ts";
 import { SCENARIOS as supervision } from "./supervision.ts";
 import { SCENARIOS as variety } from "./variety.ts";
@@ -25,6 +26,7 @@ export const ALL_SCENARIOS: Scenario[] = [
 	...firstmate,
 	...supervision,
 	...reallog,
+	...reallogHistory,
 	...harder,
 	...computation,
 	...hardBugs,
