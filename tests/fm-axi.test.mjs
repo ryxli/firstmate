@@ -135,8 +135,19 @@ try {
   if (metrics.command !== "fleet metrics" || metrics.result.tasks_in_flight !== 2 || metrics.result.tasks_queued !== 1 || metrics.result.tasks_landed !== 1) throw new Error(`metrics did not use shared inventory: ${JSON.stringify(metrics)}`);
   console.log("ok - metrics counts derive from shared inventory");
 
+  const snapshot = JSON.parse(run(["fleet", "snapshot", "--json"]).stdout);
+  if (snapshot.schema !== "fleet-snapshot/1" || !Array.isArray(snapshot.tasks)) throw new Error(`snapshot --json was not the raw FleetSnapshot: ${JSON.stringify(snapshot)}`);
+  if (snapshot.metrics !== undefined) throw new Error("snapshot --json emitted metrics without --metrics");
+  const snapshotMetrics = JSON.parse(run(["fleet", "snapshot", "--json", "--metrics"]).stdout);
+  if (snapshotMetrics.metrics?.schema !== "fm-kpi/1") throw new Error(`snapshot --json --metrics omitted metrics: ${JSON.stringify(snapshotMetrics)}`);
+  const snapshotToon = toon(run(["fleet", "snapshot"]), "snapshot toon");
+  if (snapshotToon.command !== "fleet snapshot" || snapshotToon.result.schema !== "fleet-snapshot/1") throw new Error(`bare snapshot was not TOON: ${JSON.stringify(snapshotToon)}`);
+  const snapshotBad = run(["fleet", "snapshot", "--nope"]);
+  if (snapshotBad.status !== 2 || decode(snapshotBad.stdout, { expandPaths: "safe" }).code !== "VALIDATION_ERROR") throw new Error(`snapshot rejected unknown flag incorrectly: ${snapshotBad.status} ${snapshotBad.stdout}`);
+  console.log("ok - fleet snapshot emits raw JSON, TOON, and metrics on demand");
+
   const help = toon(run(["fleet", "--help"]), "help");
-  if (help.command !== "fm-axi fleet" || help.commands.length !== 6) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
+  if (help.command !== "fm-axi fleet" || help.commands.length !== 7) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
   const old = run(["fleet", "focus"]);
   if (old.status !== 2) throw new Error(`removed compatibility command accepted: ${old.status}`);
   console.log("ok - help and compatibility validation are TOON");

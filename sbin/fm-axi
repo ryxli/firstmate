@@ -30,10 +30,11 @@ function commandHelp(command = "fm-axi"): Record<string, unknown> {
 		{ command: "fleet task get <id>", description: "Full task record; bare ids must be unique." },
 		{ command: "fleet agent get <id>", description: "Full agent record; bare ids must be unique." },
 		{ command: "fleet metrics", description: "Optional cost and productivity metrics." },
+		{ command: "fleet snapshot", description: "Raw FleetSnapshot JSON for visual consumers (--json), optionally with metrics." },
 	];
 	return {
 		command,
-		usage: home ? "fm-axi home <check|repair> <mate|--all>" : root ? "fm-axi fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics] | home <check|repair> <mate|--all>" : "fm-axi fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics]",
+		usage: home ? "fm-axi home <check|repair> <mate|--all>" : root ? "fm-axi fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics|snapshot [--json] [--metrics] [--home <path>]] | home <check|repair> <mate|--all>" : "fm-axi fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics|snapshot [--json] [--metrics] [--home <path>]]",
 		commands: home
 			? [
 				{ command: "home check <mate|--all>", description: "Check shared-code links for one registered mate or every registered mate." },
@@ -252,7 +253,42 @@ async function main(argv: string[]): Promise<number> {
 			output({ command: "fleet metrics", result: snapshot.metrics ?? null });
 			return 0;
 		}
-		if (!["fleet", "update", "tasks", "task", "agent", "metrics"].includes(command)) {
+		if (command === "snapshot") {
+			const rest = argv.slice(2);
+			let asJson = false;
+			let includeMetrics = false;
+			let home: string | undefined;
+			let statsFile: string | undefined;
+			for (let index = 0; index < rest.length; index += 1) {
+				const arg = rest[index];
+				if (arg === "--json") asJson = true;
+				else if (arg === "--metrics") includeMetrics = true;
+				else if (arg === "--home") {
+					const value = rest[index + 1];
+					if (!value || value.startsWith("-")) return validationError("--home requires a value", ["Provide a firstmate home path after --home."]);
+					home = value;
+					index += 1;
+				} else if (arg === "--stats-file") {
+					const value = rest[index + 1];
+					if (!value || value.startsWith("-")) return validationError("--stats-file requires a value", ["Provide a stats JSON path after --stats-file."]);
+					statsFile = value;
+					index += 1;
+				} else if (arg === "--help" || arg === "-h") {
+					output({ command: "fleet snapshot", usage: "fm-axi fleet snapshot [--json] [--metrics] [--home <path>] [--stats-file <path>]", description: "Raw FleetSnapshot for visual consumers; --json emits raw JSON, otherwise TOON." });
+					return 0;
+				} else {
+					return validationError(`Unexpected argument: ${arg}`, ["Use `fm-axi fleet snapshot [--json] [--metrics] [--home <path>] [--stats-file <path>]`."]);
+				}
+			}
+			const snapshot = await collectSnapshot(new Date().toISOString(), home, { includeMetrics, statsFile });
+			if (asJson) {
+				process.stdout.write(`${JSON.stringify(snapshot)}\n`);
+				return 0;
+			}
+			output({ command: "fleet snapshot", result: snapshot });
+			return 0;
+		}
+		if (!["fleet", "update", "tasks", "task", "agent", "metrics", "snapshot"].includes(command)) {
 			return validationError(`Unknown fleet command: ${command}`, ["Run `fm-axi fleet --help` for available commands."]);
 		}
 		if (command !== "fleet" || argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Run `fm-axi fleet --help` for available commands."]);

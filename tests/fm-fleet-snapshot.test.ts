@@ -418,15 +418,16 @@ describe("canonical FleetSnapshot collector", () => {
 	});
 
 	it("rejects missing snapshot option values before collecting", () => {
-		const script = join(import.meta.dir, "..", "sbin", "fm-fleet-snapshot.ts");
+		const cli = join(import.meta.dir, "..", "sbin", "fm-axi");
 		for (const flag of ["--home", "--stats-file"]) {
-			const result = spawnSync(process.execPath, [script, flag, "--metrics"], {
+			const result = spawnSync(process.execPath, [cli, "fleet", "snapshot", flag, "--metrics"], {
 				cwd: join(import.meta.dir, ".."),
 				encoding: "utf8",
 			});
 			expect(result.status).toBe(2);
-			expect(result.stdout).toBe("");
-			expect(result.stderr).toContain(`${flag} requires a value`);
+			expect(result.stderr).toBe("");
+			expect(result.stdout).toContain(`${flag} requires a value`);
+			expect(result.stdout).toContain("VALIDATION_ERROR");
 		}
 	});
 

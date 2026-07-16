@@ -32,7 +32,7 @@ mkdir -p "$TMP/bin"
 printf '%s\n' '#!/bin/sh' 'exit 7' > "$TMP/bin/omp"
 chmod +x "$TMP/bin/omp"
 env -u FM_FLEET_STATS_FILE FM_HOME="$HOME_DIR" FM_FLEET_PANES_FILE="$TMP/panes.json" PATH="$TMP/bin:$PATH" \
-  "$ROOT/sbin/fm-fleet-snapshot.ts" --metrics > "$TMP/failed.json"
+  bun "$ROOT/sbin/fm-axi" fleet snapshot --json --metrics > "$TMP/failed.json"
 python3 - "$TMP/failed.json" <<'PY'
 import json
 import sys
