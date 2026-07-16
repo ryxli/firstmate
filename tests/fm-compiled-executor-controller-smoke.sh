@@ -22,11 +22,11 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-omp_src=${FM_OMP_SRC:-/Users/ryan/code/harness/firstmate/worktrees/extension-async-jobs-api/packages/coding-agent/src/cli.ts}
+omp_src=${FM_OMP_SRC:-}
 controller="$repo_root/.omp/extensions/fm-compiled-executor-controller.ts"
 
-if [ ! -f "$omp_src" ]; then
-	echo "SKIP: OMP source with ctx.asyncJobs not found at $omp_src (set FM_OMP_SRC)"
+if [ -z "$omp_src" ] || [ ! -f "$omp_src" ]; then
+	echo "SKIP: set FM_OMP_SRC to an OMP source CLI that ships ctx.asyncJobs"
 	exit 0
 fi
 if ! command -v bun >/dev/null 2>&1; then
