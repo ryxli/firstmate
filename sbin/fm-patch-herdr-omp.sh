@@ -13,10 +13,11 @@
 # handoff may use the stable ID to preserve authority when a session file moves,
 # while stale heartbeats and publish validation require exact identity. The
 # claim also supports interactive in-memory sessions that have no file and
-# survives extension module reloads but dies with the OMP process. Only
-# interactive startup/new/resume/fork/handoff events can establish or replace it;
-# reload, session_init, agentKind=sub, and headless contexts cannot mint or
-# overwrite authority.
+# survives extension module reloads but dies with the OMP process. A fresh
+# process may reacquire an absent claim only through a top-level interactive
+# resume with an exact session tuple. Only interactive startup/new/resume/fork/
+# handoff events can establish or replace it; reload, session_init, agentKind=sub,
+# and headless contexts cannot mint or overwrite authority.
 #
 # herdr owns this file ("reinstalling or updating overwrites this file"), so we
 # cannot fix it upstream and cannot expect edits to survive an update. This
@@ -51,7 +52,7 @@ set -u
 
 MARKER="fm-resync-heartbeat"
 PATCH_MARKER="fm-resync-heartbeat-lifecycle-invariant"
-ROOT_CLAIM_MARKER="fm-exact-root-session-claim-v2"
+ROOT_CLAIM_MARKER="fm-exact-root-session-claim-v4"
 RESYNC_MS="${FM_HERDR_RESYNC_MS:-15000}"
 
 TARGET="$HOME/.omp/agent/extensions/herdr-omp-agent-state.ts"
@@ -162,7 +163,7 @@ src = heartbeat_re.sub("", src)
 # integration. A Symbol.for key gives reload continuity without crossing a
 # process boundary.
 root_helper_re = re.compile(
-    r'// fm-exact-root-session-claim-v(?:1|2): process-local exact root authority\.\n'
+    r'// fm-exact-root-session-claim-v(?:1|2|3|4): process-local exact root authority\.\n'
     r'.*?(?=export default function)',
     re.S,
 )
@@ -344,17 +345,34 @@ activation = '''  function validateRootSession(
     }
 
     const tuple = exactRootSessionTuple(ctx);
-    const isSameSessionReload =
+    const claim = processRootSessionClaim();
+    const hasMatchingPreviousSessionFile =
+      typeof event?.previousSessionFile === "string" &&
+      event.previousSessionFile.length > 0 &&
+      event.previousSessionFile === tuple?.rootSessionFile;
+    // A same-file resume with an existing process claim is a stale reload.
+    // A fresh process may mint authority only for an explicit same-file resume.
+    const isFreshSameSessionResume =
+      effectiveSessionStartSource === "resume" &&
+      claim === undefined &&
+      hasMatchingPreviousSessionFile;
+    const isStaleSameSessionReload =
       effectiveSessionStartSource === "reload" ||
       (effectiveSessionStartSource === "resume" &&
-        event?.previousSessionFile === tuple?.rootSessionFile);
+        hasMatchingPreviousSessionFile &&
+        claim !== undefined);
+    const lacksFreshResumeProof =
+      effectiveSessionStartSource === "resume" &&
+      claim === undefined &&
+      !isFreshSameSessionResume;
     if (
       !mayClaim ||
       !tuple ||
       hasRootChildMarker(event, ctx) ||
       !allowedRootStartReasons.has(effectiveSessionStartSource) ||
       ctx?.hasUI !== true ||
-      isSameSessionReload
+      lacksFreshResumeProof ||
+      isStaleSameSessionReload
     ) {
       return false;
     }

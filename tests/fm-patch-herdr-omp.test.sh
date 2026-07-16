@@ -42,6 +42,7 @@ interface PublishRecord {
 interface TestBackchannel {
   getAgentActive: () => boolean;
   getLog: () => PublishRecord[];
+  getCalls: () => string[];
 }
 
 interface PiHandle {
@@ -81,7 +82,11 @@ export default function register(pi: PiHandle): void {
     calls.push("clearFailureState");
   }
 
-  pi.__test = { getAgentActive: () => agentActive, getLog: () => publishLog };
+  pi.__test = {
+    getAgentActive: () => agentActive,
+    getLog: () => publishLog,
+    getCalls: () => calls,
+  };
 
   let rootSession = false;
 
@@ -318,6 +323,58 @@ PY
   pass "a file carrying the prior buggy heartbeat is detected as unpatched and upgrades to the corrected shape"
 }
 
+test_upgrade_from_v3_resume_gate_converges() {
+  local fresh="$TMP_ROOT/v4-fresh.ts"
+  local prior="$TMP_ROOT/v3-resume-gate.ts"
+  write_pristine_fixture "$fresh"
+  write_pristine_fixture "$prior"
+  "$PATCHER" --file "$fresh" >/dev/null || fail "fresh v4 apply failed"
+  "$PATCHER" --file "$prior" >/dev/null || fail "prior v3 precursor apply failed"
+  python3 - "$prior" <<'PY'
+import io, sys
+path = sys.argv[1]
+src = io.open(path, encoding="utf-8").read()
+modern = '''    const claim = processRootSessionClaim();
+    const hasMatchingPreviousSessionFile =
+      typeof event?.previousSessionFile === "string" &&
+      event.previousSessionFile.length > 0 &&
+      event.previousSessionFile === tuple?.rootSessionFile;
+    // A same-file resume with an existing process claim is a stale reload.
+    // A fresh process may mint authority only for an explicit same-file resume.
+    const isFreshSameSessionResume =
+      effectiveSessionStartSource === "resume" &&
+      claim === undefined &&
+      hasMatchingPreviousSessionFile;
+    const isStaleSameSessionReload =
+      effectiveSessionStartSource === "reload" ||
+      (effectiveSessionStartSource === "resume" &&
+        hasMatchingPreviousSessionFile &&
+        claim !== undefined);
+    const lacksFreshResumeProof =
+      effectiveSessionStartSource === "resume" &&
+      claim === undefined &&
+      !isFreshSameSessionResume;
+'''
+prior = '''    const isSameSessionReload =
+      effectiveSessionStartSource === "reload" ||
+      (effectiveSessionStartSource === "resume" &&
+        event?.previousSessionFile === tuple?.rootSessionFile);
+'''
+assert modern in src, "fresh v4 activation gate missing"
+src = src.replace(modern, prior, 1)
+src = src.replace("// fm-exact-root-session-claim-v4:", "// fm-exact-root-session-claim-v3:", 1)
+src = src.replace("      lacksFreshResumeProof ||\n      isStaleSameSessionReload", "      isSameSessionReload", 1)
+io.open(path, "w", encoding="utf-8").write(src)
+PY
+  "$PATCHER" --check --file "$prior"
+  local rc=$?
+  [ "$rc" -eq 1 ] || fail "--check accepted the prior v3 resume gate"
+  "$PATCHER" --file "$prior" >/dev/null || fail "upgrade from prior v3 resume gate failed"
+  diff -u "$fresh" "$prior" \
+    || fail "upgrading the prior v3 resume gate must converge to a fresh v4 apply"
+  pass "a prior v3 resume gate is re-patched to the constrained fresh-process shape"
+}
+
 test_upgrade_from_actual_parent_7a20f3d() {
   command -v bun >/dev/null 2>&1 \
     || fail "bun is required for the parent patch upgrade regression"
@@ -403,7 +460,7 @@ function sameRootSessionClaim(
 
 '''
 helper_re = re.compile(
-    r'// fm-exact-root-session-claim-v2: process-local exact root authority\.\n'
+    r'// fm-exact-root-session-claim-v4: process-local exact root authority\.\n'
     r'.*?(?=export default function)',
     re.S,
 )
@@ -420,7 +477,7 @@ PY
   "$PATCHER" --check --file "$fixture" \
     || fail "--check rejected the upgraded parent output"
 
-  grep -q "fm-exact-root-session-claim-v2" "$fixture" \
+  grep -q "fm-exact-root-session-claim-v4" "$fixture" \
     || fail "upgrade did not version the root helper marker"
   grep -q "rootSessionFile?: string;" "$fixture" \
     || fail "upgrade did not install the ID-only root helper"
@@ -839,18 +896,88 @@ MJS
   printf '%s' "$out" | grep -q "^PASS" || fail "exact-session runtime harness did not report PASS: $out"
 
   cat >"$TMP_ROOT/root-claim-fresh-process.mjs" <<'MJS'
-const claim = globalThis[Symbol.for("herdr:omp:root-session-claim:v1")];
-if (claim !== undefined) {
-  console.error(`FAIL: process-global root claim survived process exit: ${JSON.stringify(claim)}`);
-  process.exit(1);
+const fixturePath = process.argv[2];
+const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
+function assert(condition, message) {
+  if (!condition) {
+    console.error(`FAIL: ${message}`);
+    process.exit(1);
+  }
 }
-console.log("PASS: root claim is absent in a fresh OMP-equivalent process");
+
+assert(globalThis[claimKey] === undefined, "fresh process began with a stale root claim");
+process.env.HERDR_PANE_ID = "w1:p1";
+process.env.HERDR_SOCKET_PATH = "/tmp/herdr.sock";
+const handlers = new Map();
+const pi = { on(event, fn) { handlers.set(event, fn); return pi; } };
+const originalSetInterval = globalThis.setInterval;
+globalThis.setInterval = () => ({ unref() {} });
+const mod = await import(`${fixturePath}?fresh-process-resume`);
+mod.default(pi);
+globalThis.setInterval = originalSetInterval;
+
+const rootSessionFile = "/sessions/fresh-resumed-root.jsonl";
+const rootSessionId = "fresh-resumed-root-id";
+function makeCtx(
+  file,
+  id,
+  { hasUI = true, agentKind = "main", branch = [] } = {},
+) {
+  return {
+    hasUI,
+    agentKind,
+    isIdle: () => false,
+    sessionManager: {
+      getSessionFile: () => file,
+      getSessionId: () => id,
+      getBranch: () => branch,
+    },
+  };
+}
+
+const rejectedResumes = [
+  ["headless", { reason: "resume", previousSessionFile: "/sessions/headless.jsonl" }, makeCtx("/sessions/headless.jsonl", "headless", { hasUI: false })],
+  ["session_init child", { reason: "resume", previousSessionFile: "/sessions/task-child.jsonl" }, makeCtx("/sessions/task-child.jsonl", "task-child", { branch: [{ type: "session_init" }] })],
+  ["subagent", { reason: "resume", agentKind: "sub", previousSessionFile: "/sessions/subagent.jsonl" }, makeCtx("/sessions/subagent.jsonl", "subagent", { agentKind: "sub" })],
+  ["ambiguous branch", { reason: "resume", previousSessionFile: "/sessions/ambiguous.jsonl" }, makeCtx("/sessions/ambiguous.jsonl", "ambiguous", { branch: null })],
+  ["missing previous file", { reason: "resume" }, makeCtx("/sessions/missing.jsonl", "missing")],
+  ["different previous file", { reason: "resume", previousSessionFile: "/sessions/other.jsonl" }, makeCtx("/sessions/different.jsonl", "different")],
+];
+for (const [label, event, rejectedCtx] of rejectedResumes) {
+  handlers.get("session_start")?.(event, rejectedCtx);
+  assert(globalThis[claimKey] === undefined, `${label} minted root authority`);
+  assert(pi.__test.getLog().length === 0, `${label} published root state`);
+}
+
+const ctx = makeCtx(rootSessionFile, rootSessionId);
+handlers.get("session_start")?.(
+  { reason: "resume", previousSessionFile: rootSessionFile },
+  ctx,
+);
+assert(
+  JSON.stringify(globalThis[claimKey]) === JSON.stringify({
+    rootSessionFile,
+    rootSessionId,
+  }),
+  `fresh-process root resume did not reacquire the exact claim: ${JSON.stringify(globalThis[claimKey])}`,
+);
+assert(pi.__test.getLog().length > 0, "fresh-process root resume did not publish");
+assert(
+  pi.__test.getCalls().includes("reportSession:resume"),
+  "fresh-process root resume did not register the root session",
+);
+handlers.get("agent_start")?.({}, ctx);
+assert(
+  pi.__test.getAgentActive() === true,
+  "fresh-process root resume did not publish Working after agent_start",
+);
+console.log("PASS: fresh-process same-session root resume claimed and published");
 MJS
   local fresh_out
-  fresh_out=$(bun run "$TMP_ROOT/root-claim-fresh-process.mjs" 2>&1)
+  fresh_out=$(bun run "$TMP_ROOT/root-claim-fresh-process.mjs" "$fixture" 2>&1)
   local fresh_rc=$?
-  [ "$fresh_rc" -eq 0 ] || fail "stale root claim survived process exit: $fresh_out"
-  printf '%s' "$fresh_out" | grep -q "^PASS" || fail "fresh-process claim check did not report PASS: $fresh_out"
+  [ "$fresh_rc" -eq 0 ] || fail "fresh-process same-session resume regressed: $fresh_out"
+  printf '%s' "$fresh_out" | grep -q "^PASS" || fail "fresh-process resume harness did not report PASS: $fresh_out"
   pass "exact-session root claim is process-global, reload-safe, replaceable, and child-safe"
 }
 
@@ -1120,6 +1247,7 @@ test_apply_enforces_invariant
 test_patch_check_requires_publish_guard_at_publish_state
 test_apply_is_idempotent
 test_upgrade_from_prior_buggy_heartbeat_converges
+test_upgrade_from_v3_resume_gate_converges
 test_upgrade_from_actual_parent_7a20f3d
 test_missing_target_skips_cleanly
 test_active_turn_survives_background_job_wait_across_heartbeat
