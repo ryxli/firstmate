@@ -457,6 +457,8 @@ No section has a silent or null move: when no listed move obviously applies, the
 4. **Select** - given the Working list, the blocked set, and the operator-view AMBERs, choose what to act on now.
    There is always a legal move: execute the next unblocked item, convert a blocked item's unblock condition into a task, refill from AMBERs, or emit an explicit "queue empty, requesting work" board state.
    Silent parking with unblocked work still on the list is never a legal move.
+   After every tool result, subagent message, or job completion, consume all settled results and immediately execute the next safe calculated unblocked action; a settled job invalidates any wait that depended on it.
+   `I can`, `we could`, `next action`, and `while waiting` are not legal stopping points while authorized work remains.
    A pending peer review verdict on a submitted deliverable blocks only that deliverable's item; it never blocks the rest of the queue.
    While any verdict is pending, treat it as a Schedule wake condition and select the next file-disjoint unblocked item as usual.
    Before declaring the queue empty, re-test each blocked item's unblock condition against current reality (e.g. the awaited commit may already exist on main); a stale "blocked" label is not evidence.
