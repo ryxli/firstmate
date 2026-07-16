@@ -74,8 +74,9 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-reload-tests.XXXXXX")
 #   FM_FAKE_HERDR_POST_AGENT_SESSION_ID - agent_session_id AFTER resume
 #   FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID - identity after GET threshold
 #   FM_FAKE_HERDR_REPLACE_AFTER_GET - get count at which replacement identity appears
-#   FM_FAKE_HERDR_LEGACY_AGENT_SESSION - omit top-level agent and emit the
-#                                legacy agent_session object (0/1)
+#   FM_FAKE_HERDR_LEGACY_AGENT_SESSION - legacy pane encoding before resume:
+#                                1|omp, non-omp, or malformed (default 0)
+#   FM_FAKE_HERDR_POST_LEGACY_AGENT_SESSION - legacy pane encoding after resume
 #   FM_FAKE_HERDR_SESSION      - session id in pane read BEFORE resume (default "")
 #   FM_FAKE_HERDR_POST_SESSION - session id in pane read AFTER resume (default: FM_FAKE_HERDR_SESSION)
 #   FM_FAKE_HERDR_CURRENT      - pane_id returned by pane current (empty = failure)
@@ -145,10 +146,22 @@ case "${1:-}" in
           session_path_present="${FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH_PRESENT-${session_path_present}}"
           session_path="${FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH-${session_path}}"
         fi
-        if [ "${FM_FAKE_HERDR_LEGACY_AGENT_SESSION:-0}" = 1 ] && [ ! -f "$RESUMED_FILE" ]; then
-          printf '{"id":"cli:pane:get","result":{"pane":{"agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session":{"agent":"omp","kind":"id","value":"%s"}}}}\n' "$status" "$cwd" "$session_id"
-          exit 0
+        if [ -f "$RESUMED_FILE" ]; then
+          legacy_mode="${FM_FAKE_HERDR_POST_LEGACY_AGENT_SESSION:-0}"
+        else
+          legacy_mode="${FM_FAKE_HERDR_LEGACY_AGENT_SESSION:-0}"
         fi
+        case "$legacy_mode" in
+          1|omp)
+            printf '{"id":"cli:pane:get","result":{"pane":{"agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session":{"agent":"omp","kind":"id","value":"%s"}}}}\n' "$status" "$cwd" "$session_id"
+            exit 0 ;;
+          non-omp)
+            printf '{"id":"cli:pane:get","result":{"pane":{"agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session":{"agent":"other","kind":"id","value":"%s"}}}}\n' "$status" "$cwd" "$session_id"
+            exit 0 ;;
+          malformed)
+            printf '{"id":"cli:pane:get","result":{"pane":{"agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session":[]}}}\n' "$status" "$cwd"
+            exit 0 ;;
+        esac
         if [ "$session_path_present" = "1" ]; then
           printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session_id":"%s","agent_session_path":"%s"}}}\n' "$agent" "$status" "$cwd" "$session_id" "$session_path"
         else
@@ -1158,6 +1171,43 @@ test_legacy_agent_session_compositor_matrix() {
 }
 
 
+test_allow_fresh_post_reload_legacy_agent_session_proof() {
+  local CASE="$TMP_ROOT/case-legacy-post-proof"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  FM_RELOAD_NO_GUARD=1 \
+  FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+  FM_FAKE_HERDR_POST_LEGACY_AGENT_SESSION=1 \
+  FM_FAKE_HERDR_STATUS=unknown \
+  FM_FAKE_HERDR_SCREEN=empty-box \
+  FM_FAKE_HERDR_SESSION="" \
+    run_reload "$CASE" w1:p1 --allow-fresh >/dev/null 2>/dev/null \
+    || fail "(legacy/proof) fresh legacy agent_session did not prove reload"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    || fail "(legacy/proof) fresh legacy target did not receive /quit"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 omp -c" \
+    || fail "(legacy/proof) fresh legacy target did not start omp -c"
+  pass "(legacy/proof) fresh legacy agent_session proves post-reload OMP"
+}
+
+test_post_reload_invalid_legacy_agent_session_refuses_proof() {
+  local mode CASE
+  for mode in non-omp malformed; do
+    CASE="$TMP_ROOT/case-legacy-post-$mode"
+    mkdir -p "$CASE"
+    make_fake_herdr "$CASE" >/dev/null
+    FM_RELOAD_NO_GUARD=1 \
+    FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+    FM_FAKE_HERDR_POST_LEGACY_AGENT_SESSION="$mode" \
+    FM_FAKE_HERDR_STATUS=unknown \
+    FM_FAKE_HERDR_SCREEN=empty-box \
+    FM_FAKE_HERDR_SESSION="" \
+      run_reload "$CASE" w1:p1 --allow-fresh >/dev/null 2>/dev/null \
+      && fail "(legacy/proof/$mode) invalid legacy pane became restart proof"
+  done
+  pass "(legacy/proof) non-OMP and malformed legacy panes do not prove restart"
+}
+
 test_done_allows_quit() {
   local CASE="$TMP_ROOT/case-w"
   mkdir -p "$CASE"
@@ -1202,6 +1252,8 @@ test_unknown_refuses_quit
 test_self_reload_legacy_agent_session_idle_reloads
 test_legacy_agent_session_identity_byte_exact
 test_legacy_agent_session_compositor_matrix
+test_allow_fresh_post_reload_legacy_agent_session_proof
+test_post_reload_invalid_legacy_agent_session_refuses_proof
 test_durable_target_meta_untouched_when_pane_survives
 test_self_reload_durable_target_meta_rebound
 test_stale_agent_shell_detection

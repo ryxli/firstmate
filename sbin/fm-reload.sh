@@ -675,13 +675,17 @@ herdr pane run "$RELAUNCH_PANE" "$EFFECTIVE_CMD" || {
 # ---------------------------------------------------------------------------
 # Post-reload proof: verify omp restarted in the pane.
 # ---------------------------------------------------------------------------
+PROOF_PANE=""
 PROOF_AGENT=""
 PROOF_DEADLINE=$((SECONDS + PROOF_TIMEOUT))
 while [ "$SECONDS" -lt "$PROOF_DEADLINE" ]; do
-  PROOF_AGENT="$(herdr pane get "$RELAUNCH_PANE" 2>/dev/null \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("result",{}).get("pane",{}).get("agent",""))' \
-    2>/dev/null || true)"
-  if [ "$PROOF_AGENT" = "omp" ]; then
+  IFS=$'\t' read -r PROOF_PANE PROOF_AGENT _PROOF_STATUS _PROOF_LEGACY_OMP <<EOF
+$(pane_snapshot "$RELAUNCH_PANE")
+EOF
+  # pane_snapshot is the canonical decoder for current and legacy Herdr OMP
+  # identity. Do not read pane.agent directly: legacy panes encode it solely
+  # as agent_session.agent.
+  if [ "$PROOF_PANE" = "present" ] && [ "$PROOF_AGENT" = "omp" ]; then
     break
   fi
   sleep 0.5
