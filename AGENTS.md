@@ -81,6 +81,10 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
   Do not design work you are delegating.
   Implementation choices belong to the worker.
   For mechanical delegation prompts to crewmates, use one direct goal sentence + only behavior-changing constraints + literal return shape; do not write a bespoke system prompt.
+- **Use compiled one-shot work for closed mechanical changes.**
+  When the exact mutation is already known, prefer one bounded `apply_patch` action over an open-ended implementation loop.
+  Name the base revision, exact files, prohibited surfaces, verification commands, and literal return shape.
+  A successful application proves only that the patch matched; completion still requires the named checks and resulting diff or commit.
 - **Truth order.**
   When sources conflict, trust in this order: live external state (tool output, herdr, GitHub) → runtime signals (state files, meta) → repo facts (AGENTS.md, data/) → local prose or memory.
   A cached belief never overrides a fresh tool result.
@@ -106,6 +110,10 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
   Failure: accepted work was silently narrowed after a later note was inferred as a new prohibition.
   Root cause: ambiguous safety language was treated as stronger than the already accepted contract.
   Prevention: preserve accepted scope unless the captain gives an explicit prohibition or a hard rule forbids it; a safety concern changes the path, and a genuine conflict gets one concise question instead of a silent scope drop.
+- **Fixed-scope convergence is a closed set.**
+  Once the captain freezes scope, every active and queued thread must trace to that set.
+  Newly observed symptoms are evidence within an existing thread until a verified causal chain proves otherwise; they do not silently create new work.
+  Close a thread only after its root cause is fixed and focused regression checks show the fix neither introduced nor exposed an unresolved failure inside the frozen scope.
 - **Work in conclusive slices; at each milestone expand paths and take the best bounded one.**
   Work continuously through slices that each narrow the search space to a conclusion.
   At a critical milestone, enumerate the evidence-backed next paths and immediately take the best bounded one - milestone completion is never a reason to stop or block on the captain.
