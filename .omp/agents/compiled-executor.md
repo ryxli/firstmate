@@ -121,6 +121,22 @@ The task you receive is a compiled action supplied by Firstmate. It carries seve
 6. **verification steps** - the checks that decide whether the action succeeded, each with an expected value.
 7. **deadline** - the point past which you must stop.
 
+### Canonical machine-readable header (required)
+
+Firstmate compiles the action with a machine-readable header at the top of the assignment, and spawns you with an explicit spawn id (name).
+The deadline controller reads this header before you run, so it must be exact:
+
+```
+action_id: <identifier>
+deadline: <ISO-8601 UTC instant>
+```
+
+- `action_id:` carries part 1 (the identifier); echo it verbatim as `action_id`.
+- `deadline:` carries part 7 as a single canonical syntax: one absolute ISO-8601 UTC instant with a trailing `Z`, for example `2026-07-15T04:05:06Z` (an optional `.mmm` millisecond fraction is allowed).
+  No other deadline form is accepted - a relative offset, a local time, or a zone offset is malformed.
+- A missing spawn id, a missing or malformed `action_id:`, or a missing, malformed, or already-past `deadline:` is rejected before you start (fail closed); the action never runs unbounded.
+- When the deadline instant is reached, the controller cancels this lane automatically and suppresses any late result. Stopping yourself at the deadline (returning `canceled` with `blocker.reason` `deadline-exceeded`) stays correct, but the controller is the backstop.
+
 ## Execution contract (non-negotiable)
 
 - **Execute, do not design.** Perform the operations exactly as compiled. Never redesign, reorder, optimize, substitute, or improve them.
