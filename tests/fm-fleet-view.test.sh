@@ -63,4 +63,31 @@ assert 'typeof snap.health.homes === "number"' in text
 assert 'home_count: homeCount' in text
 PY
 printf '%s\n' 'ok - visual projection carries authoritative multi-home count'
+
+cat > "$TMP/live-status-input.json" <<'JSON'
+{"schema":"fleet-snapshot/1","home":"/tmp/home-a","homePaths":["/tmp/home-a"],"health":{"state":"healthy","homes":1,"missingHomes":0,"livePanes":2,"herdr":"ok"},"agents":[{"key":"home-a/done-idle","id":"done-idle","owner":"home-a","kind":"ship","status":"done","statusFile":{"state":"done","text":"finished"},"home":"/tmp/home-a","topology":{"home":"/tmp/home-a","pane":"w1:p1","workspace":"w1","tab":"t1","agentStatus":"idle"}},{"key":"home-a/done-working","id":"done-working","owner":"home-a","kind":"ship","status":"done","statusFile":{"state":"done","text":"finished"},"home":"/tmp/home-a","topology":{"home":"/tmp/home-a","pane":"w1:p2","workspace":"w1","tab":"t1","agentStatus":"working"}},{"key":"home-a/done-missing","id":"done-missing","owner":"home-a","kind":"ship","status":"done","statusFile":{"state":"done","text":"finished"},"home":"/tmp/home-a","topology":{"home":"/tmp/home-a","degraded":"missing-pane"}}],"tasks":[],"attention":[],"pending":[],"mates":[],"otherLivePanes":[],"notes":[]}
+JSON
+"$ROOT/sbin/fm-fleet-view.sh" --input "$TMP/live-status-input.json" --no-open --output "$TMP/live-status.html" >/dev/null
+bun - "$TMP/live-status.html" <<'JS'
+import { readFileSync } from "node:fs";
+
+const html = readFileSync(process.argv[2], "utf8");
+const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
+const source = scripts.at(-1)?.[1] ?? "";
+const exposed = source.replace(
+  /\n  render\(\);\n\}\)\(\);\s*$/,
+  "\n  globalThis.__fleetSnapshotTree = snapshotTree;\n})();",
+);
+if (exposed === source) throw new Error("could not expose snapshotTree fixture seam");
+(0, eval)(exposed);
+const payloadText = html.match(/<script type="application\/json" id="fv-payload">([\s\S]*?)<\/script>/)?.[1];
+if (!payloadText) throw new Error("missing embedded fleet payload");
+const tree = globalThis.__fleetSnapshotTree(JSON.parse(payloadText).fleet);
+const panes = tree.workspaces.flatMap(workspace => workspace.tabs.flatMap(tab => tab.panes));
+const byLabel = new Map(panes.map(pane => [pane.label, pane.agent_status]));
+if (byLabel.get("done-idle") !== "idle") throw new Error(`done file plus live idle displayed ${byLabel.get("done-idle")}`);
+if (byLabel.get("done-working") !== "working") throw new Error(`done file plus live working displayed ${byLabel.get("done-working")}`);
+if (byLabel.get("done-missing") !== "done") throw new Error("missing pane did not fall back to persisted status");
+JS
+printf '%s\n' 'ok - fleet view prefers reachable live status over persisted done status'
 printf '%s\n' 'ok - visual wrappers reject flag values and honor explicit homes'

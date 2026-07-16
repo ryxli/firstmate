@@ -290,12 +290,11 @@ function buildAgents(homes: ParsedHome[], panes: HerdrAgent[], owners: Map<strin
 			const pane = paneForTrackedAgent(home, agent.meta, byPane);
 			const statusFile = agent.status;
 			const liveStatus = pane?.agent_status;
-			const statusKnown = isTerminalStatus(statusFile);
 			const persistedStatus = publicStatusState(statusFile);
-			// Terminal file signals win; otherwise live Herdr wins when present,
-			// with the persisted signal as the offline/missing-pane fallback.
-			const status = statusKnown ? persistedStatus : liveStatus ?? persistedStatus;
-			const statusText = statusKnown || !liveStatus ? statusFile?.text : undefined;
+			// A validated live pane drives display state. The parsed file remains
+			// separate for disposition/attention and is the offline fallback.
+			const status = liveStatus ?? persistedStatus;
+			const statusText = liveStatus ? undefined : statusFile?.text;
 			agents.push({
 				key: canonicalTaskKey(owner, agent.id),
 				id: agent.id,

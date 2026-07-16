@@ -96,10 +96,36 @@ describe("canonical FleetSnapshot collector", () => {
 			writeFileSync(join(fixture.home, "state", "self.status"), "done: PR checks green\n");
 			const provenance = await collectSnapshot("2026-07-13T00:00:00.250Z");
 			const provenancePending = provenance.pending ?? [];
+			const idleWithDoneFile = provenance.agents?.find(agent => agent.key === "home/self");
+			expect(idleWithDoneFile).toMatchObject({
+				status: "idle",
+				liveStatus: "idle",
+				statusFile: { state: "done", text: "PR checks green" },
+			});
 			expect(provenancePending.map(item => item.key).slice(0, 2)).toEqual(["home/self", "home/done"]);
 			expect(provenancePending.find(item => item.key === "home/self")?.reason).toContain("PR checks green");
 			expect(provenancePending.find(item => item.key === "home/done")?.reason).toContain("closeout");
 			expect(provenancePending.find(item => item.key === "home/done")?.reason).not.toContain("done:");
+			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [
+				{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "session-1", agent: "omp" },
+				{ pane_id: "w1:p2", cwd: fixture.home, agent_status: "done", workspace_id: "w1", tab_id: "t1", agent: "omp" },
+			] } }));
+			const workingWithDoneFile = await collectSnapshot("2026-07-13T00:00:00.375Z");
+			expect(workingWithDoneFile.agents?.find(agent => agent.key === "home/self")).toMatchObject({
+				status: "working",
+				liveStatus: "working",
+				statusFile: { state: "done", text: "PR checks green" },
+			});
+			expect(workingWithDoneFile.pending?.find(item => item.key === "home/self")?.reason).toContain("PR checks green");
+			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [
+				{ pane_id: "w1:p2", cwd: fixture.home, agent_status: "done", workspace_id: "w1", tab_id: "t1", agent: "omp" },
+			] } }));
+			const missingPaneWithDoneFile = await collectSnapshot("2026-07-13T00:00:00.437Z");
+			expect(missingPaneWithDoneFile.agents?.find(agent => agent.key === "home/self")).toMatchObject({
+				status: "done",
+				statusFile: { state: "done", text: "PR checks green" },
+				topology: { degraded: "missing-pane" },
+			});
 			writeFileSync(join(fixture.home, "state", "self.status"), "blocked: waiting on captain\n");
 			const blocked = await collectSnapshot("2026-07-13T00:00:00.500Z");
 			expect(blocked.pending?.find(item => item.id === "self")?.cls).toBe("CAPTAIN-BLOCKED");
@@ -276,7 +302,7 @@ describe("canonical FleetSnapshot collector", () => {
 			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
 		}
 	});
-	it("classifies semantic terminal text consistently with idle Herdr", async () => {
+	it("displays idle Herdr while preserving semantic terminal disposition", async () => {
 		const fixture = fixtureHome();
 		const oldHome = process.env.FM_HOME;
 		const oldPanes = process.env.FM_FLEET_PANES_FILE;
@@ -286,7 +312,7 @@ describe("canonical FleetSnapshot collector", () => {
 		writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "idle", agent: "omp" }] } }));
 		try {
 			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
-			expect(snapshot.agents?.find(agent => agent.key === "home/self")?.status).toBe("done");
+			expect(snapshot.agents?.find(agent => agent.key === "home/self")?.status).toBe("idle");
 			expect(snapshot.tasks.find(task => task.key === "home/self")?.workerState).toBe("done");
 			expect(snapshot.attention?.find(item => item.key === "home/self")?.cls).toBe("REVIEW-READY");
 			expect(render(snapshot, "tasks")).toContain("\u2713");
@@ -682,7 +708,10 @@ describe("canonical FleetSnapshot collector", () => {
 		try {
 			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
 			expect(snapshot.home).toBe(fixture.home);
-			expect(snapshot.agents?.find(agent => agent.id === "self")?.status).toBe("failed");
+			expect(snapshot.agents?.find(agent => agent.id === "self")).toMatchObject({
+				status: "working",
+				statusFile: { state: "failed", text: "override state" },
+			});
 			expect(snapshot.pending?.find(item => item.id === "self")?.cls).toBe("CAPTAIN-BLOCKED");
 		} finally {
 			if (oldHome === undefined) delete process.env.FM_HOME;

@@ -485,12 +485,15 @@
           status: topo.agentStatus || "unknown", panes: [] };
         ws.tabs.push(tab);
       }
+      var liveAgentStatus = hasPane && !topo.degraded && present(topo.agentStatus)
+        ? topo.agentStatus
+        : null;
       tab.panes.push({
         id: hasPane ? topo.pane : "",
         label: agent.id,
         agent_identity: hasPane ? "omp" : "",
-        agent_status: agent.status || topo.agentStatus || "unknown",
-        live_agent_status: topo.degraded ? "unknown" : (hasPane ? (topo.agentStatus || "unknown") : null),
+        agent_status: liveAgentStatus || agent.status || "unknown",
+        live_agent_status: topo.degraded ? "unknown" : liveAgentStatus,
         cwd: topo.cwd || "",
         task: {
           key: agent.key || "",
