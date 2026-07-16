@@ -44,8 +44,8 @@ EOF
       status=${status#"${status%%[![:space:]]*}"}
       status=${status%"${status##*[![:space:]]}"}
       case "$status" in
-        Pending*|pending*|Active|active|Active\ /*|active\ /*)
-          printf '%s\t%s\n' "$line_no" "$outcome" >> "$source_entries"
+        Pending*|pending*|Active*|active*)
+          printf '%s\t%s\t%s\n' "$line_no" "$status" "$outcome" >> "$source_entries"
           ;;
       esac
       ;;
@@ -118,7 +118,7 @@ token_count() {
 }
 
 source_count=0
-while IFS=$'\t' read -r source_line outcome; do
+while IFS=$'\t' read -r source_line status outcome; do
   [ -n "$source_line" ] || continue
   source_count=$((source_count + 1))
   expected_count=$(token_count "$outcome")
@@ -136,9 +136,14 @@ while IFS=$'\t' read -r source_line outcome; do
     fi
   done < "$readback_entries"
 
-  # A matching item must carry at least two meaningful words and preserve
-  # at least 40 percent of the source outcome's meaningful words.
-  if [ "$best_score" -ge 2 ] && [ $((best_score * 100)) -ge $((expected_count * 40)) ]; then
+  # A matching item must carry at least two meaningful words. Active
+  # constraints may be paraphrased as a boundary in the readback, so they
+  # use a lower overlap ratio than pending work outcomes.
+  required_ratio=40
+  case "$status" in
+    Active*|active*) required_ratio=25 ;;
+  esac
+  if [ "$best_score" -ge 2 ] && [ $((best_score * 100)) -ge $((expected_count * required_ratio)) ]; then
     printf 'PASS: current-actions.md:%s ↔ firstmate-readback.md:%s\n' "$source_line" "$best_line"
     case ",$matched_lines," in
       *",$best_line,"*) ;;

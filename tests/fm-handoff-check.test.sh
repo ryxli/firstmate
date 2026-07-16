@@ -44,6 +44,10 @@ test_valid_pair() {
     *) fail "valid handoff pair missed source line 10: $out" ;;
   esac
   case "$out" in
+    *'PASS: current-actions.md:11 ↔ firstmate-readback.md:6'*) ;;
+    *) fail "valid handoff pair missed active constraint line 11: $out" ;;
+  esac
+  case "$out" in
     *'PASS: current-actions.md:13 ↔ firstmate-readback.md:7'*) ;;
     *) fail "valid handoff pair missed source line 13: $out" ;;
   esac
