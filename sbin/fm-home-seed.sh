@@ -32,6 +32,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 REG="$DATA/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
+# shellcheck source=sbin/fm-ship-ext-lib.sh
+. "$SCRIPT_DIR/fm-ship-ext-lib.sh"
 
 usage() {
   echo "usage: fm-home-seed.sh <id> <home|-> <project>..." >&2
@@ -833,40 +835,14 @@ write_registry() {
 }
 
 install_ship_extensions() {
-  # Install a symlink per entry in .omp/extensions/ (canonical) into <home>/.omp/extensions/.
-  # Idempotent: correct symlink = no-op; stale/wrong symlink = refreshed;
-  # real file the home provides itself = left alone.
-  # Writes created/replaced symlink paths to SEED_CREATED_EXT_LINKS_FILE for rollback.
-  local home=$1
-  local ext_src ext_dst entry name link_path canonical existing_target
+  # Delegate the idempotent symlink loop to the shared helper, recording created
+  # and refreshed link paths to SEED_CREATED_EXT_LINKS_FILE for rollback.
+  local home=$1 ext_src
   ext_src="$(cd "$SCRIPT_DIR/.." && pwd)/.omp/extensions"
-  [ -d "$ext_src" ] || return 0
-  ext_dst="$home/.omp/extensions"
-  if [ -d "$ext_dst" ]; then
-    SEED_EXT_DST_EXISTED=1
-  else
-    SEED_EXT_DST_EXISTED=0
-    mkdir -p "$ext_dst"
-  fi
-  for entry in "$ext_src"/*; do
-    [ -e "$entry" ] || continue
-    name=$(basename "$entry")
-    link_path="$ext_dst/$name"
-    canonical="$entry"
-    if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
-      continue
-    fi
-    if [ -L "$link_path" ]; then
-      existing_target=$(readlink "$link_path")
-      [ "$existing_target" = "$canonical" ] && continue
-      rm -f "$link_path"
-      ln -s "$canonical" "$link_path"
-      printf '%s\n' "$link_path" >> "${SEED_CREATED_EXT_LINKS_FILE:-/dev/null}"
-    else
-      ln -s "$canonical" "$link_path"
-      printf '%s\n' "$link_path" >> "${SEED_CREATED_EXT_LINKS_FILE:-/dev/null}"
-    fi
-  done
+  FM_SHIP_EXT_VERBOSE=0
+  FM_SHIP_EXT_TRACK_FILE="${SEED_CREATED_EXT_LINKS_FILE:-/dev/null}"
+  fm_link_ship_extensions "$home" "$ext_src" || return 1
+  SEED_EXT_DST_EXISTED="${FM_SHIP_EXT_DST_EXISTED:-0}"
 }
 
 seed_home() {

@@ -14,6 +14,8 @@ SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd -P)}"
 FM_HOME="${FM_HOME:-$FM_ROOT}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
+# shellcheck source=sbin/fm-ship-ext-lib.sh
+. "$SCRIPT_DIR/fm-ship-ext-lib.sh"
 
 usage() {
   echo "usage: fm-link-ship-ext.sh <id|home-path>" >&2
@@ -50,47 +52,18 @@ esac
 
 [ -d "$home" ] || { echo "error: home directory does not exist: $home" >&2; exit 1; }
 
-if [ ! -d "$EXT_SRC" ]; then
+FM_SHIP_EXT_VERBOSE=1
+FM_SHIP_EXT_TRACK_FILE=
+fm_link_ship_extensions "$home" "$EXT_SRC"
+
+if [ "${FM_SHIP_EXT_SRC_MISSING:-0}" = 1 ]; then
   printf 'ship-ext: no extensions dir at %s; nothing to do\n' "$EXT_SRC"
   exit 0
 fi
 
-ext_dst="$home/.omp/extensions"
-mkdir -p "$ext_dst"
-
-changed=0 skipped=0 noop=0
-for entry in "$EXT_SRC"/*; do
-  [ -e "$entry" ] || continue
-  name=$(basename "$entry")
-  link_path="$ext_dst/$name"
-  canonical="$entry"
-
-  if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
-    printf 'ship-ext: skip real file %s\n' "$name"
-    skipped=$((skipped + 1))
-    continue
-  fi
-
-  if [ -L "$link_path" ]; then
-    existing_target=$(readlink "$link_path")
-    if [ "$existing_target" = "$canonical" ]; then
-      noop=$((noop + 1))
-      continue
-    fi
-    rm -f "$link_path"
-    ln -s "$canonical" "$link_path"
-    printf 'ship-ext: refreshed %s -> %s\n' "$name" "$canonical"
-    changed=$((changed + 1))
-  else
-    ln -s "$canonical" "$link_path"
-    printf 'ship-ext: linked %s -> %s\n' "$name" "$canonical"
-    changed=$((changed + 1))
-  fi
-done
-
-if [ "$changed" -eq 0 ] && [ "$skipped" -eq 0 ]; then
-  printf 'ship-ext: all links up to date (%d)\n' "$noop"
+if [ "$FM_SHIP_EXT_CHANGED" -eq 0 ] && [ "$FM_SHIP_EXT_SKIPPED" -eq 0 ]; then
+  printf 'ship-ext: all links up to date (%d)\n' "$FM_SHIP_EXT_NOOP"
 else
   printf 'ship-ext: done (%d linked/refreshed, %d skipped, %d already up to date)\n' \
-    "$changed" "$skipped" "$noop"
+    "$FM_SHIP_EXT_CHANGED" "$FM_SHIP_EXT_SKIPPED" "$FM_SHIP_EXT_NOOP"
 fi
