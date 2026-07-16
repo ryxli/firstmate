@@ -156,6 +156,8 @@ launch_template() {
   esac
 }
 
+LAUNCH_FROM_TEMPLATE=0
+
 case "$ARG3" in
   *' '*)
     LAUNCH=$ARG3
@@ -171,6 +173,7 @@ case "$ARG3" in
     else
       LAUNCH=$(launch_template "$HARNESS" "$CREW_MODEL") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     fi
+    LAUNCH_FROM_TEMPLATE=1
     ;;
   *)
     HARNESS=$ARG3
@@ -179,6 +182,7 @@ case "$ARG3" in
     else
       LAUNCH=$(launch_template "$HARNESS" "$CREW_MODEL") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     fi
+    LAUNCH_FROM_TEMPLATE=1
     ;;
 esac
 
@@ -544,6 +548,11 @@ if [ "$HARNESS" = omp ] && [ "$KIND" = secondmate ] && [ "$SECONDMATE_RESUME" -e
   LAUNCH_CMD="omp --auto-approve -c"
 else
   LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
+fi
+if [ "$LAUNCH_FROM_TEMPLATE" -eq 1 ] && [ "$KIND" = secondmate ] && [ "$HARNESS" = omp ] \
+  && [ -f "$PROJ_ABS/config/omp.yml" ]; then
+  sq_omp_config=$(fm_shell_quote "$PROJ_ABS/config/omp.yml")
+  LAUNCH_CMD="omp --config $sq_omp_config${LAUNCH_CMD#omp}"
 fi
 if [ "$KIND" = secondmate ]; then
   sq_home=$(fm_shell_quote "$PROJ_ABS")
