@@ -115,10 +115,13 @@ try:
 except Exception:
     p=None
 if not isinstance(p,dict):
-    print("absent\t\tunknown")
+    print("absent\t\tunknown\t0")
 else:
-    print("present\t%s\t%s" % (p.get("agent",""), p.get("agent_status","unknown")))
-' 2>/dev/null || printf 'absent\t\tunknown\n'
+    legacy=p.get("agent_session")
+    legacy_omp=("agent" not in p and isinstance(legacy,dict) and legacy.get("agent") == "omp")
+    agent="omp" if legacy_omp else p.get("agent","")
+    print("present\t%s\t%s\t%s" % (agent, p.get("agent_status","unknown"), "1" if legacy_omp else "0"))
+' 2>/dev/null || printf 'absent\t\tunknown\t0\n'
 }
 
 pane_details() {
@@ -131,13 +134,19 @@ try:
 except Exception:
     p=None
 if not isinstance(p,dict):
-    print("\t".join(["N"] * 7))
+    print("\t".join(["N"] * 8))
 else:
+    agent=p.get("agent")
+    agent_present="agent" in p and agent is not None
     path=p.get("agent_session_path")
     sid=p.get("agent_session_id")
     path_present="agent_session_path" in p and path is not None
     sid_present="agent_session_id" in p and sid is not None
     legacy=p.get("agent_session")
+    legacy_omp="agent" not in p and isinstance(legacy,dict) and legacy.get("agent") == "omp"
+    if legacy_omp:
+        agent="omp"
+        agent_present=True
     if isinstance(legacy,dict):
         value=legacy.get("value")
         kind=legacy.get("kind")
@@ -153,13 +162,21 @@ else:
                 path_present=True
     import base64
     def field(value, present):
+        if not present:
+            return "N"
         raw="" if value is None else str(value)
-        return ("Y" if present else "N") + base64.b64encode(raw.encode()).decode()
+        return "Y" + base64.b64encode(raw.encode()).decode()
     print("\t".join([
-        field(p.get(k), k in p and p.get(k) is not None)
-        for k in ("agent","agent_status","workspace_id","cwd","label")
-    ] + [field(path,path_present), field(sid,sid_present)]))
-' 2>/dev/null || printf '%s\n' 'N	N	N	N	N	N	N'
+        field(agent, agent_present),
+        *[
+            field(p.get(k), k in p and p.get(k) is not None)
+            for k in ("agent_status","workspace_id","cwd","label")
+        ],
+        field(path,path_present),
+        field(sid,sid_present),
+        field("1", legacy_omp),
+    ]))
+' 2>/dev/null || printf '%s\n' 'N	N	N	N	N	N	N	N'
 }
 
 detail_decode() {
@@ -172,7 +189,7 @@ detail_decode() {
 
 revalidate_target() {
   _pane="$1"
-  IFS=$'\t' read -r _agent _status _ws _cwd _label _session_path _session_id <<EOF
+  IFS=$'\t' read -r _agent _status _ws _cwd _label _session_path _session_id _legacy_omp <<EOF
 $(pane_details "$_pane")
 EOF
 detail_decode "$_agent" || return 1; _agent="$DETAIL_VALUE"; _agent_present="$DETAIL_PRESENT"
@@ -182,8 +199,15 @@ detail_decode "$_cwd" || return 1; _cwd="$DETAIL_VALUE"; _cwd_present="$DETAIL_P
 detail_decode "$_label" || return 1; _label="$DETAIL_VALUE"; _label_present="$DETAIL_PRESENT"
 detail_decode "$_session_path" || return 1; _session_path="$DETAIL_VALUE"; _session_path_present="$DETAIL_PRESENT"
 detail_decode "$_session_id" || return 1; _session_id="$DETAIL_VALUE"; _session_id_present="$DETAIL_PRESENT"
+detail_decode "$_legacy_omp" || return 1; _legacy_omp="$DETAIL_VALUE"; _legacy_omp_present="$DETAIL_PRESENT"
   [ "$_agent" = "omp" ] || return 1
-  { [ "$_status" = "idle" ] || [ "$_status" = "done" ]; } || return 1
+  if [ "$_status" = "idle" ] || [ "$_status" = "done" ]; then
+    :
+  elif [ "$_status" = "unknown" ] && [ "$_legacy_omp_present" = 1 ] && [ "$_legacy_omp" = 1 ] && [ "$(screen_state "$_pane")" = "idle" ]; then
+    :
+  else
+    return 1
+  fi
   [ "$_ws_present" = "$PANE_WS_PRESENT" ] && [ "$_cwd_present" = "$PANE_CWD_PRESENT" ] && [ "$_label_present" = "$PANE_LABEL_PRESENT" ] || return 1
   [ "$_ws" = "$PANE_WS" ] && [ "$_cwd" = "$PANE_CWD" ] && [ "$_label" = "$PANE_LABEL" ] || return 1
   [ -n "$PIN_AGENT_SESSION_PATH" ] || [ -n "$PIN_AGENT_SESSION_ID" ] || return 1
@@ -203,9 +227,18 @@ detail_decode "$_session_id" || return 1; _session_id="$DETAIL_VALUE"; _session_
 }
 
 screen_state() {
+  # `pane read visible` retains scrollback. The newest lifecycle marker belongs
+  # to the active composer, so a historical spinner must not outweigh a later
+  # idle composer, while a later spinner or interrupt hint remains a hard refusal.
   herdr pane read "$1" --source visible --lines 120 2>/dev/null \
-    | python3 -c 'import re,sys; t=sys.stdin.read(); print("working" if re.search(r"working|blocked", t, re.I) else ("idle" if re.search(r"idle composer|composer", t, re.I) else "unknown"))' \
-    2>/dev/null || printf 'unknown\n'
+    | python3 -c '
+import re,sys
+markers=list(re.finditer(r"working|blocked|idle composer|composer|[\u2800-\u28ff]|(?:⟨|<)esc(?:⟩|>)", sys.stdin.read(), re.I))
+if not markers:
+    print("unknown")
+else:
+    print("idle" if markers[-1].group(0).lower() in ("idle composer", "composer") else "working")
+' 2>/dev/null || printf 'unknown\n'
 }
 
 
@@ -214,7 +247,7 @@ wait_for_confirmed_idle() {
   _timeout="$2"
   _deadline=$((SECONDS + _timeout))
   while [ "$SECONDS" -lt "$_deadline" ]; do
-    IFS=$'\t' read -r _exists _agent _status <<EOF
+    IFS=$'\t' read -r _exists _agent _status _legacy_omp <<EOF
 $(pane_snapshot "$_pane")
 EOF
     if [ "$_exists" = "absent" ]; then
@@ -222,7 +255,7 @@ EOF
       return 1
     fi
     _screen="$(screen_state "$_pane")"
-    if [ "$_agent" = "omp" ] && { [ "$_status" = "idle" ] || [ "$_status" = "done" ]; } && [ "$_screen" = "idle" ]; then
+    if [ "$_agent" = "omp" ] && { [ "$_status" = "idle" ] || [ "$_status" = "done" ] || { [ "$_status" = "unknown" ] && [ "$_legacy_omp" = 1 ]; }; } && [ "$_screen" = "idle" ]; then
       return 0
     fi
     sleep 0.25
@@ -394,7 +427,7 @@ PANE_CWD_PRESENT="${FM_RELOAD_PIN_CWD_PRESENT:-}"
 PANE_LABEL_PRESENT="${FM_RELOAD_PIN_LABEL_PRESENT:-}"
 PIN_AGENT_SESSION_PATH_PRESENT="${FM_RELOAD_PIN_AGENT_SESSION_PATH_PRESENT:-}"
 PIN_AGENT_SESSION_ID_PRESENT="${FM_RELOAD_PIN_AGENT_SESSION_ID_PRESENT:-}"
-IFS=$'\t' read -r _PIN_AGENT _PIN_STATUS _CAP_WS _CAP_CWD _CAP_LABEL _CAP_SESSION_PATH _CAP_SESSION_ID <<EOF
+IFS=$'\t' read -r _PIN_AGENT _PIN_STATUS _CAP_WS _CAP_CWD _CAP_LABEL _CAP_SESSION_PATH _CAP_SESSION_ID _CAP_LEGACY_OMP <<EOF
 $(pane_details "$PANE")
 EOF
 detail_decode "$_PIN_AGENT" || exit 1; _PIN_AGENT="$DETAIL_VALUE"; _PIN_AGENT_PRESENT="$DETAIL_PRESENT"
@@ -404,6 +437,7 @@ detail_decode "$_CAP_CWD" || exit 1; _CAP_CWD="$DETAIL_VALUE"; _CAP_CWD_PRESENT=
 detail_decode "$_CAP_LABEL" || exit 1; _CAP_LABEL="$DETAIL_VALUE"; _CAP_LABEL_PRESENT="$DETAIL_PRESENT"
 detail_decode "$_CAP_SESSION_PATH" || exit 1; _CAP_SESSION_PATH="$DETAIL_VALUE"; _CAP_SESSION_PATH_PRESENT="$DETAIL_PRESENT"
 detail_decode "$_CAP_SESSION_ID" || exit 1; _CAP_SESSION_ID="$DETAIL_VALUE"; _CAP_SESSION_ID_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CAP_LEGACY_OMP" || exit 1
 if [ -z "$PANE_WS_SET" ]; then PANE_WS="$_CAP_WS"; PANE_WS_SET=1; PANE_WS_PRESENT="$_CAP_WS_PRESENT"; fi
 if [ -z "$PANE_CWD_SET" ]; then PANE_CWD="$_CAP_CWD"; PANE_CWD_SET=1; PANE_CWD_PRESENT="$_CAP_CWD_PRESENT"; fi
 if [ -z "$PANE_LABEL_SET" ]; then PANE_LABEL="$_CAP_LABEL"; PANE_LABEL_SET=1; PANE_LABEL_PRESENT="$_CAP_LABEL_PRESENT"; fi
@@ -482,7 +516,7 @@ fi
 # mismatch state but cannot eliminate a final check-to-/quit TOCTOU race.
 # A detached self-reload worker reaches this gate after the current turn.
 # Pin the target identity before waiting: pane ids can be compacted/reused.
-IFS=$'\t' read -r _CUR_AGENT _CUR_STATUS _CUR_WS _CUR_CWD _CUR_LABEL _CUR_SESSION_PATH _CUR_SESSION_ID <<EOF
+IFS=$'\t' read -r _CUR_AGENT _CUR_STATUS _CUR_WS _CUR_CWD _CUR_LABEL _CUR_SESSION_PATH _CUR_SESSION_ID _CUR_LEGACY_OMP <<EOF
 $(pane_details "$PANE")
 EOF
 detail_decode "$_CUR_AGENT" || exit 1; _CUR_AGENT="$DETAIL_VALUE"; _CUR_AGENT_PRESENT="$DETAIL_PRESENT"
@@ -492,6 +526,7 @@ detail_decode "$_CUR_CWD" || exit 1; _CUR_CWD="$DETAIL_VALUE"; _CUR_CWD_PRESENT=
 detail_decode "$_CUR_LABEL" || exit 1; _CUR_LABEL="$DETAIL_VALUE"; _CUR_LABEL_PRESENT="$DETAIL_PRESENT"
 detail_decode "$_CUR_SESSION_PATH" || exit 1; _CUR_SESSION_PATH="$DETAIL_VALUE"; _CUR_SESSION_PATH_PRESENT="$DETAIL_PRESENT"
 detail_decode "$_CUR_SESSION_ID" || exit 1; _CUR_SESSION_ID="$DETAIL_VALUE"; _CUR_SESSION_ID_PRESENT="$DETAIL_PRESENT"
+detail_decode "$_CUR_LEGACY_OMP" || exit 1
 if [ "$_CUR_AGENT" != "omp" ] || [ "$_CUR_WS_PRESENT" != "$PANE_WS_PRESENT" ] || [ "$_CUR_CWD_PRESENT" != "$PANE_CWD_PRESENT" ] || [ "$_CUR_LABEL_PRESENT" != "$PANE_LABEL_PRESENT" ] || [ "$_CUR_WS" != "$PANE_WS" ] || [ "$_CUR_CWD" != "$PANE_CWD" ] || [ "$_CUR_LABEL" != "$PANE_LABEL" ]; then
   echo "fm-reload.sh: target pane changed before idle wait; refusing /quit" >&2
   exit 1
@@ -509,11 +544,7 @@ if ! wait_for_confirmed_idle "$PANE" "$TIMEOUT"; then
 fi
 
 
-REAL_STATE="unknown"
-RECONCILE_SCRIPT="$SCRIPT_DIR/fm-reconcile-status.sh"
-if [ -x "$RECONCILE_SCRIPT" ]; then
-  REAL_STATE="$(bash "$RECONCILE_SCRIPT" "$PANE" 2>/dev/null || true)"
-fi
+REAL_STATE="$(screen_state "$PANE")"
 if [ "$REAL_STATE" != "idle" ]; then
   echo "fm-reload.sh: pane $PANE screen is ${REAL_STATE:-unknown}; refusing /quit" >&2
   exit 1

@@ -74,6 +74,8 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-reload-tests.XXXXXX")
 #   FM_FAKE_HERDR_POST_AGENT_SESSION_ID - agent_session_id AFTER resume
 #   FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID - identity after GET threshold
 #   FM_FAKE_HERDR_REPLACE_AFTER_GET - get count at which replacement identity appears
+#   FM_FAKE_HERDR_LEGACY_AGENT_SESSION - omit top-level agent and emit the
+#                                legacy agent_session object (0/1)
 #   FM_FAKE_HERDR_SESSION      - session id in pane read BEFORE resume (default "")
 #   FM_FAKE_HERDR_POST_SESSION - session id in pane read AFTER resume (default: FM_FAKE_HERDR_SESSION)
 #   FM_FAKE_HERDR_CURRENT      - pane_id returned by pane current (empty = failure)
@@ -143,6 +145,10 @@ case "${1:-}" in
           session_path_present="${FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH_PRESENT-${session_path_present}}"
           session_path="${FM_FAKE_HERDR_REPLACEMENT_SESSION_PATH-${session_path}}"
         fi
+        if [ "${FM_FAKE_HERDR_LEGACY_AGENT_SESSION:-0}" = 1 ] && [ ! -f "$RESUMED_FILE" ]; then
+          printf '{"id":"cli:pane:get","result":{"pane":{"agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session":{"agent":"omp","kind":"id","value":"%s"}}}}\n' "$status" "$cwd" "$session_id"
+          exit 0
+        fi
         if [ "$session_path_present" = "1" ]; then
           printf '{"id":"cli:pane:get","result":{"pane":{"agent":"%s","agent_status":"%s","cwd":"%s","workspace_id":"w1","label":"fake-mate","agent_session_id":"%s","agent_session_path":"%s"}}}\n' "$agent" "$status" "$cwd" "$session_id" "$session_path"
         else
@@ -174,6 +180,9 @@ case "${1:-}" in
           case "$screen_status" in
             working|blocked) printf '⠁ Working\n' ;;
             idle|done) printf 'idle composer\n' ;;
+            stale-spinner) printf '⠁ Working\nidle composer\n' ;;
+            idle-then-spinner) printf 'idle composer\n⠁ Working\n' ;;
+            idle-then-active) printf 'idle composer\n⠁ ⟨esc⟩\n' ;;
             *) printf '' ;;
           esac
           exit 0
@@ -1037,6 +1046,60 @@ test_unknown_refuses_quit() {
     && fail "(v) unknown pane received /quit"
   pass "(v) unknown pane waits then refuses /quit"
 }
+test_self_reload_legacy_agent_session_idle_reloads() {
+  local CASE="$TMP_ROOT/case-legacy-agent-session"
+  mkdir -p "$CASE"
+  make_fake_herdr "$CASE" >/dev/null
+  local sid="abcd1234-0000-0000-0000-000000000020"
+  FM_RELOAD_NO_GUARD='' \
+  FM_FAKE_HERDR_CURRENT=w1:p1 \
+  FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+  FM_FAKE_HERDR_STATUS=unknown \
+  FM_FAKE_HERDR_SCREEN=stale-spinner \
+  FM_FAKE_HERDR_SESSION="$sid" \
+    run_reload "$CASE" >/dev/null \
+    || fail "(legacy) self-reload handoff failed"
+  local rlog="$CASE/state/.reload.w1-p1.log"
+  wait_worker_done "$rlog" || fail "(legacy) self-reload worker never recorded completion"
+  grep -q "detached self-reload of pane w1:p1 succeeded" "$rlog" \
+    || fail "(legacy) self-reload worker did not succeed"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+    || fail "(legacy) idle legacy agent_session target did not receive /quit"
+  herdr_log "$CASE" | grep -q "pane run w1:p1 omp --resume $sid" \
+    || fail "(legacy) idle legacy agent_session target did not resume exactly"
+  pass "(legacy) self-reload accepts fresh idle composer after historical spinner"
+}
+test_legacy_agent_session_refuses_working_or_replaced() {
+  local CASE sid
+  sid="abcd1234-0000-0000-0000-000000000021"
+  for CASE in "$TMP_ROOT/case-legacy-working" "$TMP_ROOT/case-legacy-replaced"; do
+    mkdir -p "$CASE"
+    make_fake_herdr "$CASE" >/dev/null
+    if [ "${CASE##*/}" = "case-legacy-working" ]; then
+      FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+      FM_FAKE_HERDR_STATUS=unknown \
+      FM_FAKE_HERDR_SCREEN=idle-then-active \
+      FM_FAKE_HERDR_SESSION="$sid" \
+        run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+        && fail "(legacy) visibly working target unexpectedly reloaded"
+    else
+      FM_FAKE_HERDR_LEGACY_AGENT_SESSION=1 \
+      FM_FAKE_HERDR_AGENT_SESSION_ID=agent-session-original \
+      FM_FAKE_HERDR_REPLACEMENT_AGENT_SESSION_ID=agent-session-replacement \
+      FM_FAKE_HERDR_REPLACE_AFTER_GET=2 \
+      FM_FAKE_HERDR_STATUS=unknown \
+      FM_FAKE_HERDR_SCREEN=idle \
+      FM_FAKE_HERDR_SESSION="$sid" \
+        run_reload "$CASE" w1:p1 >/dev/null 2>/dev/null \
+        && fail "(legacy) replaced target unexpectedly reloaded"
+    fi
+    herdr_log "$CASE" | grep -q "pane run w1:p1 /quit" \
+      && fail "(legacy) unsafe target received /quit"
+  done
+  pass "(legacy) visibly working or replaced legacy target refuses /quit"
+}
+
+
 test_done_allows_quit() {
   local CASE="$TMP_ROOT/case-w"
   mkdir -p "$CASE"
@@ -1078,6 +1141,8 @@ test_done_allows_quit
 test_durable_target_meta_rebound
 test_busy_refuses_quit
 test_unknown_refuses_quit
+test_self_reload_legacy_agent_session_idle_reloads
+test_legacy_agent_session_refuses_working_or_replaced
 test_durable_target_meta_untouched_when_pane_survives
 test_self_reload_durable_target_meta_rebound
 test_stale_agent_shell_detection
