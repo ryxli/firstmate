@@ -16,6 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: shellcheck -x --severity=error sbin/*.sh tests/*.sh
+      - name: Tooling invocation convention
+        run: sbin/fm-tooling-lint.sh
 
   tests:
     name: Behavior tests
