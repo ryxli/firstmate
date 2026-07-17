@@ -182,7 +182,7 @@ Before raw typing into a human shell pane, read its prompt for a pending draft; 
 Covered by section 8.
 Steer a crewmate only with short single lines via `sbin/fm-send.sh`; anything long belongs in a file the crewmate can read.
 Steer a secondmate the same way.
-Its charter escalates only captain-relevant outcomes - `done`, `blocked`, `needs-decision`, `failed`, or a material phase change - to the main firstmate through the fleet peer bus, so routine internal churn stays inside the secondmate home and never touches the supervisor channel.
+Its charter escalates per the peer bus discipline owned by AGENTS.md: captain-relevant outcomes only, routine internal churn never touches the supervisor channel.
 A successful steer send proves only queued delivery, not that the target consumed or acted on it.
 For time-sensitive steers, peek promptly and distinguish sent, queued, observed, and acted-on; nudge once or use the existing stuck-crewmate ladder only when the queued instruction is urgent, rather than duplicating steers or interrupting productive work.
 
@@ -213,19 +213,7 @@ The finished report must include the approved matrix, a representative live flee
 If live evidence contradicts the matrix, roll the change back or keep the task open; contradictory live evidence beats a passing isolated check.
 
 **Boundary, verdict, and review contracts.**
-Failure: deploy and restore lanes interpreted triggers and blessed scope from prose.
-Root cause: lane boundaries were not machine-checkable.
-Prevention: before parallel lane work, publish an edge table with producer, consumer, artifact path, allowed trigger, prohibited interpretation, and machine check for every handoff.
-Deploy lanes consume only named artifacts and commands; they never decide whether a trigger, verdict, or safety condition is satisfied.
-Failure: consumers overrode the producer's pass or fail.
-Root cause: verdict authority was not attached to the evidence producer.
-Prevention: each edge-table row names one verdict producer; other lanes report execution evidence only.
-Failure: review cycles burned on defects already published in prior rejections.
-Root cause: rejection criteria were treated as prose instead of a red-first matrix.
-Prevention: reviewers publish RED rows first with row id, evidence, required fix, and proof command; authors resubmit only with row-by-row PASS evidence against that matrix.
-Failure: edge cases drifted between lanes.
-Root cause: boundaries were described as intent rather than checked interfaces.
-Prevention: keep the edge table current until the handoff is green; any new edge discovered during review becomes a table row before more code moves.
+Review and evidence safeguards are owned by AGENTS.md; before parallel lane work, publish a machine-checkable edge table (producer, consumer, artifact path, allowed trigger, machine check) and attach verdict authority to the evidence producer, never the consumer.
 
 ### PR ready
 

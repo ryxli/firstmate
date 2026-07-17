@@ -41,7 +41,9 @@ Never touch anything under `firstmate/projects/`.
 
 ## Mechanical state machine
 
-For every repository, complete and observe each state before taking the next action:
+`sbin/fm-update.sh` implements this machine natively for the firstmate repo and secondmate homes; run it rather than hand-executing the steps there.
+Apply the steps manually only to configured local infrastructure the script does not cover.
+For every such repository, complete and observe each state before taking the next action:
 
 1. **Observe before fetch.**
    Capture `git status --short --branch`, the current branch, configured remotes, and whether the worktree is clean.
@@ -71,24 +73,13 @@ A diverged or ambiguous fork is a report, not an automatic repair.
 Feature branches, scratch checkouts, local-only scaffolds, and dirty worktrees are not synchronized unless the captain names them and approves the branch-specific action.
 ## Reporting contract
 
-Report one line per repository:
-
-```text
-<repo>: observed <state> -> action <action> -> observed <final state>
-```
-
-Separate:
-
-- synchronized and verified
-- already current
-- skipped safely with an exact reason
-- requires a captain decision
-
-Never report “already current” until after the remote fetch and post-fetch observation.
+Relay `fm-update.sh`'s native one-line-per-repository output (`<label>: updated <a>..<b>` / `already current` / `skipped: <exact reason>`), and keep manually synced targets in the same format.
+Separate synchronized, already current, safely skipped, and requires-a-captain-decision.
+Never report "already current" until after the remote fetch and post-fetch observation.
 
 ## Safety
 
-- Never force-push, reset, stash, create a merge commit, or discard unlanded work.
+- The fast-forward-only invariant (never force-push, reset, stash, merge-commit, or discard unlanded work) is owned by AGENTS.md; it applies to every action here.
 - Never operate on more than one repository in a single opaque command.
 - Never treat a stale pre-fetch status as current truth.
 - Configured local source changes that require a documented post-sync action must complete and verify that action after source synchronization.
