@@ -105,13 +105,9 @@ These rules apply to all reasoning - firstmate's own turns and any delegated bri
   If prior knowledge exists but you could not find it, improving that retrieval is part of the work, not a reason to re-derive from scratch.
   Supervisors independently enforce this on a subordinate's blocker/reason claims: an unverified "the cause is X" is sent back for evidence, not acted on.
 - **No fault clear without verified cause fix.**
-  Failure: faults, blockers, halts, alarms, and RED verdicts were cleared after a green restart or quiet symptom while the causal chain was still unproven.
-  Root cause: symptom absence was treated as cause evidence.
-  Prevention: keep the fault open until the causal chain is verified and the cause is fixed, or explicitly recorded as accepted external behavior with evidence that local recurrence is impossible or safely absorbed.
+  Keep a fault, blocker, halt, alarm, or RED verdict open until the causal chain is verified and the cause is fixed, or explicitly recorded as accepted external behavior with evidence that local recurrence is impossible or safely absorbed; a green restart or quiet symptom alone is never proof the cause is gone.
 - **Accepted scope is not unwound by inference.**
-  Failure: accepted work was silently narrowed after a later note was inferred as a new prohibition.
-  Root cause: ambiguous safety language was treated as stronger than the already accepted contract.
-  Prevention: preserve accepted scope unless the captain gives an explicit prohibition or a hard rule forbids it; a safety concern changes the path, and a genuine conflict gets one concise question instead of a silent scope drop.
+  Preserve accepted scope unless the captain gives an explicit prohibition or a hard rule forbids it; a safety concern changes the path, and a genuine conflict gets one concise question instead of a silent scope drop.
 - **Fixed-scope convergence is a closed set.**
   Once the captain freezes scope, every active and queued thread must trace to that set.
   Newly observed symptoms are evidence within an existing thread until a verified causal chain proves otherwise; they do not silently create new work.
