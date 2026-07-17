@@ -62,16 +62,19 @@ required = ["schema", "captured", "milestone", "sha", "corpus_scenarios", "trial
 missing = [k for k in required if k not in row]
 assert not missing, f"row missing top-level keys: {missing}"
 g = row["gates"]
-for k in ("action_bench", "corpus", "supervision", "tests"):
+for k in ("action_bench", "corpus", "supervision", "tests", "repo_invariants"):
     assert k in g, f"gates missing {k}"
 assert row["gates"]["action_bench"]["ok"] is True, "action-bench gates did not pass on the real corpus"
 assert row["gates"]["corpus"]["sanitize_status"] == "clean", "corpus sanitize status not clean"
 assert row["gates"]["tests"]["files"] == 1, "tests stage did not restrict to the FM_MILESTONE_TESTS_ONLY file"
+assert row["gates"]["repo_invariants"]["ok"] is True, "repo invariants gate did not pass on the live checkout"
+assert row["gates"]["repo_invariants"]["claude_md"] == "AGENTS.md", "CLAUDE.md symlink target unexpected"
+assert row["gates"]["repo_invariants"]["tracked_private"] == "none", "a fleet-private path is tracked"
 assert row["context_weight"]["total_tokens"] > 0, "context-weight total_tokens must be positive"
 assert len(row["context_weight"]["table_hash"]) == 16, "table_hash must be a 16-char hex digest"
 assert row["models"] == [], "models must be empty when no --runs are supplied"
 ' || fail "milestone row schema check failed"
-pass "one run produces one valid superset row (schema, gates, context-weight, empty models)"
+pass "one run produces one valid superset row (schema, gates incl. repo_invariants, context-weight, empty models)"
 
 # --- re-running with identical inputs reproduces an identical row ----------
 # except captured (pinned identical here anyway) and per-stage wall-clock
@@ -100,6 +103,33 @@ pass "re-running with identical inputs reproduces an identical row (modulo times
 out3="$(FM_MILESTONE_NOTE='env note' "$RUN" noted --out "$TMP/out3" --jobs 4 2>&1)" \
   || fail "fm-milestone.sh exited nonzero with FM_MILESTONE_NOTE set"$'\n'"$out3"
 assert_contains "$(cat "$TMP/out3/milestones.md")" "_env note_" "note renders in the markdown section"
+
+# --- --compare <shaA> <shaB>: the auto-A/B hook, isolated to $TMP/out4 via --out
+#     so this never touches the real durable ledger --------------------------
+if command -v git >/dev/null 2>&1; then
+  SHA_B="$(cd "$ROOT" && git rev-parse HEAD)"
+  SHA_A="$(cd "$ROOT" && git rev-parse HEAD~1)"
+  out4="$("$RUN" --compare "$SHA_A" "$SHA_B" cmp-smoke --out "$TMP/out4" --jobs 4 2>&1)" \
+    || fail "fm-milestone.sh --compare exited nonzero"$'\n'"$out4"
+  assert_contains "$out4" "fm-milestone --compare: baseline $SHA_A vs candidate $SHA_B" "compare announces baseline/candidate SHAs"
+  assert_contains "$out4" "repo invariants |" "compare delta table includes the repo-invariants row"
+  [ "$(wc -l < "$TMP/out4/milestones.jsonl" | tr -d ' ')" = "2" ] || fail "expected exactly two jsonl rows from --compare (baseline + candidate)"
+  ROWS="$TMP/out4/milestones.jsonl" python3 -c '
+import json, os
+lines = open(os.environ["ROWS"]).read().splitlines()
+a, b = (json.loads(l) for l in lines)
+label_a, label_b = a["milestone"], b["milestone"]
+assert label_a == "cmp-smoke-baseline", f"unexpected baseline label: {label_a}"
+assert label_b == "cmp-smoke-candidate", f"unexpected candidate label: {label_b}"
+for row in (a, b):
+    label = row["milestone"]
+    assert row["gates"]["repo_invariants"]["ok"] is True, f"repo_invariants failed for {label}"
+    assert row["sha"], f"missing sha on {label}"
+' || fail "--compare ledger rows failed the schema/label check"
+  pass "--compare measures both SHAs through the identical pipeline and appends baseline+candidate rows"
+else
+  printf 'ok - SKIP fm-milestone --compare (git not found)\n'
+fi
 
 rm -rf "$TMP"
 printf 'PASS fm-milestone\n'

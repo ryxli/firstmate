@@ -14,7 +14,7 @@
 // See README.md in this directory for the row schema and the --compare contract.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +75,19 @@ interface GateTests extends Timed {
 	assertions: number;
 }
 
+// Absorbed from the retired benchmarks/eval-runner/fm-eval-run.py (gate_invariants): the
+// CLAUDE.md/.claude-skills symlink contract plus "no fleet-private path is tracked" - a cheap,
+// previously-uncovered regression check (nothing else in the milestone or test suite watches for
+// an accidental `git add -f` into data/state/config/projects). ok/tracked_private/claude_md/
+// claude_skills field names match the retired tool's JSON verbatim, so any historical eval-runner
+// artifact reads the same way.
+interface GateInvariants extends Timed {
+	ok: boolean;
+	claude_md: string | null;
+	claude_skills: string | null;
+	tracked_private: string;
+}
+
 interface GateContextWeight extends Timed {
 	ok: boolean;
 	total_tokens: number;
@@ -100,6 +113,7 @@ export interface MilestoneRow {
 		corpus: GateCorpus;
 		supervision: GateSupervision;
 		tests: GateTests;
+		repo_invariants: GateInvariants;
 	};
 	context_weight: GateContextWeight;
 	elapsed_s: number;
@@ -242,6 +256,40 @@ async function stageTests(root: string, jobs: number, only?: RegExp): Promise<Ga
 	};
 }
 
+function readlinkOrNull(p: string): string | null {
+	try {
+		return readlinkSync(p);
+	} catch {
+		return null;
+	}
+}
+
+// `root` is either the live REPO_ROOT (a real git working tree) or a headless `git archive`
+// snapshot with no `.git` at all (see archiveSnapshot below). The symlink checks read straight off
+// the filesystem so they work unmodified in both cases (git archive preserves symlinks as symlink
+// tar entries). The tracked-private-path check cannot: a headless snapshot has no index to query,
+// so it reads the committed tree for `sha` from REPO_ROOT (`git ls-tree`) instead of the working
+// tree (`git ls-files`) whenever `root` itself isn't a git repo - both answer the same question
+// ("is data/state/config/projects tracked at this point in history") from whichever source exists.
+async function stageRepoInvariants(root: string, sha: string): Promise<GateInvariants> {
+	const t0 = Date.now();
+	const claudeMd = readlinkOrNull(join(root, "CLAUDE.md"));
+	const claudeSkills = readlinkOrNull(join(root, ".claude", "skills"));
+	const hasGit = existsSync(join(root, ".git"));
+	const r = hasGit
+		? await runCmd(["git", "ls-files", "--", "data", "state", "config", "projects"], root, 30_000)
+		: await runCmd(["git", "-C", REPO_ROOT, "ls-tree", "-r", "--name-only", sha, "--", "data", "state", "config", "projects"], REPO_ROOT, 30_000);
+	const tracked = r.stdout.trim();
+	const ok = claudeMd === "AGENTS.md" && claudeSkills === "../.agents/skills" && tracked === "";
+	return {
+		ok,
+		claude_md: claudeMd,
+		claude_skills: claudeSkills,
+		tracked_private: tracked || "none",
+		secs: Math.round((Date.now() - t0) / 100) / 10,
+	};
+}
+
 async function modelsFromRuns(runsPaths: string[]): Promise<ModelMacro[]> {
 	if (runsPaths.length === 0) return [];
 	const id2tier = new Map(loadScenarios().map((s) => [s.id, s.difficulty] as const));
@@ -252,12 +300,13 @@ async function modelsFromRuns(runsPaths: string[]): Promise<ModelMacro[]> {
 // git-archive snapshot for --compare) and compose one row. Nothing here writes to `root`.
 export async function measure(root: string, opts: MeasureOpts): Promise<MilestoneRow> {
 	const t0 = Date.now();
-	const [actionBench, corpus, supervision, tests, contextWeight, models] = await Promise.all([
+	const [actionBench, corpus, supervision, tests, contextWeight, repoInvariants, models] = await Promise.all([
 		stageActionBenchGates(root),
 		stageCorpus(root),
 		stageSupervision(root),
 		stageTests(root, opts.jobs, process.env.FM_MILESTONE_TESTS_ONLY ? new RegExp(process.env.FM_MILESTONE_TESTS_ONLY) : undefined),
 		stageContextWeight(root),
+		stageRepoInvariants(root, opts.sha),
 		modelsFromRuns(opts.runsPaths),
 	]);
 	const trials = models.find((m) => m.trials !== null)?.trials ?? null;
@@ -270,7 +319,7 @@ export async function measure(root: string, opts: MeasureOpts): Promise<Mileston
 		trials,
 		note: opts.note,
 		models,
-		gates: { action_bench: actionBench, corpus, supervision, tests },
+		gates: { action_bench: actionBench, corpus, supervision, tests, repo_invariants: repoInvariants },
 		context_weight: contextWeight,
 		elapsed_s: Math.round((Date.now() - t0) / 100) / 10,
 	};
@@ -309,6 +358,7 @@ export function renderSection(row: MilestoneRow): string {
 		`| supervision | ${g.supervision.verdict} tokens ${g.supervision.totals.old_tokens}->${g.supervision.totals.new_tokens} (${g.supervision.reduction_pct >= 0 ? "-" : "+"}${Math.abs(g.supervision.reduction_pct)}%, ${g.supervision.secs}s) |`,
 		`| tests | ${fmtGate(g.tests.ok)} ${g.tests.passed}/${g.tests.files} files, ${g.tests.assertions} assertions (${g.tests.secs}s) |`,
 		`| context-weight | ${row.context_weight.total_tokens} tokens (hash \`${row.context_weight.table_hash}\`, ${row.context_weight.secs}s) |`,
+		`| repo invariants | ${fmtGate(g.repo_invariants.ok)} (tracked-private: ${g.repo_invariants.tracked_private}, ${g.repo_invariants.secs}s) |`,
 	];
 	if (row.models.length > 0) {
 		seg.push("", "| model | control | harness | lift | corrupt |", "|---|---|---|---|---|");
@@ -345,6 +395,19 @@ function gitRevParse(rev: string, cwd: string): string {
 // Isolated, ephemeral snapshot of `sha` (no .git, no worktree metadata - a plain source tree via
 // `git archive`) so --compare can measure a historical SHA without touching the live checkout or
 // registering a worktree. Self-cleans; the caller runs the same `measure()` used for a live row.
+//
+// Seam decision (absorbing benchmarks/eval-runner, since retired): eval-runner's fm-eval-run.py
+// used a *persistent* per-slot clone (`prepare_checkout`: clone once, then fetch/reset/clean/
+// checkout-detach on every reuse) instead of a one-shot archive. Measured on this repo, `git
+// archive` completes in ~0.03s while a fresh `git clone` alone costs ~2.3s wall time - and archive
+// needs no clone at all, because REPO_ROOT is already a full local checkout with every reachable
+// object; there is no network fetch to amortize the way eval-runner's cache amortized in the
+// cherry-pick-workflow case (arbitrary remote refs, re-measured across many separate process
+// invocations over time). For --compare's actual shape - two SHAs already in this repo's history,
+// measured concurrently within one process - the persistent cache adds real complexity (a mutable
+// slot directory outside the run's temp scope, remote-URL bookkeeping, reset/clean-before-reuse,
+// orphan-directory cleanup) with no offsetting win: archive is already faster and leaves nothing
+// behind to go stale. Verdict: keep git-archive; do not adopt the checkout cache.
 function archiveSnapshot(sha: string): string {
 	const resolved = gitRevParse(sha, REPO_ROOT);
 	const dir = mkdtempSync(join(tmpdir(), "fm-milestone-compare-"));
@@ -382,6 +445,7 @@ async function cmdCompare(shaA: string, shaB: string, label: string, outDir: str
 		console.log(`| supervision tokens | ${fmtDelta(rowA.gates.supervision.totals.new_tokens, rowB.gates.supervision.totals.new_tokens)} |`);
 		console.log(`| tests passed | ${fmtDelta(rowA.gates.tests.passed, rowB.gates.tests.passed)}/${rowB.gates.tests.files} |`);
 		console.log(`| context-weight tokens | ${fmtDelta(rowA.context_weight.total_tokens, rowB.context_weight.total_tokens)} |`);
+		console.log(`| repo invariants | ${fmtGate(rowA.gates.repo_invariants.ok)} -> ${fmtGate(rowB.gates.repo_invariants.ok)} |`);
 		console.log("");
 		console.log(`wrote ${jsonlPath} + ${mdPath}`);
 	} finally {
@@ -421,18 +485,32 @@ async function cmdRun(argv: string[]): Promise<void> {
 	console.log(`  supervision ${row.gates.supervision.verdict} tokens ${row.gates.supervision.totals.old_tokens}->${row.gates.supervision.totals.new_tokens}`);
 	console.log(`  tests ${fmtGate(row.gates.tests.ok)} ${row.gates.tests.passed}/${row.gates.tests.files} files`);
 	console.log(`  context-weight ${row.context_weight.total_tokens} tokens (hash ${row.context_weight.table_hash})`);
+	console.log(`  repo invariants ${fmtGate(row.gates.repo_invariants.ok)} (tracked-private: ${row.gates.repo_invariants.tracked_private})`);
 	console.log(`wrote ${jsonlPath} + ${mdPath}`);
 }
 
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
 	if (argv[0] === "--compare") {
-		const [shaA, shaB, label] = argv.slice(1);
+		const rest = argv.slice(1);
+		const positionals: string[] = [];
+		const flags: Record<string, string> = {};
+		for (let i = 0; i < rest.length; i++) {
+			const a = rest[i];
+			if (a.startsWith("--")) {
+				flags[a.slice(2)] = rest[++i] ?? "";
+			} else {
+				positionals.push(a);
+			}
+		}
+		const [shaA, shaB, label] = positionals;
 		if (!shaA || !shaB) {
-			console.error("usage: fm-milestone.sh --compare <shaA> <shaB> [label]");
+			console.error("usage: fm-milestone.sh --compare <shaA> <shaB> [label] [--out dir] [--jobs n]");
 			process.exit(1);
 		}
-		await cmdCompare(shaA, shaB, label ?? "compare", DEFAULT_OUT, 4);
+		const outDir = flags.out ?? DEFAULT_OUT;
+		const jobs = flags.jobs ? Number(flags.jobs) : 4;
+		await cmdCompare(shaA, shaB, label ?? "compare", outDir, jobs);
 		return;
 	}
 	await cmdRun(argv);

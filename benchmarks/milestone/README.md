@@ -20,6 +20,9 @@ proven - it invents no new measurement, only folds their outputs into a single d
 - `benchmarks/action-bench/milestone-ledger.ts`'s `macroFor` - reused verbatim (not re-derived) to
   populate `models[]` when one or more live action-bench `runs.json` artifacts are passed as extra
   positional args, exactly mirroring a0e86b0's per-model control/harness macro row.
+- repo invariants - the CLAUDE.md/`.claude/skills` symlink contract plus "no fleet-private path
+  (`data`/`state`/`config`/`projects`) is tracked", absorbed from the now-retired
+  `benchmarks/eval-runner/fm-eval-run.py` gate of the same name (see "Consolidation" below).
 
 Nothing here re-implements a gate. `benchmarks/milestone/run.ts` is glue: it shells to each real
 instrument, times each stage, and appends one row.
@@ -78,7 +81,8 @@ new sections simply absent - historical seeding stays compatible in both directi
       "totals": { "old_tokens": 1111, "new_tokens": 443, "old_false": 8, "new_false": 1, "old_missed": 1, "new_missed": 0 },
       "reduction_pct": 60.1, "secs": 0.1
     },
-    "tests": { "ok": true, "files": 44, "passed": 44, "failed": 0, "failures": [], "assertions": 512, "secs": 78.2 }
+    "tests": { "ok": true, "files": 44, "passed": 44, "failed": 0, "failures": [], "assertions": 512, "secs": 78.2 },
+    "repo_invariants": { "ok": true, "claude_md": "AGENTS.md", "claude_skills": "../.agents/skills", "tracked_private": "none", "secs": 0.1 }
   },
   "context_weight": { "ok": true, "total_tokens": 27902, "tokenizer": "chars/4", "table_hash": "2d4b7e0d6194c005", "secs": 0.1 },
   "elapsed_s": 91.9
@@ -92,10 +96,16 @@ new sections simply absent - historical seeding stays compatible in both directi
 appends both rows to the ledger under `<label>-baseline` / `<label>-candidate`, then prints a delta
 table. This is the intended shape for auto-A/B on any harness change: land the change, run
 `sbin/fm-milestone.sh --compare <base-sha> <candidate-sha>`, and read the delta on the same gates
-every milestone already tracks - no bespoke comparison logic per change. Once
-`benchmarks/eval-runner` (the promoted multi-candidate gate runner, landing separately) is
-available in a given checkout, its persistent per-slot checkout cache is a straightforward
-drop-in replacement for the ephemeral `git archive` snapshot here for repeated/parallel comparisons.
+every milestone already tracks - no bespoke comparison logic per change. Pass `--out dir` to redirect
+both rows away from the durable ledger (used by the test suite); omit it for a real comparison.
+
+`git archive` was measured against a persistent per-slot clone-and-reuse cache (the mechanism the
+now-retired `benchmarks/eval-runner` used) and kept deliberately: archive finishes in ~0.03s here
+against ~2.3s for a bare `git clone` alone, and needs no clone step at all since `REPO_ROOT` is
+already a full local checkout. The persistent cache earns its complexity only when amortizing
+repeated clones of *remote* refs across many separate invocations - not this tool's shape, two SHAs
+already in local history, measured once per `--compare` call. See the comment above
+`archiveSnapshot()` in `run.ts` for the full evaluation.
 
 ## Layout
 
@@ -108,3 +118,12 @@ README.md this file
 `benchmarks/action-bench/results/` (the canonical, plum-history-seeded ledger) holds the
 durable `milestones.{jsonl,md}` this tool writes - distinct from action-bench's own per-model ledger
 because this one composes multiple benchmarks, not action-bench alone.
+
+## Consolidation
+
+`benchmarks/eval-runner/fm-eval-run.py`, a separately-promoted multi-SHA gate runner, landed the
+same day as this tool and duplicated its A/B mission. It has been retired: `--compare` is now the
+one canonical SHA-vs-SHA surface, its `repo_invariants` gate was absorbed above, and its
+`sbin/fm-eval-run.sh` wrapper and test are deleted. `benchmarks/eval-runner/crew-metrics.py` (a
+distinct, unrelated passive-metrics tool) and its shared `fm_paths.py` helper remain in that
+directory under `sbin/fm-crew-metrics.sh`.
