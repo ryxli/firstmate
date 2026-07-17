@@ -332,6 +332,102 @@ test_home_seed_registry_reads_scope_from_filled_brief() {
   pass "home seeding records routing scope from filled charter briefs"
 }
 
+test_home_seed_writes_canonical_mise_toml() {
+  local home subhome mise
+  home="$TMP_ROOT/mise-seed-home"
+  subhome="$TMP_ROOT/mise-seed-subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  make_git_project "$home/projects/alpha"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/mise-seed-alpha.git"
+  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='mise seed scope' FM_SECONDMATE_SCOPE='mise seed scope' \
+    "$ROOT/sbin/fm" home-seed mise "$subhome" alpha >/dev/null \
+    || fail "seed failed when creating canonical mise config"
+  mise="$subhome/.mise.toml"
+  [ -f "$mise" ] || fail "seed did not create .mise.toml"
+  grep -F '"{{config_root}}/sbin"' "$mise" >/dev/null || fail "seeded .mise.toml omitted shared sbin PATH"
+  grep -F '"{{config_root}}/bin"' "$mise" >/dev/null || fail "seeded .mise.toml omitted local bin PATH"
+  pass "home seeding creates canonical mise PATH config"
+}
+
+test_home_seed_mise_is_idempotent() {
+  local home subhome before after
+  home="$TMP_ROOT/mise-idem-home"
+  subhome="$TMP_ROOT/mise-idem-subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  make_git_project "$home/projects/alpha"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/mise-idem-alpha.git"
+  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='mise idempotent scope' FM_SECONDMATE_SCOPE='mise idempotent scope' \
+    "$ROOT/sbin/fm" home-seed idem "$subhome" alpha >/dev/null \
+    || fail "initial seed failed for mise idempotence"
+  before=$(cat "$subhome/.mise.toml")
+  FM_HOME="$home" "$ROOT/sbin/fm" home-seed idem "$subhome" alpha >/dev/null \
+    || fail "repeat seed failed for mise idempotence"
+  after=$(cat "$subhome/.mise.toml")
+  [ "$after" = "$before" ] || fail "repeat seed changed canonical .mise.toml"
+  pass "home seeding leaves canonical mise config idempotent"
+}
+
+test_home_seed_preserves_custom_mise_toml() {
+  local home subhome custom before after
+  home="$TMP_ROOT/mise-custom-home"
+  subhome="$TMP_ROOT/mise-custom-subhome"
+  custom="$TMP_ROOT/mise-custom.expected"
+  mkdir -p "$home/projects" "$home/data" "$home/state" "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects" "$subhome/sbin"
+  printf '# Firstmate\n' > "$subhome/AGENTS.md"
+  make_git_project "$home/projects/alpha"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/mise-custom-alpha.git"
+  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  cat > "$custom" <<'EOF'
+# local customization
+[env]
+_.path = ["{{config_root}}/sbin", "{{config_root}}/bin"]
+CUSTOM_VALUE = "kept"
+EOF
+  cp "$custom" "$subhome/.mise.toml"
+  before=$(cat "$subhome/.mise.toml")
+
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='mise custom scope' FM_SECONDMATE_SCOPE='mise custom scope' \
+    "$ROOT/sbin/fm" home-seed custom "$subhome" alpha >/dev/null \
+    || fail "seed failed with customized .mise.toml"
+  after=$(cat "$subhome/.mise.toml")
+  [ "$after" = "$before" ] || fail "seed clobbered customized .mise.toml"
+  cmp -s "$custom" "$subhome/.mise.toml" || fail "customized .mise.toml content changed"
+  pass "home seeding preserves customized .mise.toml"
+}
+
+test_home_seed_rolls_back_created_mise_toml() {
+  local home subhome err missing_remote
+  home="$TMP_ROOT/mise-rollback-home"
+  subhome="$TMP_ROOT/mise-rollback-subhome"
+  err="$TMP_ROOT/mise-rollback.err"
+  missing_remote="$TMP_ROOT/remotes/mise-missing-beta.git"
+  mkdir -p "$home/projects" "$home/data" "$home/state" "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects" "$subhome/sbin"
+  printf '# Firstmate\n' > "$subhome/AGENTS.md"
+  make_git_project "$home/projects/alpha"
+  make_git_project "$home/projects/beta"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/mise-rollback-alpha.git"
+  git -C "$home/projects/beta" remote add origin "file://$missing_remote"
+  cat > "$home/data/projects.md" <<EOF
+- alpha [direct-PR] - alpha project (added 2026-06-22)
+- beta [direct-PR] - beta project (added 2026-06-22)
+EOF
+
+  if FM_HOME="$home" FM_SECONDMATE_CHARTER='mise rollback scope' FM_SECONDMATE_SCOPE='mise rollback scope' \
+    "$ROOT/sbin/fm" home-seed rollback-mise "$subhome" alpha beta >/dev/null 2>"$err"; then
+    fail "seed succeeded despite failed clone after mise creation"
+  fi
+  [ ! -e "$subhome/.mise.toml" ] || fail "failed seed left created .mise.toml behind"
+  [ ! -e "$subhome/projects/alpha" ] || fail "failed seed left a cloned project after mise rollback"
+  if [ -f "$home/data/secondmates.md" ] && grep -F -- '- rollback-mise ' "$home/data/secondmates.md" >/dev/null; then
+    fail "failed seed left registry route after mise rollback"
+  fi
+  pass "home seeding rolls back a newly created mise config"
+}
+
 test_home_seed_validate_rejects_duplicate_homes() {
   local home subhome subhome_abs err
   home="$TMP_ROOT/duplicate-home"
@@ -2326,6 +2422,10 @@ test_fm_home_parameterization
 test_lock_status_is_per_home
 test_home_seed_registry_scope_and_overlapping_projects
 test_home_seed_registry_reads_scope_from_filled_brief
+test_home_seed_writes_canonical_mise_toml
+test_home_seed_mise_is_idempotent
+test_home_seed_preserves_custom_mise_toml
+test_home_seed_rolls_back_created_mise_toml
 test_home_seed_validate_rejects_duplicate_homes
 test_home_seed_validate_rejects_duplicate_ids
 test_home_seed_validate_rejects_nested_homes

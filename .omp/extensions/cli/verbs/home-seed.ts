@@ -42,6 +42,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureMateMiseToml } from "../lib/mise-home";
 import { linkShipExtensions } from "../lib/ship-ext";
 
 // Canonical repo root, resolved from this module's own physical location
@@ -697,6 +698,7 @@ interface SeedState {
 	charterExisted: boolean;
 	markerExisted: boolean;
 	identityExisted: boolean;
+	miseTomlCreated: boolean;
 	herdrWorkspaceId: string;
 }
 
@@ -845,6 +847,13 @@ function rollback(ctx: Ctx, state: SeedState): void {
 				restoreSeedFile(state.charterExisted, join(state.backupDir, "charter.md"), join(state.home, "data", "charter.md"));
 				restoreSeedFile(state.subRegExisted, join(state.backupDir, "sub-projects.md"), join(state.home, "data", "projects.md"));
 				restoreSeedFile(state.identityExisted, join(state.backupDir, "identity"), join(state.home, "config", "identity"));
+				if (state.miseTomlCreated) {
+					try {
+						rmSync(join(state.home, ".mise.toml"), { force: true });
+					} catch {
+						// best-effort removal
+					}
+				}
 			}
 		}
 	}
@@ -906,6 +915,7 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 		charterExisted: false,
 		markerExisted: false,
 		identityExisted: false,
+		miseTomlCreated: false,
 		herdrWorkspaceId: "",
 	};
 	writeFileSync(state.createdProjectsFile, "");
@@ -967,6 +977,9 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 		const extSrc = join(CANONICAL_ROOT, ".omp", "extensions");
 		const extResult = linkShipExtensions(home, extSrc, { verbose: false, trackFile: state.createdExtLinksFile });
 		state.extDstExisted = extResult.dstExisted;
+		const miseResult = ensureMateMiseToml(home, true);
+		if (miseResult.status.startsWith("blocked:")) fail(`error: unable to seed mise config at ${miseResult.path}: ${miseResult.status}`);
+		state.miseTomlCreated = miseResult.created;
 
 		if (!existsSync(state.parentBrief)) {
 			const charterEnv = process.env.FM_SECONDMATE_CHARTER;

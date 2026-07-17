@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -78,6 +80,12 @@ try {
   writeFileSync(join(plum, "data", "secondmates.md"), `- sage - nested persistent mate (home: ${sage}; scope: tests)\n`);
   setupHome(plum);
   setupHome(sage);
+  const customMiseToml = `# custom mise config kept by tests
+[env]
+_.path = ["{{config_root}}/sbin", "{{config_root}}/bin"]
+PLUM_ONLY = "kept"
+`;
+  writeFileSync(join(plum, "mise.toml"), customMiseToml);
 
   const rootHelp = toon(run(["--help"]), "root help");
   assert(rootHelp.command === "fm", `root help command was ${JSON.stringify(rootHelp.command)}`);
@@ -132,8 +140,11 @@ try {
   assert(repaired.command === "home repair" && repaired.result.length === 1, `named repair returned the wrong envelope: ${JSON.stringify(repaired)}`);
   assertRecord(repaired.result[0], { command: "home repair", target: "sage", home: sage, action: "repair", result: "ok" });
   assert(repaired.result[0].diagnostics.some(line => line === "link.AGENTS.md=repaired"), "repair omitted repaired-link diagnostic");
+  assert(repaired.result[0].diagnostics.some(line => line === "mise.toml=repaired"), "repair omitted created mise diagnostic");
   assert(readlinkSync(join(sage, "AGENTS.md")) === realpathSync(join(codeRoot, "AGENTS.md")), "repair did not restore expected safe link");
-  console.log("ok - named repair restores the safe helper-managed link");
+  const sageMise = readFileSync(join(sage, ".mise.toml"), "utf8");
+  assert(sageMise.includes('"{{config_root}}/sbin"') && sageMise.includes('"{{config_root}}/bin"'), "repair did not create canonical mise PATH entries");
+  console.log("ok - named repair restores the safe helper-managed link and creates canonical mise config");
 
   const idempotent = toon(run(["home", "repair", "--all"]), "idempotent recursive repair");
   assert(idempotent.command === "home repair" && idempotent.result.length === 2, `recursive repair returned the wrong envelope: ${JSON.stringify(idempotent)}`);
@@ -143,8 +154,12 @@ try {
     assertRecord(record, { command: "home repair", target: record.target, home: expectedHome, action: "repair", result: "ok" });
   }
   assert(idempotent.result.some(record => record.target === "sage" && record.diagnostics.some(line => line === "link.AGENTS.md=ok")), "idempotent repair did not preserve healthy nested link state");
+  assert(idempotent.result.some(record => record.target === "sage" && record.diagnostics.some(line => line === "mise.toml=ok")), "idempotent repair did not preserve healthy mise state");
   assert(readlinkSync(join(sage, "AGENTS.md")) === realpathSync(join(codeRoot, "AGENTS.md")), "idempotent repair changed an already healthy link");
-  console.log("ok - --all repair is idempotent across nested homes");
+  assert(readFileSync(join(sage, ".mise.toml"), "utf8") === sageMise, "idempotent repair changed canonical mise config");
+  assert(readFileSync(join(plum, "mise.toml"), "utf8") === customMiseToml, "repair clobbered customized mise.toml");
+  assert(!existsSync(join(plum, ".mise.toml")), "repair created hidden mise config beside existing customized mise.toml");
+  console.log("ok - --all repair is idempotent across nested homes and preserves customized mise.toml");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }
