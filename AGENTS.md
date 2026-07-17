@@ -254,33 +254,16 @@ Hot invariants remain always on:
 
 ## 7. Supervision protocol
 
-Supervision is automatic and in-process.
-The omp extension `.omp/extensions/fm-supervisor.ts` loads at session start and runs one long-lived driver for the whole session - there is nothing to arm, drain, or re-arm, and no watcher, wake-queue, beacon, or guard.
-It blocks (zero tokens while idle) on three sources and wakes you only when something needs you:
-
-- the herdr socket event stream - one persistent `events.subscribe` connection over `$HERDR_SOCKET_PATH` carrying every crewmate `working`/`idle`/`blocked`/`done` transition plus `pane.exited`/`pane.closed`, pushed live (the fleet is dynamic: a new `state/<id>.meta` adds its pane's subscription, a closed pane drops it);
-- `fs.watch` on `state/*.status` - a crewmate's appended status line;
-- a timer firing each `state/*.check.sh` (e.g. a merged-PR poll).
-
-For each event the extension applies the captain-relevance rule (the relevance regex defined in `.omp/extensions/fm-supervisor.ts` - `done:|blocked:|failed:|needs-decision:|PR ready|checks green|ready in branch|merged`; a `check` with non-empty output; a herdr `->blocked`/`->done`).
-A relevant event becomes ONE dense, self-contained wake digest injected into your session via `pi.sendMessage` - it renders as an `fm-wake` message carrying the task, pane, state, and recommended action.
-Act on it directly; it is self-contained and needs no follow-up read.
-Non-relevant status lines are appended to `state/.status-internal.log` and never wake you.
-A herdr `working->idle` (turn-end) is not a wake by itself; it only coalesces with a relevant status in the same grace window (`FM_SIGNAL_GRACE`, default 30s).
-
-You no longer arm a watcher, drain a queue, poll for staleness, or re-arm anything.
-Wakes arrive as messages; between them, silence is correct - do not send idle progress to the captain.
+Supervision is automatic and in-process: the omp extension `.omp/extensions/fm-supervisor.ts` loads at session start and runs one long-lived driver for the whole session, blocking at zero token cost until something needs you - there is nothing to arm, drain, or re-arm yourself.
+A relevant event (a crewmate reaching done/blocked/failed/needs-decision, a PR going green, or a check firing with output) arrives as ONE dense, self-contained `fm-wake` message carrying the task, pane, state, and recommended action - act on it directly, it needs no follow-up read, and non-relevant status noise never wakes you.
 There is no periodic heartbeat: the event stream surfaces every relevant change directly, so review the fleet and reconcile `data/backlog.md` as you handle wakes, teardowns, and PR merges, not on a timer.
 
-**Stale.** On a crewmate turn-end the extension arms a stale backstop; it fires only if the pane is still idle past `FM_STALE_ESCALATE_SECS` (default 240s) with no captain-relevant last status.
-A stale wake directs you to peek the pane (`sbin/fm-peek.sh <pane_id>`) to diagnose.
-Stale is SKIPPED for `kind=secondmate` panes (an idle secondmate is healthy - it runs its own supervision) and for ship tasks parked on a green PR (`pr=` set and a terminal `done: PR`/PR-ready status line); those stay covered by the merge `check.sh` and the status stream.
+**Stale.** An idle crewmate with no captain-relevant last status gets a stale wake after a timeout: peek the pane (`sbin/fm-peek.sh <pane_id>`) to diagnose.
+Stale is SKIPPED for `kind=secondmate` panes (an idle secondmate is healthy - it runs its own supervision) and for ship tasks parked on a green PR; those stay covered by the merge `check.sh` and the status stream.
 
 Token discipline: the injected digest is self-contained - act on it without re-reading; default any pane peek to 40 lines; batch what you tell the captain.
 Herdr's native agent status is the ground truth, so each harness's herdr integration must be installed once per machine: `herdr integration install omp` for omp panes and `herdr integration install claude` (which manages the `~/.claude/hooks/herdr-agent-state.sh` SessionStart hook) for Claude panes; without it crewmate panes report `unknown` and only the status-file stream carries signals.
-
-Lean-loop discipline: keep your own loop lean for reasoning and decisions - fork self-contained side-work to a disposable `task` subagent (or route domain work to a secondmate) rather than burning your context on it; the thinking and execution discipline in section 1 governs the rest.
-For autonomous-loop incidents (notification spam, 429s, repeated blocked wakes, cost growth), follow `docs/runbooks/autonomous-loop-incident-triage.md`.
+Event-source mechanics (the socket stream, the relevance regex, grace-window/stale-timer constants), lean-loop reasoning discipline, and autonomous-loop-incident debugging are documented in code comments in `.omp/extensions/fm-supervisor.ts`, next to the mechanism they describe.
 
 ### Away-mode (`/afk`) (lazy)
 

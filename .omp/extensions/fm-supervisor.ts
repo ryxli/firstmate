@@ -275,6 +275,44 @@ export function classifyAndDigest(events: FleetEvent[], opts?: { afk?: boolean }
 	return { wakes, digests, falseWakes: 0, detected };
 }
 
+// ======================= AGENTS.md operator narrative ===================
+// Relocated here from AGENTS.md section 7 (supervision protocol): this is the
+// mechanism detail an engineer debugging or modifying this extension needs.
+// AGENTS.md itself only keeps the compressed operative sentences (wake
+// digest behavior, stale behavior, token discipline) that firstmate needs
+// every turn - the rest was over-owned prose duplicating what this file
+// already documents in code, so it lives here now, not in both places.
+//   - Three sources feed the live loop: the herdr socket event stream (every
+//     crewmate working/idle/blocked/done transition plus
+//     pane.exited/pane.closed, pushed live - the fleet is dynamic, a new
+//     state/<id>.meta adds a subscription and a closed pane drops it);
+//     fs.watch on state/*.status (a crewmate's appended status line); and a
+//     timer firing each state/*.check.sh (e.g. a merged-PR poll).
+//   - Every event runs through the relevance rule above (STATUS_PREFIX_RE /
+//     STATUS_PHRASE_RE / herdr ->blocked|->done / a check with non-empty
+//     output, see isRelevant()). A relevant event becomes ONE dense,
+//     self-contained wake digest injected via pi.sendMessage. Non-relevant
+//     status lines only reach state/.status-internal.log.
+//   - A herdr working->idle (turn-end) is not a wake by itself; it only
+//     coalesces with a relevant status within GRACE_MS / FM_SIGNAL_GRACE
+//     (default 30s, see readTunables() below).
+//   - Stale backstop: on turn-end the driver arms staleMs /
+//     FM_STALE_ESCALATE_SECS (default 240s, see readTunables() below);
+//     firing directs firstmate to peek the pane (sbin/fm-peek.sh). Skipped
+//     for kind=secondmate panes (an idle secondmate runs its own
+//     supervision) and for ship tasks parked on a green PR (pr= set and a
+//     terminal done: PR / PR-ready status line); those stay covered by the
+//     merge check.sh and the status stream instead.
+//   - Autonomous-loop incidents (notification spam, 429s, repeated blocked
+//     wakes, cost growth): see docs/runbooks/autonomous-loop-incident-triage.md.
+//   - Lean-loop reasoning discipline (fork self-contained side-work to a
+//     disposable subagent, or route domain work to a secondmate, rather than
+//     burning firstmate's own context on it) is a firstmate reasoning habit,
+//     not a mechanism this extension implements; it is noted here only
+//     because it was grouped with the incident-triage pointer in AGENTS.md's
+//     former supervision-protocol prose. See AGENTS.md's thinking and
+//     execution discipline section for the rule itself.
+//
 // ============================== LIVE LOOP =============================
 // Everything below runs only inside event handlers (after the runtime is
 // initialized). Nothing here executes at import time, so importing this module
