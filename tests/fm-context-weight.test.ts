@@ -170,3 +170,80 @@ describe("fm-context-weight", () => {
 		expect(stdout).toContain("mateb\t(no config/omp.yml)\t0\t-\n");
 	});
 });
+
+describe("fm-context-weight --budget", () => {
+	const AGENTS_TEXT = "# Agent\nshared always-on context\n## Rules\nkeep it small\n";
+	const SKILL_TEXT = "# Alpha\nskill context that is lazy\n";
+	const ALWAYS_ON = countTokens(AGENTS_TEXT);
+	const GOVERNANCE = countTokens(AGENTS_TEXT) + countTokens(SKILL_TEXT);
+
+	// Builds a tracked-layer fixture plus a deliberately large local-layer file
+	// that must never count toward the budget. Omit `budget` to leave out the
+	// ceiling file entirely.
+	function fixture(budget?: { alwaysOnMax: number; governanceMax: number }): string {
+		const root = mkdtempSync(join(tmpdir(), "fm-context-budget-"));
+		homes.push(root);
+		const codeRoot = join(root, "code");
+		write(join(codeRoot, "AGENTS.md"), AGENTS_TEXT);
+		write(join(codeRoot, ".agents", "skills", "alpha", "SKILL.md"), SKILL_TEXT);
+		write(join(root, "home", "data", "cap.md"), "# Preferences\n".repeat(500));
+		if (budget) {
+			writeFileSync(join(codeRoot, "context-budget.toml"), `always_on_max = ${budget.alwaysOnMax}\ngovernance_max = ${budget.governanceMax}\n`);
+		}
+		return codeRoot;
+	}
+
+	function runBudget(codeRoot: string): { code: number; stdout: string; stderr: string } {
+		const result = Bun.spawnSync({
+			cmd: [COMMAND, "--budget"],
+			env: { ...process.env, FM_CODE_ROOT_OVERRIDE: codeRoot, FM_HOME: join(codeRoot, "..", "home") },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		return { code: result.exitCode ?? -1, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
+	}
+
+	it("passes at the ceiling and excludes the large local-layer file", () => {
+		const result = runBudget(fixture({ alwaysOnMax: ALWAYS_ON, governanceMax: GOVERNANCE }));
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain(`= ceiling ${String(GOVERNANCE).padStart(6)}`);
+	});
+
+	it("fails and reports the overage when the always-on layer exceeds its ceiling", () => {
+		const result = runBudget(fixture({ alwaysOnMax: ALWAYS_ON - 5, governanceMax: GOVERNANCE }));
+		expect(result.code).toBe(1);
+		expect(result.stdout).toContain("FAIL  always_on");
+		expect(result.stdout).toContain("(+5 over budget)");
+		expect(result.stderr).toContain("context budget exceeded");
+	});
+
+	it("passes but nudges to tighten when a ceiling has slack", () => {
+		const result = runBudget(fixture({ alwaysOnMax: ALWAYS_ON + 1000, governanceMax: GOVERNANCE + 1000 }));
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("ratchet: lower to");
+		expect(result.stderr).toContain("context budget has slack");
+	});
+
+	it("fails when the budget file is missing", () => {
+		const result = runBudget(fixture());
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain("no budget file");
+	});
+
+	// The live ratchet, re-homed from CI into the suite: the real tracked layer
+	// must stay within the committed ceilings. This is what fires when AGENTS.md
+	// or a skill grows without a paid-for cut.
+	it("keeps the real tracked layer within its committed budget", () => {
+		const repoRoot = join(import.meta.dir, "..");
+		const result = Bun.spawnSync({
+			cmd: [COMMAND, "--budget"],
+			env: { ...process.env, FM_CODE_ROOT_OVERRIDE: repoRoot },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (result.exitCode !== 0) {
+			throw new Error(`context budget breached:\n${result.stdout.toString()}${result.stderr.toString()}`);
+		}
+		expect(result.exitCode).toBe(0);
+	});
+});

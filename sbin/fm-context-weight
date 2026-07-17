@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 // fm-context-weight - estimate the token weight of shared and home-specific
 // context using the repository's byte-stable chars/4 tokenizer.
+//
+// `--budget` switches to a ratchet: it exits non-zero when the tracked
+// template layer exceeds the committed ceilings in context-budget.toml.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -280,6 +283,63 @@ function collectContext(): ContextFile[] {
 	return files.sort(compareWeight);
 }
 
+function readCeiling(tomlText: string, key: string): number | null {
+	const match = new RegExp(`^${key}\\s*=\\s*(\\d+)`, "m").exec(tomlText);
+	return match ? Number(match[1]) : null;
+}
+
+// `--budget`: the compiled form of the "fight context accretion" rule. The
+// tracked template layer - AGENTS.md (always-on) plus the lazy skills - may
+// only stay flat or shrink against the committed ceilings in
+// context-budget.toml. Local-layer files (cap.md, charter.md, briefs) are
+// excluded on purpose: they vary per machine and fleet and never travel.
+// Over budget exits 1 (a prose addition must be paid for with a cut or a
+// reviewed ceiling raise); slack exits 0 but nudges to tighten the ceiling so
+// a reduction is locked in. This is a one-way ratchet, not a static cap.
+function budgetCheck(files: ContextFile[], codeRoot: string): number {
+	const budgetPath = process.env.FM_CONTEXT_BUDGET_FILE ?? join(codeRoot, "context-budget.toml");
+	if (!existsSync(budgetPath)) {
+		console.error(`context budget: no budget file at ${budgetPath}`);
+		return 1;
+	}
+	const toml = readFileSync(budgetPath, "utf8");
+	const alwaysOnMax = readCeiling(toml, "always_on_max");
+	const governanceMax = readCeiling(toml, "governance_max");
+	if (alwaysOnMax === null || governanceMax === null) {
+		console.error(`context budget: ${budgetPath} must set always_on_max and governance_max`);
+		return 1;
+	}
+
+	const alwaysOn = files.find((file) => file.label === "AGENTS.md")?.tokens ?? 0;
+	const governance = files
+		.filter((file) => file.label === "AGENTS.md" || file.label.startsWith(".agents/skills/"))
+		.reduce((sum, file) => sum + file.tokens, 0);
+
+	let status = 0;
+	let slack = false;
+	const check = (name: string, current: number, max: number): void => {
+		const head = `${name.padEnd(11)} ${String(current).padStart(6)} tokens`;
+		if (current > max) {
+			console.log(`FAIL  ${head}  > ceiling ${String(max).padStart(6)}  (+${current - max} over budget)`);
+			status = 1;
+		} else if (current < max) {
+			console.log(`ok    ${head}  < ceiling ${String(max).padStart(6)}  (ratchet: lower to ${current})`);
+			slack = true;
+		} else {
+			console.log(`ok    ${head}  = ceiling ${String(max).padStart(6)}`);
+		}
+	};
+	check("always_on", alwaysOn, alwaysOnMax);
+	check("governance", governance, governanceMax);
+
+	if (status === 1) {
+		console.error("context budget exceeded: pay for the addition with a cut, or justify a ceiling raise in review.");
+	} else if (slack) {
+		console.error(`context budget has slack: tighten a ceiling in ${relative(codeRoot, budgetPath) || budgetPath} to lock in the reduction.`);
+	}
+	return status;
+}
+
 function main(): void {
 	const { dataRoot } = contextRoots();
 	const files = collectContext();
@@ -308,6 +368,10 @@ function main(): void {
 }
 
 try {
+	if (process.argv.slice(2).includes("--budget")) {
+		const { codeRoot } = contextRoots();
+		process.exit(budgetCheck(collectContext(), codeRoot));
+	}
 	main();
 } catch (error) {
 	console.error(`error: ${error instanceof Error ? error.message : String(error)}`);

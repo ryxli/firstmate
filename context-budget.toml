@@ -1,0 +1,14 @@
+# Context budget for the tracked template layer, enforced by
+# `sbin/fm-context-weight --budget` and the ratchet test in
+# tests/fm-context-weight.test.ts.
+#
+# The ratchet: these ceilings may only stay flat or drop. Any prose addition
+# that pushes a value over its ceiling must be paid for with a cut elsewhere or
+# a reviewed ceiling raise; when a reduction lands, tighten the ceiling to lock
+# it in. This turns "fight context accretion" from a recalled rule into a guard
+# that fires in the test suite regardless of who remembers it.
+#
+# Local-layer files (data/cap.md, data/charter.md, data/*/brief.md) are
+# deliberately NOT budgeted: they vary per machine and fleet and never travel.
+always_on_max = 8086      # AGENTS.md - loaded on every turn of every mate
+governance_max = 30563    # AGENTS.md + all .agents/skills/**/SKILL.md
