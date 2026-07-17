@@ -74,12 +74,12 @@ fleet_sync() {
 }
 
 self_pane_sync() {
-  [ -x "$FM_ROOT/sbin/fm-self-pane.sh" ] || return 0
+  [ -x "$FM_ROOT/sbin/fm" ] || return 0
   command -v herdr >/dev/null 2>&1 || return 0
   herdr_server_running || return 0
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/fm-self-pane.XXXXXX" 2>/dev/null) || return 0
-  if "$FM_ROOT/sbin/fm-self-pane.sh" >"$tmp" 2>&1; then
+  if "$FM_ROOT/sbin/fm" self-pane >"$tmp" 2>&1; then
     rm -f "$tmp"
     return 0
   fi
@@ -176,7 +176,7 @@ crew=
 [ -n "$crew" ] && [ "$crew" != "default" ] && echo "CREW_HARNESS_OVERRIDE: $crew"
 fm_tasks_axi_compatible && echo "TASKS_AXI: available"
 # Do not sync dependencies or fleet state from an unchecked captain handoff.
-handoff_check_output=$("$FM_ROOT/sbin/fm-handoff-check.sh" 2>&1) || {
+handoff_check_output=$("$FM_ROOT/sbin/fm" handoff-check 2>&1) || {
   printf '%s\n' "$handoff_check_output"
   exit 1
 }

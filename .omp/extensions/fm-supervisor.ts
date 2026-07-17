@@ -298,7 +298,7 @@ export function classifyAndDigest(events: FleetEvent[], opts?: { afk?: boolean }
 //     (default 30s, see readTunables() below).
 //   - Stale backstop: on turn-end the driver arms staleMs /
 //     FM_STALE_ESCALATE_SECS (default 240s, see readTunables() below);
-//     firing directs firstmate to peek the pane (sbin/fm-peek.sh). Skipped
+//     firing directs firstmate to peek the pane (sbin/fm peek). Skipped
 //     for kind=secondmate panes (an idle secondmate runs its own
 //     supervision) and for ship tasks parked on a green PR (pr= set and a
 //     terminal done: PR / PR-ready status line); those stay covered by the

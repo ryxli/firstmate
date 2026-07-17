@@ -6,6 +6,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SPAWN="$ROOT/sbin/fm-spawn.sh"
 TMP_ROOT=
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
+# sbin/fm runs under bun; expose ONLY the real bun binary (not the mise shim
+# dir, which would leak every other shimmed tool into the sandbox).
+BUNBIN=$(mktemp -d "${TMPDIR:-/tmp}/fm-bunbin.XXXXXX")
+ln -s "$(bun -e 'console.log(process.execPath)')" "$BUNBIN/bun"
+BASE_PATH="$BASE_PATH:$BUNBIN"
 
 fail() {
   printf 'not ok - %s\n' "$1" >&2

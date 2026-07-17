@@ -17,7 +17,7 @@
 #   Set FM_SECONDMATE_CHARTER='<charter>' to fill the charter text.
 #   Set FM_SECONDMATE_SCOPE='<scope>' to write a routing scope distinct from the charter text.
 # For ship tasks, the definition of done is shaped by the project's delivery mode
-# (data/projects.md via fm-project-mode.sh; see AGENTS.md section 6):
+# (data/projects.md via fm project-mode; see AGENTS.md section 6):
 #   direct-PR    implement, focused review + tests, push + open PR via gh-axi -> captain merge (default)
 #   direct-main  implement, focused review + tests, guarded non-force push to origin/main, no PR
 #   local-only   implement on branch, stop and report "ready in branch" (no push/PR);
@@ -345,7 +345,7 @@ shell_quote() {
 }
 
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
-REPORT_HELPER=$(shell_quote "$FM_ROOT/sbin/fm-report.sh")
+REPORT_HELPER="$(shell_quote "$FM_ROOT/sbin/fm") report"
 SUPERVISOR_ID=$(fm_supervisor_slug "$CONFIG")
 assignment_contract() {
   cat <<'EOF'
@@ -486,7 +486,7 @@ fi
 # Ship task: shape Setup / Rule 1 / Definition of done by the project's delivery mode.
 # yolo does not affect the brief (it governs firstmate's approval behaviour), so discard it.
 read -r MODE _ <<EOF
-$("$FM_ROOT/sbin/fm-project-mode.sh" "$REPO")
+$("$FM_ROOT/sbin/fm" project-mode "$REPO")
 EOF
 
 case "$MODE" in
@@ -582,7 +582,7 @@ $RULE1
 8. Escalate a decision to a human ONLY for (a) a genuine toss-up between two equally good options after weighing the evidence, or (b) a destructive, irreversible, or live-capital-risk action (product choices, ask-user findings included). Then report needs-decision: {summary of options + the evidence you weighed} and stop. Firstmate will reply with the decision.
 
 # Project memory
-If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/sbin/fm-ensure-agents-md.sh .\` in the worktree.
+If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/sbin/fm ensure-agents-md .\` in the worktree.
 If this task produced durable project-intrinsic knowledge, record it in \`AGENTS.md\` as part of your change.
 Keep it proportionate: skip \`AGENTS.md\` edits for trivial tasks that produced no durable project knowledge.
 

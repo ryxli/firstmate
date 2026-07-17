@@ -4,11 +4,16 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOME_LINK="$ROOT/sbin/fm-home-link.sh"
+HOME_LINK="$ROOT/sbin/fm"
 SPAWN="$ROOT/sbin/fm-spawn.sh"
 UPDATE="$ROOT/sbin/fm-update.sh"
 TMP_ROOT=
-BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
+# fm-spawn.sh's link-repair path now shells out to the bun-based `fm` CLI, so the
+# sanitized spawn-lifecycle PATH below must still resolve bun even though it
+# otherwise excludes the host PATH.
+BUN_DIR=""
+command -v bun >/dev/null 2>&1 && BUN_DIR=$(dirname "$(command -v bun)")
+BASE_PATH=${FM_TEST_BASE_PATH:-${BUN_DIR:+$BUN_DIR:}/usr/bin:/bin:/usr/sbin:/sbin}
 
 fail() {
   printf 'not ok - %s\n' "$1" >&2
@@ -195,7 +200,7 @@ make_link_home() {
   local code=$1 home=$2 id=$3
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
   printf '%s\n' "$id" > "$home/.fm-secondmate-home"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair >/dev/null
 }
 
 make_current_home() {
@@ -224,9 +229,9 @@ test_current_layout_home_link_check_passes() {
   local code="$TMP_ROOT/current-pass-code" home="$TMP_ROOT/current-pass-home" out
   make_code_root "$code"
   make_current_home "$code" "$home" currentpass
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair >/dev/null \
     || fail "current-layout repair failed before check"
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check 2>&1) \
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
     || fail "current-layout check failed: $out"
   assert_contains "$out" "result=ok" "current-layout check did not report result=ok"
   pass "current per-extension .omp layout passes home-link check"
@@ -240,7 +245,7 @@ test_home_link_allows_missing_claude_link() {
   make_link_home "$code" "$home" missingclaude
   [ ! -e "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] \
     || fail "home-link repair created CLAUDE.md"
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check 2>&1) \
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
     || fail "home-link check rejected a missing CLAUDE.md: $out"
   assert_contains "$out" "link.CLAUDE.md=ok" "missing CLAUDE.md was not healthy"
   pass "home-link check accepts a missing CLAUDE.md"
@@ -253,10 +258,10 @@ test_home_link_removes_legacy_claude_symlink() {
   make_code_root "$code"
   make_link_home "$code" "$home" legacyclaude
   ln -s "$code/CLAUDE.md" "$home/CLAUDE.md"
-  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null 2>&1; then
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check >/dev/null 2>&1; then
     fail "home-link check accepted a legacy CLAUDE.md symlink"
   fi
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair 2>&1) \
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair 2>&1) \
     || fail "home-link repair failed to remove legacy CLAUDE.md symlink: $out"
   [ ! -e "$home/CLAUDE.md" ] && [ ! -L "$home/CLAUDE.md" ] \
     || fail "home-link repair left or recreated CLAUDE.md symlink"
@@ -272,7 +277,7 @@ test_home_link_preserves_non_symlink_claude_objects() {
 
   make_link_home "$code" "$file_home" claudeFile
   printf 'user-owned instructions\n' > "$file_home/CLAUDE.md"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$file_home" --repair >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$file_home" --repair >/dev/null \
     || fail "home-link repair rejected a user-owned CLAUDE.md file"
   [ -f "$file_home/CLAUDE.md" ] || fail "home-link repair removed a user-owned CLAUDE.md file"
   [ "$(cat "$file_home/CLAUDE.md")" = 'user-owned instructions' ] \
@@ -281,7 +286,7 @@ test_home_link_preserves_non_symlink_claude_objects() {
   make_link_home "$code" "$dir_home" claudeDir
   mkdir "$dir_home/CLAUDE.md"
   printf 'keep\n' > "$dir_home/CLAUDE.md/owned"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$dir_home" --repair >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$dir_home" --repair >/dev/null \
     || fail "home-link repair rejected a user-owned CLAUDE.md directory"
   [ -d "$dir_home/CLAUDE.md" ] || fail "home-link repair removed a user-owned CLAUDE.md directory"
   [ "$(cat "$dir_home/CLAUDE.md/owned")" = keep ] \
@@ -296,7 +301,7 @@ test_current_layout_broken_extension_link_fails() {
   make_current_home "$code" "$home" currentbroken
   rm -f "$home/.omp/extensions/test-ext.ts"
   ln -s "$TMP_ROOT/missing-extension" "$home/.omp/extensions/test-ext.ts"
-  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null 2>&1; then
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check >/dev/null 2>&1; then
     fail "current-layout check accepted a broken extension link"
   fi
   pass "current per-extension broken link fails home-link check"
@@ -309,11 +314,11 @@ test_current_layout_repairs_extension_link() {
   code=$(canonical "$code")
   make_current_home "$code" "$home" currentrepair
   rm -f "$home/.omp/extensions/test-ext.ts"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair >/dev/null \
     || fail "current-layout repair failed"
   assert_link_points "$home/.omp/extensions/test-ext.ts" "$code/.omp/extensions/test-ext.ts" \
     "repaired extension link"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check >/dev/null \
     || fail "current-layout check failed after repair"
   pass "current per-extension broken link is repaired"
 }
@@ -331,12 +336,12 @@ test_current_layout_repair_discovers_shared_skills() {
   done
   make_current_home "$code" "$home" currentskills
 
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check 2>&1); then
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1); then
     fail "current-layout check accepted a home missing the shared .agents link"
   fi
   assert_contains "$out" "result=blocked" \
     "current-layout check did not report the shared .agents link failure"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair >/dev/null \
     || fail "current-layout repair failed to link shared .agents"
 
   [ -d "$home/.omp" ] && [ ! -L "$home/.omp" ] \
@@ -350,7 +355,7 @@ test_current_layout_repair_discovers_shared_skills() {
     assert_contains "$(cat "$skill_file")" "name: $skill" \
       "repaired home discovered the wrong content for $skill"
   done
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check >/dev/null \
     || fail "current-layout check failed after shared-skill repair"
   pass "current-layout repair links .agents and discovers shared skills"
 }
@@ -363,7 +368,7 @@ test_legacy_whole_omp_link_still_passes() {
   local code="$TMP_ROOT/legacy-pass-code" home="$TMP_ROOT/legacy-pass-home"
   make_code_root "$code"
   make_link_home "$code" "$home" legacypass
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check >/dev/null \
     || fail "legacy whole-directory .omp link no longer passes"
   pass "legacy whole-directory .omp symlink still passes home-link check"
 }
@@ -385,11 +390,11 @@ test_home_link_repairs_shared_code_without_moving_operational_dirs() {
   ln -s "$TMP_ROOT/stale-sbin" "$home/sbin"
   : > "$home/AGENTS.md"
 
-  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --check >/dev/null 2>&1; then
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check >/dev/null 2>&1; then
     fail "fm-home-link --check accepted a stale unlinked home before repair"
   fi
 
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair >/dev/null \
     || fail "fm-home-link --repair failed"
   assert_link_points "$home/sbin" "$code/sbin" "sbin link"
   assert_link_points "$home/AGENTS.md" "$code/AGENTS.md" "AGENTS.md link"
@@ -400,19 +405,19 @@ test_home_link_repairs_shared_code_without_moving_operational_dirs() {
   done
 
   before=$(readlink "$home/sbin")
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$home" --repair >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair >/dev/null \
     || fail "second fm-home-link --repair failed"
   [ "$(readlink "$home/sbin")" = "$before" ] || fail "idempotent repair changed sbin target"
 
   printf '%s\n' '- alpha [local-only +yolo] - alpha project (added 2026-07-08)' > "$home/data/projects.md"
-  out=$(FM_HOME="$home" FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$home/sbin/fm-project-mode.sh" alpha 2>&1) \
+  out=$(FM_HOME="$home" FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$home/sbin/fm" project-mode alpha 2>&1) \
     || fail "project mode through symlinked sbin failed: $out"
   [ "$out" = 'local-only on' ] || fail "symlinked sbin did not read mate-home data/projects.md: $out"
 
   mkdir -p "$conflict/data" "$conflict/state" "$conflict/config" "$conflict/projects"
   printf '%s\n' conflict > "$conflict/.fm-secondmate-home"
   printf 'local instructions must survive\n' > "$conflict/AGENTS.md"
-  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$conflict" --repair >/dev/null 2>&1; then
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$conflict" --repair >/dev/null 2>&1; then
     fail "fm-home-link clobbered a non-empty AGENTS.md conflict"
   fi
   out=$(cat "$conflict/AGENTS.md")
@@ -433,13 +438,13 @@ test_home_link_removes_broken_legacy_bin_without_clobbering_user_file() {
 
   make_link_home "$code" "$broken_home" brokenbin
   ln -s "$TMP_ROOT/missing-bin-target" "$broken_home/bin"
-  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$broken_home" --check >/dev/null 2>&1; then
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$broken_home" --check >/dev/null 2>&1; then
     fail "fm-home-link --check accepted an obsolete broken bin link"
   fi
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$broken_home" --repair >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$broken_home" --repair >/dev/null \
     || fail "fm-home-link --repair failed to remove obsolete broken bin link"
   [ ! -L "$broken_home/bin" ] || fail "repair left obsolete broken bin symlink"
-  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$broken_home" --check >/dev/null 2>&1; then
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$broken_home" --check >/dev/null 2>&1; then
     :
   else
     fail "fm-home-link --check rejected the repaired home"
@@ -447,7 +452,7 @@ test_home_link_removes_broken_legacy_bin_without_clobbering_user_file() {
 
   make_link_home "$code" "$user_home" userbin
   printf 'user-owned bin content\n' > "$user_home/bin"
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" "$user_home" --repair 2>&1) \
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$user_home" --repair 2>&1) \
     || fail "fm-home-link --repair rejected a user-owned bin file: $out"
   [ -f "$user_home/bin" ] || fail "repair removed the user-owned bin file"
   [ "$(cat "$user_home/bin")" = 'user-owned bin content' ] \

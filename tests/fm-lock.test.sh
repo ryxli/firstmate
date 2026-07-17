@@ -29,7 +29,7 @@ esac
 SH
 chmod +x "$TMP_ROOT/bin/ps"
 
-out=$(PATH="$TMP_ROOT/bin:$PATH" FM_HOME="$TMP_ROOT/home" "$ROOT/sbin/fm-lock.sh" 2>&1) || true
+out=$(PATH="$TMP_ROOT/bin:$PATH" FM_HOME="$TMP_ROOT/home" "$ROOT/sbin/fm" lock 2>&1) || true
 case "$out" in
   *'lock acquired: harness pid 222'*) : ;;
   *) fail "bun-hosted omp ancestry was not detected: $out" ;;

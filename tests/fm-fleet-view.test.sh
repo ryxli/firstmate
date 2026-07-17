@@ -23,7 +23,7 @@ FOLDER="${B//\//-}"
 printf '%s\n' '{"byFolder":[{"folder":"'"$FOLDER"'","totalCost":1.25,"totalInputTokens":100,"totalOutputTokens":50,"totalCacheReadTokens":30,"totalCacheWriteTokens":20,"totalRequests":2,"failedRequests":0}]}' > "$TMP/stats.json"
 
 if FM_HOME="$A" FM_FLEET_PANES_FILE="$TMP/panes.json" \
-  "$ROOT/sbin/fm-fleet-view.sh" --home --no-open >/dev/null 2>&1; then
+  bun "$ROOT/sbin/fm" fleet-view --home --no-open >/dev/null 2>&1; then
   echo "fleet view accepted a following flag as --home value" >&2
   exit 1
 elif [ "$?" -ne 2 ]; then
@@ -33,7 +33,7 @@ fi
 
 if FM_HOME="$A" FM_FLEET_PANES_FILE="$TMP/panes.json" \
   FM_FLEET_STATS_FILE="$TMP/stats.json" \
-  "$ROOT/sbin/fm-kpi-view.sh" --home --no-open >/dev/null 2>&1; then
+  bun "$ROOT/sbin/fm" kpi-view --home --no-open >/dev/null 2>&1; then
   echo "KPI view accepted a following flag as --home value" >&2
   exit 1
 elif [ "$?" -ne 2 ]; then
@@ -42,9 +42,9 @@ elif [ "$?" -ne 2 ]; then
 fi
 
 FM_HOME="$A" FM_FLEET_PANES_FILE="$TMP/panes.json" \
-  "$ROOT/sbin/fm-fleet-view.sh" --home "$B" --no-open --output "$TMP/fleet.html" >/dev/null
+  bun "$ROOT/sbin/fm" fleet-view --home "$B" --no-open --output "$TMP/fleet.html" >/dev/null
 FM_HOME="$A" FM_FLEET_PANES_FILE="$TMP/panes.json" FM_FLEET_STATS_FILE="$TMP/stats.json" \
-  "$ROOT/sbin/fm-kpi-view.sh" --home "$B" --no-open --output "$TMP/kpi.html" >/dev/null
+  bun "$ROOT/sbin/fm" kpi-view --home "$B" --no-open --output "$TMP/kpi.html" >/dev/null
 
 python3 - "$B" "${B//\//-}" "$TMP/fleet.html" "$TMP/kpi.html" <<'PY'
 import sys
@@ -54,7 +54,7 @@ assert folder in open(kpi).read(), folder
 PY
 
 printf '%s\n' '{"schema":"fleet-snapshot/1","home":"/tmp/home-a","homePaths":["/tmp/home-a","/tmp/plum","/tmp/gauge"],"health":{"state":"degraded","homes":3,"missingHomes":0,"livePanes":0,"herdr":"ok"},"agents":[],"tasks":[],"attention":[],"pending":[],"mates":[],"otherLivePanes":[],"notes":[]}' > "$TMP/count-input.json"
-"$ROOT/sbin/fm-fleet-view.sh" --input "$TMP/count-input.json" --no-open --output "$TMP/count.html" >/dev/null
+bun "$ROOT/sbin/fm" fleet-view --input "$TMP/count-input.json" --no-open --output "$TMP/count.html" >/dev/null
 python3 - "$TMP/count.html" <<'PY'
 import sys
 text = open(sys.argv[1]).read()
@@ -67,7 +67,7 @@ printf '%s\n' 'ok - visual projection carries authoritative multi-home count'
 cat > "$TMP/live-status-input.json" <<'JSON'
 {"schema":"fleet-snapshot/1","home":"/tmp/home-a","homePaths":["/tmp/home-a"],"health":{"state":"healthy","homes":1,"missingHomes":0,"livePanes":2,"herdr":"ok"},"agents":[{"key":"home-a/done-idle","id":"done-idle","owner":"home-a","kind":"ship","status":"done","statusFile":{"state":"done","text":"finished"},"home":"/tmp/home-a","topology":{"home":"/tmp/home-a","pane":"w1:p1","workspace":"w1","tab":"t1","agentStatus":"idle"}},{"key":"home-a/done-working","id":"done-working","owner":"home-a","kind":"ship","status":"done","statusFile":{"state":"done","text":"finished"},"home":"/tmp/home-a","topology":{"home":"/tmp/home-a","pane":"w1:p2","workspace":"w1","tab":"t1","agentStatus":"working"}},{"key":"home-a/done-missing","id":"done-missing","owner":"home-a","kind":"ship","status":"done","statusFile":{"state":"done","text":"finished"},"home":"/tmp/home-a","topology":{"home":"/tmp/home-a","degraded":"missing-pane"}}],"tasks":[],"attention":[],"pending":[],"mates":[],"otherLivePanes":[],"notes":[]}
 JSON
-"$ROOT/sbin/fm-fleet-view.sh" --input "$TMP/live-status-input.json" --no-open --output "$TMP/live-status.html" >/dev/null
+bun "$ROOT/sbin/fm" fleet-view --input "$TMP/live-status-input.json" --no-open --output "$TMP/live-status.html" >/dev/null
 bun - "$TMP/live-status.html" <<'JS'
 import { readFileSync } from "node:fs";
 

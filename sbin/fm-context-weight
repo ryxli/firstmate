@@ -94,7 +94,7 @@ function cacheRoots(): { ompCache: string; claudeCache: string } {
 }
 
 // Parse "- <id> - ... (home: <path>; ...)" registry lines from
-// data/secondmates.md - the same shape fm-identity-migrate.sh and friends
+// data/secondmates.md - the same shape fm identity-migrate and friends
 // parse in shell. Malformed or unreadable input degrades to no mates found.
 function parseSecondmates(dataRoot: string): Mate[] {
 	const path = join(dataRoot, "secondmates.md");

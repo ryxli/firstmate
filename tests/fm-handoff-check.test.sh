@@ -32,7 +32,7 @@ seed_valid_fixture() {
 test_valid_pair() {
   local fixture="$TMP_ROOT/valid" out
   seed_valid_fixture "$fixture"
-  if ! out=$(FM_HOME="$fixture" "$ROOT/sbin/fm-handoff-check.sh"); then
+  if ! out=$(FM_HOME="$fixture" "$ROOT/sbin/fm" handoff-check); then
     fail "valid handoff pair failed validation: $out"
   fi
   case "$out" in
@@ -64,7 +64,7 @@ test_contradictory_readback() {
   awk 'NR == 7 { print "3. Pursue an unrelated completed request."; next } { print }' \
     "$fixture/data/handoff/firstmate-readback.md" > "$fixture/data/handoff/readback.tmp"
   mv "$fixture/data/handoff/readback.tmp" "$fixture/data/handoff/firstmate-readback.md"
-  if out=$(FM_HOME="$fixture" "$ROOT/sbin/fm-handoff-check.sh"); then
+  if out=$(FM_HOME="$fixture" "$ROOT/sbin/fm" handoff-check); then
     fail "contradictory readback unexpectedly passed: $out"
   fi
   case "$out" in

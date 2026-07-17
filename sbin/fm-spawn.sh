@@ -3,7 +3,7 @@
 # its isolated firstmate home.
 # Usage: fm-spawn.sh <task-id> <project-dir> [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [harness|launch-command] --secondmate [--workspace=<id>] [--tab=<id>]
-#   With no harness arg, the harness comes from fm-harness.sh crew (config/crew-harness,
+#   With no harness arg, the harness comes from fm harness crew (config/crew-harness,
 #   falling back to firstmate's own harness). A bare adapter name (omp|claude|codex|
 #   opencode|pi) overrides it for this spawn. A non-flag string containing whitespace
 #   is treated as a RAW launch command - the escape hatch for verifying new adapters.
@@ -167,7 +167,7 @@ case "$ARG3" in
     done
     ;;
   '')
-    HARNESS=$("$FM_ROOT/sbin/fm-harness.sh" crew)
+    HARNESS=$("$FM_ROOT/sbin/fm" harness crew)
     if [ "$KIND" = secondmate ]; then
       LAUNCH=$(launch_template "$HARNESS") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     else
@@ -406,7 +406,7 @@ validate_firstmate_home_for_spawn() {
   # AGENTS.md and sbin/ as real paths is self-contained, not a partial link home.
   if ! git -C "$abs_home" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
     && home_needs_shared_code_repair "$abs_home"; then
-    "$FM_ROOT/sbin/fm-home-link.sh" "$abs_home" --repair >/dev/null || {
+    "$FM_ROOT/sbin/fm" home-link "$abs_home" --repair >/dev/null || {
       echo "error: failed to repair shared-code links in secondmate home $home" >&2
       return 1
     }
@@ -499,7 +499,7 @@ fi
 
 # Preflight: validate harness binary and worktree base before creating anything.
 if [ "$KIND" != secondmate ]; then
-  "$SCRIPT_DIR/fm-resolve-spawn.sh" "$PROJ_ABS" "$HARNESS" || exit $?
+  "$SCRIPT_DIR/fm" resolve-spawn "$PROJ_ABS" "$HARNESS" || exit $?
 fi
 
 # Ship and scout tabs must be created in the spawning firstmate's own
@@ -537,7 +537,7 @@ if [ "$KIND" = secondmate ]; then
 else
   PROJ_NAME=$(basename "$PROJ_ABS")
   read -r MODE YOLO <<EOF
-$("$FM_ROOT/sbin/fm-project-mode.sh" "$PROJ_NAME")
+$("$FM_ROOT/sbin/fm" project-mode "$PROJ_NAME")
 EOF
 fi
 

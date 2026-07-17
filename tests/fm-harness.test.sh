@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Harness detection (fm-harness.sh) and the per-adapter launch templates
+# Harness detection (fm harness) and the per-adapter launch templates
 # (fm-spawn.sh launch_template). Pins the omp adapter and guards the omp/claude
 # ordering regression: omp sets BOTH OMPCODE=1 and CLAUDECODE=1, so detection
 # MUST check OMPCODE first or omp misdetects as claude.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HARNESS="$ROOT/sbin/fm-harness.sh"
+FM="$ROOT/sbin/fm"
 SPAWN="$ROOT/sbin/fm-spawn.sh"
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
@@ -15,7 +15,7 @@ pass() { printf 'ok - %s\n' "$1"; }
 # Run detection with a clean slate for the harness env markers so the host's
 # own environment cannot leak into a case.
 detect() {
-  env -u OMPCODE -u CLAUDECODE -u PI_CODING_AGENT "$@" "$HARNESS"
+  env -u OMPCODE -u CLAUDECODE -u PI_CODING_AGENT "$@" "$FM" harness
 }
 
 # --- detection: environment markers -----------------------------------------

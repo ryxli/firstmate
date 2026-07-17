@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior tests for fm-identity-migrate.sh: check and migrate commands.
+# Behavior tests for `fm identity-migrate`: check and migrate commands.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,7 +21,8 @@ cleanup() {
 trap cleanup EXIT
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-identity-migrate-tests.XXXXXX")
 
-MIGRATE="$ROOT/sbin/fm-identity-migrate.sh"
+FM="$ROOT/sbin/fm"
+MIGRATE() { "$FM" identity-migrate "$@"; }
 
 # Build a minimal registry and home structure for tests.
 make_home() {
@@ -70,7 +71,7 @@ test_check_all_versioned_exits_0() {
   make_registry "$reg" "alpha:$home1:Alpha summary" "beta:$home2:Beta summary"
 
   local out
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) \
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check) \
     || fail "check exited non-zero for all-versioned registry"
   printf '%s\n' "$out" | grep -F "OK" | grep -F "alpha" >/dev/null \
     || fail "check did not emit OK for alpha"
@@ -92,7 +93,7 @@ test_check_unversioned_exits_1() {
   make_registry "$reg" "fran:$home:Schwarzwald domain expert"
 
   local out rc=0
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) || rc=$?
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check) || rc=$?
   [ "$rc" = 1 ] || fail "check did not exit 1 for unversioned identity"
   printf '%s\n' "$out" | grep -F "UNRESOLVED" | grep -F "fran" >/dev/null \
     || fail "check did not emit UNRESOLVED for fran"
@@ -114,7 +115,7 @@ test_check_no_identity_exits_1() {
   make_registry "$reg" "riggs:$home:Harness mate"
 
   local out rc=0
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) || rc=$?
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check) || rc=$?
   [ "$rc" = 1 ] || fail "check did not exit 1 for marker-only home"
   printf '%s\n' "$out" | grep -F "UNRESOLVED" | grep -F "riggs" >/dev/null \
     || fail "check did not emit UNRESOLVED for riggs"
@@ -136,7 +137,7 @@ test_check_no_marker_exits_1() {
   make_registry "$reg" "atlas:$home:GPU specialist"
 
   local out rc=0
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) || rc=$?
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check) || rc=$?
   [ "$rc" = 1 ] || fail "check did not exit 1 for home with no marker"
   printf '%s\n' "$out" | grep -F "UNRESOLVED" | grep -F "atlas" >/dev/null \
     || fail "check did not emit UNRESOLVED for atlas"
@@ -156,7 +157,7 @@ test_migrate_unversioned_adds_schema_version() {
   make_registry "$reg" "fran:$home:Schwarzwald domain expert"
 
   local out
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" migrate) \
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE migrate) \
     || fail "migrate exited non-zero for unversioned home"
   printf '%s\n' "$out" | grep -F "MIGRATED" | grep -F "fran" >/dev/null \
     || fail "migrate did not emit MIGRATED for fran"
@@ -187,7 +188,7 @@ test_migrate_dry_run_does_not_write() {
 
   local before after out
   before=$(cat "$home/config/identity")
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" migrate --dry-run) \
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE migrate --dry-run) \
     || fail "migrate --dry-run exited non-zero"
   after=$(cat "$home/config/identity")
   printf '%s\n' "$out" | grep -F "WOULD_MIGRATE" | grep -F "riggs" >/dev/null \
@@ -209,7 +210,7 @@ test_migrate_marker_only_creates_identity() {
   make_registry "$reg" "atlas:$home:GPU remote specialist"
 
   local out
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" migrate) \
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE migrate) \
     || fail "migrate exited non-zero for marker-only home"
   printf '%s\n' "$out" | grep -F "CREATED" | grep -F "atlas" >/dev/null \
     || fail "migrate did not emit CREATED for atlas"
@@ -235,7 +236,7 @@ test_migrate_already_versioned_is_idempotent() {
 
   local before after out
   before=$(cat "$home/config/identity")
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" migrate) \
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE migrate) \
     || fail "migrate exited non-zero for already-versioned home"
   after=$(cat "$home/config/identity")
   printf '%s\n' "$out" | grep -F "ALREADY_VERSIONED" | grep -F "ledger" >/dev/null \
@@ -257,7 +258,7 @@ test_migrate_refuses_marker_mismatch() {
   make_registry "$reg" "fran:$home:Schwarzwald domain expert"   # registry says "fran"
 
   local err rc=0
-  err=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" migrate 2>&1 >/dev/null) || rc=$?
+  err=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE migrate 2>&1 >/dev/null) || rc=$?
   [ "$rc" = 1 ] || fail "migrate did not exit 1 on marker mismatch"
   printf '%s\n' "$err" | grep -F "CONFLICT" >/dev/null \
     || fail "migrate did not emit CONFLICT on stderr for marker mismatch"
@@ -272,7 +273,7 @@ test_check_empty_registry_exits_0() {
   mkdir -p "$(dirname "$reg")"
   printf '# Secondmates\n\n' > "$reg"
 
-  FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check \
+  FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check \
     || fail "check exited non-zero for empty registry"
   pass "check exits 0 for an empty registry"
 }
@@ -296,7 +297,7 @@ test_check_recurses_nested_registry() {
   make_registry "$home_a/data/secondmates.md" "beta:$home_b:Beta summary"
 
   local out rc=0
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) || rc=$?
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check) || rc=$?
   [ "$rc" = 1 ] || fail "check did not exit 1 when nested home is unversioned"
   printf '%s\n' "$out" | grep -F "OK" | grep -F "alpha" >/dev/null \
     || fail "check did not emit OK for top-level alpha"
@@ -323,7 +324,7 @@ test_check_handles_registry_cycle() {
   make_registry "$home_b/data/secondmates.md" "alpha:$home_a:Alpha"  # cycle
 
   local out
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) \
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check) \
     || fail "check exited non-zero for cycle (expected all versioned)"
   local alpha_count
   alpha_count=$(printf '%s\n' "$out" | awk -F'\t' '$2=="alpha"{c++} END{print c+0}')
@@ -350,7 +351,7 @@ test_check_deduplicates_homes() {
   make_registry "$home_b/data/secondmates.md" "alpha:$home_a:Alpha"
 
   local out
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" check) \
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check) \
     || fail "check exited non-zero when all homes are versioned"
   local alpha_count
   alpha_count=$(printf '%s\n' "$out" | awk -F'\t' '$2=="alpha"{c++} END{print c+0}')
@@ -375,7 +376,7 @@ test_migrate_recurses_nested_registry() {
   make_registry "$home_a/data/secondmates.md" "beta:$home_b:Beta"
 
   local out
-  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" "$MIGRATE" migrate) \
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE migrate) \
     || fail "migrate exited non-zero"
   printf '%s\n' "$out" | grep -F "MIGRATED" | grep -F "beta" >/dev/null \
     || fail "migrate did not emit MIGRATED for nested beta"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior tests for sbin/fm-skill-census.sh.
+# Behavior tests for sbin/fm skill-census.
 # Scenarios: exact-duplicate-of-template (merge), same-name-drift (drift, plus
 # --check exiting nonzero), cache-only (graduate-or-delete), unique mate-local
 # (healthy), and a stale_when in the past (expire) - plus confirming a
@@ -9,7 +9,7 @@ set -eu
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CENSUS="$ROOT/sbin/fm-skill-census.sh"
+CENSUS="$ROOT/sbin/fm"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/fm-skill-census-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -88,7 +88,7 @@ run_census() {
   FM_SKILL_CACHE_OMP_OVERRIDE="$OMP_CACHE" \
   FM_SKILL_CACHE_CLAUDE_OVERRIDE="$CLAUDE_CACHE" \
   FM_SKILL_CENSUS_TODAY="2026-07-17" \
-  "$CENSUS" "$@"
+  "$CENSUS" skill-census "$@"
 }
 
 # --- default run: exit 0, every disposition present -------------------------
@@ -158,7 +158,7 @@ if ! FM_CODE_ROOT_OVERRIDE="$CODE_ROOT" \
    FM_SKILL_CACHE_OMP_OVERRIDE="$TMP/cache/empty-omp" \
    FM_SKILL_CACHE_CLAUDE_OVERRIDE="$TMP/cache/empty-claude" \
    FM_SKILL_CENSUS_TODAY="2026-07-17" \
-   "$CENSUS" --check > "$TMP/nodrift-out.tsv" 2>"$TMP/nodrift-err"; then
+   "$CENSUS" skill-census --check > "$TMP/nodrift-out.tsv" 2>"$TMP/nodrift-err"; then
   fail "--check exited nonzero with no drift present" "$TMP/nodrift-err"
 fi
 pass "--check exits 0 when no drift row exists"
@@ -172,7 +172,7 @@ if ! FM_CODE_ROOT_OVERRIDE="$EMPTY_CODE_ROOT" \
    FM_HOME="$EMPTY_HOME" \
    FM_SKILL_CACHE_OMP_OVERRIDE="$TMP/no-such-omp-cache" \
    FM_SKILL_CACHE_CLAUDE_OVERRIDE="$TMP/no-such-claude-cache" \
-   "$CENSUS" > "$TMP/empty-out.tsv" 2>"$TMP/empty-err"; then
+   "$CENSUS" skill-census > "$TMP/empty-out.tsv" 2>"$TMP/empty-err"; then
   fail "run over entirely-missing surfaces exited nonzero" "$TMP/empty-err"
 fi
 [ -s "$TMP/empty-err" ] && fail "run over entirely-missing surfaces wrote to stderr" "$TMP/empty-err"

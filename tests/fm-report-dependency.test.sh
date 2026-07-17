@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPORT="$ROOT/sbin/fm-report.sh"
+REPORT() { "$ROOT/sbin/fm" report "$@"; }
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-report-dep.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -30,7 +30,7 @@ printf 'witness GO\n' > "$ARTIFACT"
 
 TERMINAL="terminal event=wit-1 artifact=$ARTIFACT consumers=$BEAR producer=bull-witness done: preflight GO"
 
-"$REPORT" "$PARENT" "$TERMINAL"
+REPORT "$PARENT" "$TERMINAL"
 
 [ "$(count 'event=wit-1' "$PARENT")" -eq 1 ] || fail "terminal event reaches the parent status file"
 # THE incident assertion: the named consumer must receive the same wake line.
@@ -38,14 +38,14 @@ TERMINAL="terminal event=wit-1 artifact=$ARTIFACT consumers=$BEAR producer=bull-
 pass 'terminal event routes to parent and named consumer'
 
 # Exactly-once: replaying the same terminal event must not double-deliver.
-"$REPORT" "$PARENT" "$TERMINAL"
+REPORT "$PARENT" "$TERMINAL"
 [ "$(count 'event=wit-1' "$PARENT")" -eq 1 ] || fail "duplicate terminal event is idempotent at the parent"
 [ "$(count 'event=wit-1' "$BEAR")" -eq 1 ] || fail "duplicate terminal event is idempotent at the consumer"
 pass 'duplicate terminal events deliver exactly once'
 
 # --- multiple consumers ----------------------------------------------------
 MULTI="terminal event=wit-2 artifact=$ARTIFACT consumers=$BEAR,$OTHER producer=bull-witness done: multi"
-"$REPORT" "$PARENT" "$MULTI"
+REPORT "$PARENT" "$MULTI"
 [ "$(count 'event=wit-2' "$BEAR")" -eq 1 ] || fail "first of two consumers woken"
 [ "$(count 'event=wit-2' "$OTHER")" -eq 1 ] || fail "second of two consumers woken"
 pass 'multiple named consumers each woken exactly once'
@@ -53,7 +53,7 @@ pass 'multiple named consumers each woken exactly once'
 # Consumer already completed/cancelled (its status file was removed):
 # delivery must neither crash nor storm.
 rm -f "$OTHER"
-"$REPORT" "$PARENT" "terminal event=wit-3 artifact=$ARTIFACT consumers=$OTHER producer=bull-witness done: late"
+REPORT "$PARENT" "terminal event=wit-3 artifact=$ARTIFACT consumers=$OTHER producer=bull-witness done: late"
 [ "$(count 'event=wit-3' "$OTHER")" -eq 1 ] || fail "delivery to a completed consumer recreates its file harmlessly"
 pass 'consumer gone before delivery: harmless append, no crash'
 
@@ -62,7 +62,7 @@ pass 'consumer gone before delivery: harmless append, no crash'
 # artifact wake. Existing artifact -> ARTIFACT_READY at every destination.
 BLOCKED_CONSUMERS="$BEAR,$OTHER"
 BLOCKED_READY="BLOCKED waiting_on=$ARTIFACT owner=bull-witness callback=rereview event=blk-1 consumers=$BLOCKED_CONSUMERS detail: awaiting witness"
-"$REPORT" "$PARENT" "$BLOCKED_READY"
+REPORT "$PARENT" "$BLOCKED_READY"
 for dest in "$PARENT" "$BEAR" "$OTHER"; do
   [ "$(count_match '^BLOCKED.*event=blk-1' "$dest")" -eq 1 ] || fail "valid BLOCKED reaches each destination"
   [ "$(count_match '^ARTIFACT_READY.*event=blk-1' "$dest")" -eq 1 ] || fail "ready wake reaches each destination"
@@ -70,7 +70,7 @@ done
 pass 'BLOCKED and ready wake fan out to primary and consumers'
 
 # Replaying a valid BLOCKED event must not duplicate its state or wake anywhere.
-"$REPORT" "$PARENT" "$BLOCKED_READY"
+REPORT "$PARENT" "$BLOCKED_READY"
 for dest in "$PARENT" "$BEAR" "$OTHER"; do
   [ "$(count_match '^BLOCKED.*event=blk-1' "$dest")" -eq 1 ] || fail "replayed BLOCKED is idempotent at each destination"
   [ "$(count_match '^ARTIFACT_READY.*event=blk-1' "$dest")" -eq 1 ] || fail "replayed ready wake is idempotent at each destination"
@@ -80,8 +80,8 @@ pass 'replayed BLOCKED fan-out delivers exactly once'
 # Stale identity fans out ARTIFACT_STALE, never ARTIFACT_READY, and remains
 # idempotent when replayed.
 STALE="BLOCKED waiting_on=$ARTIFACT waiting_on_sha=deadbeef owner=bull callback=rereview event=blk-2 consumers=$BLOCKED_CONSUMERS detail: pinned"
-"$REPORT" "$PARENT" "$STALE"
-"$REPORT" "$PARENT" "$STALE"
+REPORT "$PARENT" "$STALE"
+REPORT "$PARENT" "$STALE"
 for dest in "$PARENT" "$BEAR" "$OTHER"; do
   [ "$(count_match '^BLOCKED.*event=blk-2' "$dest")" -eq 1 ] || fail "stale BLOCKED reaches each destination once"
   [ "$(count_match '^ARTIFACT_STALE.*event=blk-2' "$dest")" -eq 1 ] || fail "stale wake reaches each destination once"
@@ -91,7 +91,7 @@ pass 'stale artifact fans out without a ready wake'
 
 # Missing artifact -> stays blocked at every destination, with no phantom wake.
 MISSING="BLOCKED waiting_on=$TMP/data/absent.md owner=bull callback=rereview event=blk-3 consumers=$BLOCKED_CONSUMERS detail: not yet"
-"$REPORT" "$PARENT" "$MISSING"
+REPORT "$PARENT" "$MISSING"
 for dest in "$PARENT" "$BEAR" "$OTHER"; do
   [ "$(count_match '^BLOCKED.*event=blk-3' "$dest")" -eq 1 ] || fail "missing-artifact BLOCKED reaches each destination"
   [ "$(count_match '^ARTIFACT_READY.*event=blk-3' "$dest")" -eq 0 ] || fail "missing artifact does not emit ready"
@@ -103,7 +103,7 @@ pass 'missing artifact remains blocked without a wake'
 REJECT_PRIMARY="$TMP/state/reject-primary.status"
 REJECT_CONSUMER="$TMP/state/reject-consumer.status"
 set +e
-"$REPORT" "$REJECT_PRIMARY" "BLOCKED waiting_on=$ARTIFACT event=blk-4 consumers=$REJECT_CONSUMER detail: missing owner and callback"
+REPORT "$REJECT_PRIMARY" "BLOCKED waiting_on=$ARTIFACT event=blk-4 consumers=$REJECT_CONSUMER detail: missing owner and callback"
 rc=$?
 set -e
 [ "$rc" -eq 3 ] || fail "malformed BLOCKED is rejected with exit 3 (got $rc)"
@@ -114,7 +114,7 @@ pass 'malformed BLOCKED atomically rejects all destinations'
 # --- frozen base interface -------------------------------------------------
 # Plain two-arg reporting without dependency grammar is byte-compatible.
 PLAIN="$TMP/state/plain.status"
-"$REPORT" "$PLAIN" "working: ordinary progress line"
+REPORT "$PLAIN" "working: ordinary progress line"
 [ "$(cat "$PLAIN")" = "working: ordinary progress line" ] || fail "plain status lines pass through unchanged"
 pass 'base interface unchanged for plain lines'
 

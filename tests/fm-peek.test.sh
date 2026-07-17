@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Tests for fm-peek.sh: flag parsing, status header, line-count defaults.
+# Tests for `fm peek`: flag parsing, status header, line-count defaults.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT=
-BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
+# `sbin/fm` is a bun script, so the fake-herdr PATH prefix must still leave
+# the real PATH reachable (for bun itself) - prepending BIN_DIR is enough to
+# shadow any real herdr further down the chain.
+BASE_PATH=${FM_TEST_BASE_PATH:-$PATH}
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
@@ -68,15 +71,10 @@ run_peek() {
     FM_FAKE_PEEK_PANE_FILE="$PANE_FILE" \
     FM_FAKE_PANE_STATUS="idle" \
     FM_STATE_OVERRIDE="$STATE_DIR" \
-    "$ROOT/sbin/fm-peek.sh" "$@"
+    "$ROOT/sbin/fm" peek "$@"
 }
 
 # ---- tests ----
-
-test_bash_n() {
-  bash -n "$ROOT/sbin/fm-peek.sh" || fail "bash -n syntax check failed"
-  pass "bash -n passes"
-}
 
 test_default_uses_40_lines() {
   rm -f "$LINES_FILE"
@@ -121,7 +119,6 @@ test_no_pane_exits_nonzero() {
   pass "no pane arg exits non-zero"
 }
 
-test_bash_n
 test_default_uses_40_lines
 test_full_uses_120_lines
 test_status_only_prints_header_no_body

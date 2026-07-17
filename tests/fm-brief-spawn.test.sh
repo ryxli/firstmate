@@ -106,7 +106,7 @@ spawn_one() {
     FM_SPAWN_NO_GUARD=1 \
     FM_SPAWN_WORKSPACE=w-test \
     FM_FAKE_HERDR_LOG="$HERDR_LOG" \
-    PATH="$BIN_DIR:/usr/bin:/bin" \
+    PATH="$BIN_DIR:$(dirname "$(command -v bun)"):/usr/bin:/bin" \
     "$ROOT/sbin/fm-spawn.sh" "${args[@]}" 2>&1
 }
 

@@ -24,7 +24,7 @@ If the captain asks for a new harness, propose verifying it first: spawn a trivi
 
 ### Detecting harnesses
 
-`sbin/fm-harness.sh` prints your own harness (verified env markers first, then process ancestry); `sbin/fm-harness.sh crew` resolves the effective crewmate harness from `config/crew-harness`.
+`sbin/fm harness` prints your own harness (verified env markers first, then process ancestry); `sbin/fm harness crew` resolves the effective crewmate harness from `config/crew-harness`.
 On `unknown`, ask the captain instead of guessing; a captain override always beats detection.
 When you verify a new adapter, record its env marker and command name in that script.
 
@@ -36,7 +36,7 @@ When you verify a new adapter, record its env marker and command name in that sc
 | Interrupt | single Escape |
 | Skill invocation | `/skill:<name>` (e.g. `/skill:no-mistakes`); natural language also works |
 
-Detection: omp sets `OMPCODE=1` AND `CLAUDECODE=1` (Claude API compatibility), so `sbin/fm-harness.sh` checks `OMPCODE` BEFORE the `CLAUDECODE` branch, otherwise omp misdetects as claude.
+Detection: omp sets `OMPCODE=1` AND `CLAUDECODE=1` (Claude API compatibility), so `sbin/fm harness` checks `OMPCODE` BEFORE the `CLAUDECODE` branch, otherwise omp misdetects as claude.
 The launch template is `omp --auto-approve "$(cat <brief>)"`; `--auto-approve` is omp's skip-all-approvals autonomy flag (the analog of claude's `--dangerously-skip-permissions`).
 No trust or permission dialog blocks a fresh worktree launch (an onboarding splash shows briefly, then the brief processes); still peek the pane within ~20s as for any spawn.
 Composer: omp draws a full rounded box (`╭── … ──╮` over `╰── … ──╯`) whose last visible line is the bottom border; `sbin/fm-herdr-lib.sh` strips the full box-drawing set so a border-only idle composer reads as empty rather than pending input.

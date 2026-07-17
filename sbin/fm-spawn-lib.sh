@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # fm-spawn-lib.sh - shared spawn-path shell helpers for firstmate.
 #
-# Sourced by fm-spawn.sh, fm-brief.sh, and fm-resolve-spawn.sh so that the
-# value-quoting and launch-command parsing used while placing a crewmate live
-# in exactly one place and never drift between the spawner, the brief
-# scaffolder, and the preflight validator.
+# Sourced by fm-spawn.sh and fm-brief.sh so that the value-quoting and
+# launch-command parsing used while placing a crewmate live in exactly one
+# place and never drift between the spawner and the brief scaffolder. The
+# `fm resolve-spawn` CLI verb (preflight validator) inlines its own copy.
 #
 # All functions are set -u and set -e safe and define no source-time state.
 

@@ -41,9 +41,9 @@ immediately. This is the standard way to open any Lavish artifact here.
    command. Read the feedback, apply the requested changes to the artifact, then
    acknowledge in the browser - non-blocking, write-only:
    ```sh
-   sbin/fm-lavish-reply.sh <file.html> "<message for the captain>"
+   sbin/fm lavish-reply <file.html> "<message for the captain>"
    ```
-   `fm-lavish-reply.sh` POSTs to the write-only `agent-reply` endpoint and
+   `fm lavish-reply` POSTs to the write-only `agent-reply` endpoint and
    returns instantly; it NEVER polls, so it can never consume feedback or race
    the steward. The steward keeps the session open and relays the next round.
 
@@ -83,7 +83,7 @@ Before showing the captain any reviewed visual artifact:
 
 - `sbin/fm-lavish-open.sh` - entry point: open/resume + launch steward; `--recover`.
 - `sbin/fm-lavish-steward.sh` - the worker loop (launched detached; not run by hand).
-- `sbin/fm-lavish-reply.sh` - write-only, non-blocking agent reply.
+- `sbin/fm lavish-reply` - write-only, non-blocking agent reply.
 - `sbin/fm-lavish-lib.sh` - shared session-key / URL / state primitives.
 - State lives under `state/lavish/` (gitignored): `<key>.steward` (worker meta),
   `<key>.feedback.md` (relayed feedback), `<key>.steward.log` (diagnostics).

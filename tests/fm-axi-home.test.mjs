@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { decode } from "@toon-format/toon";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const cli = join(root, "sbin", "fm-axi");
+const cli = join(root, "sbin", "fm");
 const temp = mkdtempSync(join(tmpdir(), "fm-axi-home-test-"));
 const codeRoot = join(temp, "code-root");
 const firstmate = join(temp, "firstmate");
@@ -80,14 +80,14 @@ try {
   setupHome(sage);
 
   const rootHelp = toon(run(["--help"]), "root help");
-  assert(rootHelp.command === "fm-axi", `root help command was ${JSON.stringify(rootHelp.command)}`);
+  assert(rootHelp.command === "fm", `root help command was ${JSON.stringify(rootHelp.command)}`);
   assert(rootHelp.commands.some(command => command.command === "home"), "root help omitted home command");
   assert(String(rootHelp.usage).includes("home <check|repair> <mate|--all>"), "root help omitted exact home grammar");
   console.log("ok - root help is TOON and documents home grammar");
 
   const homeHelp = toon(run(["home", "--help"]), "home help");
-  assert(homeHelp.command === "fm-axi home", `home help command was ${JSON.stringify(homeHelp.command)}`);
-  assert(String(homeHelp.usage).includes("fm-axi home <check|repair> <mate|--all>"), "home help omitted exact grammar");
+  assert(homeHelp.command === "fm home", `home help command was ${JSON.stringify(homeHelp.command)}`);
+  assert(String(homeHelp.usage).includes("fm home <check|repair> <mate|--all>"), "home help omitted exact grammar");
   console.log("ok - home subcommand help is TOON");
 
   const named = toon(run(["home", "check", "plum"]), "named healthy check");

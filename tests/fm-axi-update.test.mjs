@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { decode } from "@toon-format/toon";
 
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const cli = join(root, "sbin", "fm-axi");
+const cli = join(root, "sbin", "fm");
 const temp = mkdtempSync(join(tmpdir(), "fm-axi-update-test-"));
 const origin = join(temp, "origin.git");
 const seed = join(temp, "seed");

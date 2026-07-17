@@ -3,7 +3,7 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT=
-BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
+BASE_PATH=${FM_TEST_BASE_PATH:-$PATH}
 
 fail() {
   printf 'not ok - %s\n' "$1" >&2
@@ -85,12 +85,12 @@ assert_meta_value() {
 
 run_self_pane() {
   local fakebin=$1 home=$2 json=$3
-  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$json" "$ROOT/sbin/fm-self-pane.sh"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$json" "$ROOT/sbin/fm" self-pane
 }
 
 run_self_pane_check() {
   local fakebin=$1 home=$2 json=$3
-  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$json" "$ROOT/sbin/fm-self-pane.sh" --check
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$json" "$ROOT/sbin/fm" self-pane --check
 }
 
 test_normal_write() {
@@ -153,7 +153,7 @@ test_unresolved_preserves_metadata() {
 
   out="$case_dir/out"
   err="$case_dir/err"
-  if PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$bad_json" "$ROOT/sbin/fm-self-pane.sh" >"$out" 2>"$err"; then
+  if PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$bad_json" "$ROOT/sbin/fm" self-pane >"$out" 2>"$err"; then
     fail "unresolved pane current unexpectedly succeeded"
   fi
   after=$(cat "$meta")

@@ -27,8 +27,9 @@ Runtime tool versions (node, bun, and the `herdr` binary) are managed with `mise
 - This repo is a template for running a firstmate orchestrator agent.
   `AGENTS.md` is the agent's entire job description; `CLAUDE.md` is a symlink to it, and `.claude/skills` is a symlink to `.agents/skills`.
 - `AGENTS.md` section 1 is canonical for the tracked-file list: only shared material is tracked, and everything personal to one fleet's local state is gitignored.
-- Helper scripts in `sbin/` are plain bash.
-  `shellcheck sbin/*.sh` must pass, and CI enforces it.
+- The command surface is the typed `fm` CLI (`sbin/fm`, bun): one verb module per file under `.omp/extensions/cli/verbs/`, auto-discovered, no registry to edit.
+  New tooling is born typed - never new bash in `sbin/`.
+  The remaining bash scripts in `sbin/` are held deliberately (live pane orchestration and captain-gated git mutation); each is ported to a verb when next touched (port-on-touch), and until then `shellcheck sbin/*.sh` must pass, enforced by CI.
 - Changes to harness adapters (launch templates in `sbin/fm-spawn.sh`, the adapter tables in `AGENTS.md`) must be verified empirically against the real harness, never written from documentation alone.
 - In Markdown, put each full sentence on its own line.
 

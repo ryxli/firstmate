@@ -9,7 +9,7 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB="$ROOT/sbin/fm-lavish-lib.sh"
 OPEN="$ROOT/sbin/fm-lavish-open.sh"
-REPLY="$ROOT/sbin/fm-lavish-reply.sh"
+REPLY=("$ROOT/sbin/fm" lavish-reply)
 STEWARD="$ROOT/sbin/fm-lavish-steward.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-lavish.XXXXXX")
 trap 'pkill -f "$TMP_ROOT" 2>/dev/null; rm -rf "$TMP_ROOT"' EXIT
@@ -130,9 +130,9 @@ test_kill_polls_is_selective() {
 
 test_reply_arg_validation() {
   local status
-  "$REPLY" >/dev/null 2>&1; status=$?
+  "${REPLY[@]}" >/dev/null 2>&1; status=$?
   [ "$status" -eq 2 ] || fail "reply with no args should exit 2 (got $status)"
-  "$REPLY" only-one-arg >/dev/null 2>&1; status=$?
+  "${REPLY[@]}" only-one-arg >/dev/null 2>&1; status=$?
   [ "$status" -eq 2 ] || fail "reply with one arg should exit 2 (got $status)"
   pass "reply rejects missing args with exit 2"
 }

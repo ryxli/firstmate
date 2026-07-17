@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODE="$ROOT/sbin/fm-project-mode.sh"
+MODE="$ROOT/sbin/fm"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-project-mode.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -23,7 +23,7 @@ cat > "$TMP/home/data/projects.md" <<'EOF'
 - typo [direct-mainn +yolo] - Typo project (added 2026-07-16)
 EOF
 
-run_mode() { FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' "$MODE" "$1"; }
+run_mode() { FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' "$MODE" project-mode "$1"; }
 
 out=$(run_mode legacy)
 [ "$out" = "direct-PR off" ] || fail "[no-mistakes] must resolve to 'direct-PR off', got: $out"

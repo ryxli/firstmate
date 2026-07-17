@@ -210,19 +210,19 @@ test_fm_home_parameterization() {
   mkdir -p "$home_one/data" "$home_one/state" "$home_two/data" "$home_two/state"
   printf '%s\n' '- app [local-only +yolo] - test app (added 2026-06-22)' > "$home_one/data/projects.md"
 
-  out=$(FM_HOME="$home_one" "$ROOT/sbin/fm-project-mode.sh" app)
+  out=$(FM_HOME="$home_one" "$ROOT/sbin/fm" project-mode app)
   [ "$out" = "local-only on" ] || fail "fm-project-mode did not read projects.md from FM_HOME"
-  out=$(FM_HOME="$home_two" "$ROOT/sbin/fm-project-mode.sh" app 2>/dev/null)
+  out=$(FM_HOME="$home_two" "$ROOT/sbin/fm" project-mode app 2>/dev/null)
   [ "$out" = "direct-PR off" ] || fail "unconfigured project did not default to direct-PR with yolo off"
 
   FM_HOME="$home_one" "$ROOT/sbin/fm-brief.sh" task-a app >/dev/null || fail "brief scaffold failed under FM_HOME"
   brief="$home_one/data/task-a/brief.md"
   [ -f "$brief" ] || fail "brief was not written under FM_HOME/data"
-  grep -F "'$ROOT/sbin/fm-report.sh' '$home_one/state/task-a.status'" "$brief" >/dev/null || fail "brief did not use the reporting helper with shell-quoted FM_HOME state path"
+  grep -F "'$ROOT/sbin/fm' report '$home_one/state/task-a.status'" "$brief" >/dev/null || fail "brief did not use the reporting helper with shell-quoted FM_HOME state path"
 
   FM_HOME="$home_one" "$ROOT/sbin/fm-brief.sh" task-b app --scout >/dev/null || fail "scout brief scaffold failed under FM_HOME"
   brief="$home_one/data/task-b/brief.md"
-  grep -F "'$ROOT/sbin/fm-report.sh' '$home_one/state/task-b.status'" "$brief" >/dev/null || fail "scout brief did not use the reporting helper with shell-quoted FM_HOME state path"
+  grep -F "'$ROOT/sbin/fm' report '$home_one/state/task-b.status'" "$brief" >/dev/null || fail "scout brief did not use the reporting helper with shell-quoted FM_HOME state path"
 
   FM_HOME="$home_one" FM_SECONDMATE_CHARTER='ops domain' "$ROOT/sbin/fm-brief.sh" task-c --secondmate app >/dev/null \
     || fail "secondmate brief scaffold failed under FM_HOME"
@@ -230,7 +230,7 @@ test_fm_home_parameterization() {
   grep -F "through the fleet peer bus" "$brief" >/dev/null || fail "secondmate brief did not use peer-bus escalation"
 
   printf 'project=x\n' > "$home_one/state/task-a.meta"
-  FM_HOME="$home_one" FM_GUARD_GRACE=999999 "$ROOT/sbin/fm-pr-check.sh" task-a https://github.com/example/repo/pull/1 >/dev/null 2>/dev/null \
+  FM_HOME="$home_one" FM_GUARD_GRACE=999999 "$ROOT/sbin/fm" pr-check task-a https://github.com/example/repo/pull/1 >/dev/null 2>/dev/null \
     || fail "fm-pr-check failed under FM_HOME"
   [ -f "$home_one/state/task-a.check.sh" ] || fail "pr check was not written under FM_HOME/state"
   [ ! -e "$home_two/state/task-a.check.sh" ] || fail "pr check leaked into another home"
@@ -243,9 +243,9 @@ test_lock_status_is_per_home() {
   home_two="$TMP_ROOT/lock-two"
   mkdir -p "$home_one/state" "$home_two/state"
   printf '999999\n' > "$home_one/state/.lock"
-  out=$(FM_HOME="$home_one" "$ROOT/sbin/fm-lock.sh" status)
+  out=$(FM_HOME="$home_one" "$ROOT/sbin/fm" lock status)
   printf '%s\n' "$out" | grep -F 'lock: stale' >/dev/null || fail "home one lock status did not read its own lock"
-  out=$(FM_HOME="$home_two" "$ROOT/sbin/fm-lock.sh" status)
+  out=$(FM_HOME="$home_two" "$ROOT/sbin/fm" lock status)
   [ "$out" = "lock: free" ] || fail "home two lock status was affected by home one"
   pass "fm-lock status is scoped per home"
 }
@@ -285,9 +285,9 @@ EOF
   git -C "$subhome/projects/beta" remote get-url origin >/dev/null 2>&1 || fail "direct-PR beta did not keep an origin remote"
   [ ! -e "$subhome/projects/gamma/.no-mistakes-init" ] || fail "seed must not run no-mistakes init"
   [ ! -e "$subhome/projects/gamma/.no-mistakes-doctor" ] || fail "seed must not run no-mistakes doctor"
-  out=$(FM_HOME="$subhome" "$ROOT/sbin/fm-project-mode.sh" alpha)
+  out=$(FM_HOME="$subhome" "$ROOT/sbin/fm" project-mode alpha)
   [ "$out" = "direct-PR on" ] || fail "seed did not preserve alpha delivery mode in subhome registry"
-  out=$(FM_HOME="$subhome" "$ROOT/sbin/fm-project-mode.sh" beta)
+  out=$(FM_HOME="$subhome" "$ROOT/sbin/fm" project-mode beta)
   [ "$out" = "direct-PR off" ] || fail "seed did not preserve beta delivery mode in subhome registry"
   grep -F -- '- design - feature design and implementation for alpha beta gamma' "$home/data/secondmates.md" >/dev/null || fail "registry line was not written"
   grep -F 'scope: feature design and implementation for alpha beta gamma' "$home/data/secondmates.md" >/dev/null || fail "registry line did not record scope"
@@ -2009,7 +2009,7 @@ test_backlog_handoff_moves_in_scope_items() {
 - [x] old-task - shipped thing - local main (merged 2026-06-19)
 EOF
 
-  out=$(FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" design feat-x feat-y) \
+  out=$(FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff design feat-x feat-y) \
     || fail "handoff failed for in-scope items"
   printf '%s\n' "$out" | grep -F 'handed off 2 item(s) to design' >/dev/null \
     || fail "handoff did not report the moved items"
@@ -2030,7 +2030,7 @@ EOF
 
   # Idempotent re-run: no error, no duplication, main untouched.
   before=$(cat "$home/data/backlog.md")
-  FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" design feat-x feat-y >/dev/null 2>&1 \
+  FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff design feat-x feat-y >/dev/null 2>&1 \
     || fail "idempotent re-run failed"
   [ "$(grep -cF -- '- [ ] feat-x - add feature x (repo: alpha)' "$subhome/data/backlog.md")" -eq 1 ] \
     || fail "idempotent re-run duplicated feat-x in the secondmate backlog"
@@ -2038,14 +2038,14 @@ EOF
 
   # A key matching neither backlog aborts atomically: nothing moves.
   before=$(cat "$home/data/backlog.md")
-  if FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" design bug-z no-such-key >/dev/null 2>&1; then
+  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff design bug-z no-such-key >/dev/null 2>&1; then
     fail "handoff succeeded despite an unmatched key"
   fi
   [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "handoff with an unmatched key still mutated the main backlog"
   grep -F 'bug-z' "$home/data/backlog.md" >/dev/null || fail "atomic abort lost the valid bug-z item from the main backlog"
 
   before=$(cat "$home/data/backlog.md")
-  if FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" design live-task >/dev/null 2>&1; then
+  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff design live-task >/dev/null 2>&1; then
     fail "handoff accepted an in-flight backlog item"
   fi
   [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "handoff with an in-flight key mutated the main backlog"
@@ -2053,7 +2053,7 @@ EOF
   grep -F 'live-task' "$subhome/data/backlog.md" >/dev/null && fail "in-flight refusal copied the live task"
 
   # An unregistered secondmate is refused.
-  if FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" ghost bug-z >/dev/null 2>&1; then
+  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff ghost bug-z >/dev/null 2>&1; then
     fail "handoff accepted an unregistered secondmate id"
   fi
   pass "fm-backlog-handoff moves in-scope items, is idempotent, and aborts safely"
@@ -2078,7 +2078,7 @@ test_backlog_handoff_creates_absent_section_and_refuses_non_secondmate_home() {
 ## Done
 - [x] shipped-task - shipped thing - local main (merged 2026-06-19)
 EOF
-  FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" archive shipped-task >/dev/null \
+  FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff archive shipped-task >/dev/null \
     || fail "handoff of a Done item failed"
   grep -F '## Done' "$subhome/data/backlog.md" >/dev/null \
     || fail "handoff did not create the missing Done section in the secondmate backlog"
@@ -2091,7 +2091,7 @@ EOF
   make_git_project "$projhome"
   projhome_abs=$(cd "$projhome" && pwd -P)
   printf -- '- proj-sm - bogus (home: %s; scope: bogus; projects: alpha; added 2026-06-22)\n' "$projhome_abs" >> "$home/data/secondmates.md"
-  if FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" proj-sm shipped-task >/dev/null 2>&1; then
+  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff proj-sm shipped-task >/dev/null 2>&1; then
     fail "handoff wrote into a destination that is not a seeded secondmate home"
   fi
   [ ! -e "$projhome/data/backlog.md" ] || fail "handoff created a backlog inside a non-secondmate home"
@@ -2104,7 +2104,7 @@ EOF
 ## Queued
 - [ ] marker-task - should not move (repo: alpha)
 EOF
-  if FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" marker-sm marker-task >/dev/null 2>&1; then
+  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff marker-sm marker-task >/dev/null 2>&1; then
     fail "handoff accepted a marker-only directory as a secondmate home"
   fi
   [ ! -e "$markerhome/data/backlog.md" ] || fail "handoff wrote into a marker-only directory"
@@ -2120,7 +2120,7 @@ EOF
 ## Queued
 - [ ] symlink-task - should not move (repo: alpha)
 EOF
-  if FM_HOME="$home" "$ROOT/sbin/fm-backlog-handoff.sh" symlink-sm symlink-task >/dev/null 2>&1; then
+  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff symlink-sm symlink-task >/dev/null 2>&1; then
     fail "handoff accepted a secondmate home with data outside the home"
   fi
   [ ! -e "$outside/backlog.md" ] || fail "handoff wrote through a symlinked secondmate data directory"
@@ -2187,7 +2187,7 @@ test_home_seed_ship_extensions_idempotent() {
     || fail "seed failed for ext idempotent test"
 
   # fm-link-ship-ext on an already-linked home should report no changes
-  out=$("$ROOT/sbin/fm-link-ship-ext.sh" "$subhome")
+  out=$("$ROOT/sbin/fm" link-ship-ext "$subhome")
   printf '%s\n' "$out" | grep -F 'up to date' >/dev/null \
     || fail "fm-link-ship-ext reported changes on already-correct symlinks: $out"
 
@@ -2253,7 +2253,7 @@ test_link_ship_ext_resolves_id_from_registry() {
   ext_src="$ROOT/.omp/extensions"
   [ -d "$ext_src" ] || { pass "no extensions dir; vacuous pass"; return; }
 
-  FM_HOME="$main_home" "$ROOT/sbin/fm-link-ship-ext.sh" extid >/dev/null \
+  FM_HOME="$main_home" "$ROOT/sbin/fm" link-ship-ext extid >/dev/null \
     || fail "fm-link-ship-ext failed to resolve id from secondmates.md"
 
   for entry in "$ext_src"/*; do
@@ -2274,8 +2274,8 @@ test_link_ship_ext_symlink_invocation_uses_canonical_root() {
   ln -s "$ROOT/sbin" "$main_home/sbin"
   ext_src="$ROOT/.omp/extensions"
   [ -d "$ext_src" ] || { pass "no extensions dir; vacuous pass"; return; }
-  invoker="$main_home/sbin/fm-link-ship-ext.sh"
-  "$invoker" "$sm_home" >/dev/null || fail "symlink invocation failed"
+  invoker="$main_home/sbin/fm"
+  "$invoker" link-ship-ext "$sm_home" >/dev/null || fail "symlink invocation failed"
   for entry in "$ext_src"/*; do
     [ -e "$entry" ] || continue
     name=$(basename "$entry")

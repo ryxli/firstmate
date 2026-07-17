@@ -38,7 +38,7 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 usage() {
   echo "usage: fm-home-seed.sh <id> <home|-> <project>..." >&2
   echo "       fm-home-seed.sh validate" >&2
-  echo "       fm-link-ship-ext.sh <id|home-path>  # refresh extension symlinks without re-seeding" >&2
+  echo "       fm link-ship-ext <id|home-path>  # refresh extension symlinks without re-seeding" >&2
 }
 
 registry_home_for_line() {
@@ -549,7 +549,7 @@ clone_project() {
   [ -d "$src" ] || { echo "error: project $project not found at $src" >&2; return 1; }
   git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error: project $project is not a git repo" >&2; return 1; }
   read -r mode _ <<EOF
-$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/sbin/fm-project-mode.sh" "$project")
+$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/sbin/fm" project-mode "$project")
 EOF
   if [ "$mode" = local-only ]; then
     echo "error: project $project is local-only; secondmate routes support only direct-PR projects" >&2
@@ -576,7 +576,7 @@ validate_seed_project() {
   [ -d "$src" ] || { echo "error: project $project not found at $src" >&2; return 1; }
   git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error: project $project is not a git repo" >&2; return 1; }
   read -r mode _ <<EOF
-$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/sbin/fm-project-mode.sh" "$project")
+$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/sbin/fm" project-mode "$project")
 EOF
   if [ "$mode" = local-only ]; then
     echo "error: project $project is local-only; secondmate routes support only direct-PR projects" >&2
@@ -777,7 +777,7 @@ registry_line_for_project() {
 project_mode_in_home() {
   local home=$1 project=$2 mode
   read -r mode _ <<EOF
-$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_HOME="$home" "$FM_ROOT/sbin/fm-project-mode.sh" "$project")
+$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_HOME="$home" "$FM_ROOT/sbin/fm" project-mode "$project")
 EOF
   printf '%s\n' "$mode"
 }

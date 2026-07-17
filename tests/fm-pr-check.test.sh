@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PR_CHECK="$ROOT/sbin/fm-pr-check.sh"
+PR_CHECK="$ROOT/sbin/fm"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-pr-check.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -22,7 +22,7 @@ SH
 chmod +x "$TMP/bin/gh-axi"
 
 URL=https://github.com/example/repo/pull/42
-FM_HOME="$TMP/home" "$PR_CHECK" task-a1 "$URL" >/dev/null \
+FM_HOME="$TMP/home" "$PR_CHECK" pr-check task-a1 "$URL" >/dev/null \
   || fail "fm-pr-check failed"
 CHECK="$TMP/home/state/task-a1.check.sh"
 [ -f "$CHECK" ] || fail "fm-pr-check did not write the check script"

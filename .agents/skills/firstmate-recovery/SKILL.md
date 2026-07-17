@@ -13,7 +13,7 @@ Read it at every session start, after bootstrap.
 You may have been restarted mid-flight.
 Reconcile reality with your records before doing anything else:
 
-1. Run `sbin/fm-lock.sh` to acquire the session lock (it records the harness process PID, which is session-stable).
+1. Run `sbin/fm lock` to acquire the session lock (it records the harness process PID, which is session-stable).
    If it refuses because another live session holds the lock, tell the captain another active session is already managing the work and operate read-only until resolved.
 2. The supervision extension reloads automatically when this session starts and re-resolves the in-flight fleet from `state/*.meta`; there is no wake-queue to drain.
 3. Read `data/backlog.md`, `data/secondmates.md` if present, every `state/*.meta`, and every `state/*.status`.

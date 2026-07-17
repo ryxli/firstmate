@@ -1,0 +1,62 @@
+#!/usr/bin/env bun
+// fm - canonical TOON-native agent CLI entry point.
+//
+// Dispatches to verb modules auto-discovered from .omp/extensions/cli/verbs/*.ts.
+// Each verb module is one file exporting a default { name, describe, run(argv) }.
+// Adding a verb requires adding exactly one file here: there is no separate
+// registry to edit.
+//
+// sbin/fm is a symlink to this file, kept for every existing consumer.
+// Note: Bun resolves an entry-script symlink to its realpath before exposing
+// it via process.argv / import.meta.url, so this script cannot tell whether
+// it was invoked as `fm` or `fm` - both names run identical code. Root
+// help therefore always uses the pre-split fm help contract (frozen,
+// byte-compatible shape); `help` is accepted as a synonym for `--help`.
+
+import { readdirSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { output, validationError } from "../.omp/extensions/cli/common";
+import { commandHelp } from "../.omp/extensions/cli/help";
+
+interface Verb {
+	name: string;
+	describe: string;
+	run(argv: string[]): number | Promise<number>;
+}
+
+const VERBS_DIR = fileURLToPath(new URL("../.omp/extensions/cli/verbs/", import.meta.url));
+
+async function loadVerbs(): Promise<Verb[]> {
+	let entries: string[] = [];
+	try {
+		entries = readdirSync(VERBS_DIR).filter(name => name.endsWith(".ts")).sort();
+	} catch {
+		entries = [];
+	}
+	const verbs: Verb[] = [];
+	for (const entry of entries) {
+		const mod = await import(pathToFileURL(`${VERBS_DIR}${entry}`).href);
+		const verb = mod.default;
+		if (verb && typeof verb.name === "string" && typeof verb.describe === "string" && typeof verb.run === "function") {
+			verbs.push(verb as Verb);
+		}
+	}
+	return verbs.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function main(): Promise<number> {
+	const argv = process.argv.slice(2);
+	if (!argv.length || argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+		output(commandHelp());
+		return 0;
+	}
+
+	const verbs = await loadVerbs();
+	const verb = verbs.find(candidate => candidate.name === argv[0]);
+	if (!verb) {
+		return validationError(`Unknown command: ${argv[0]}`, ["Run `fm --help` for available commands."]);
+	}
+	return await verb.run(argv);
+}
+
+process.exit(await main());

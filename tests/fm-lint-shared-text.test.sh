@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for fm-lint-shared-text.sh: the guard that keeps firstmate's persona and
+# Tests for `fm lint-shared-text`: the guard that keeps firstmate's persona and
 # the em-dash out of shared, semi-public text (PR/commit/issue bodies).
 #
 # Contract under test:
@@ -13,9 +13,10 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LINT="$ROOT/sbin/fm-lint-shared-text.sh"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-lint.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
+
+lint() { "$ROOT/sbin/fm" lint-shared-text "$@"; }
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
@@ -24,7 +25,7 @@ pass() { printf 'ok - %s\n' "$1"; }
 EMDASH=$(printf '\342\200\224')
 
 run() { # stdin text -> runs linter, echoes nothing; sets global RC/OUT
-  OUT=$(printf '%s' "$1" | "$LINT" - 2>&1); RC=$?
+  OUT=$(printf '%s' "$1" | lint - 2>&1); RC=$?
 }
 
 test_clean_prose_passes() {
@@ -63,17 +64,17 @@ test_phrase_caught() {
 
 test_file_input_works() {
   printf 'Captain speaking.\n' > "$TMP_ROOT/bad.md"
-  OUT=$("$LINT" "$TMP_ROOT/bad.md" 2>&1); RC=$?
+  OUT=$(lint "$TMP_ROOT/bad.md" 2>&1); RC=$?
   [ "$RC" -eq 1 ] || fail "file input with persona should fail (rc=$RC)"
   printf 'plain engineering prose here.\n' > "$TMP_ROOT/good.md"
-  OUT=$("$LINT" "$TMP_ROOT/good.md" 2>&1); RC=$?
+  OUT=$(lint "$TMP_ROOT/good.md" 2>&1); RC=$?
   [ "$RC" -eq 0 ] || fail "file input clean should pass (rc=$RC): $OUT"
   pass "file input works for both bad and good bodies"
 }
 
 test_bad_usage_exits_2() {
-  "$LINT" a b >/dev/null 2>&1; [ "$?" -eq 2 ] || fail "too many args should exit 2"
-  "$LINT" "$TMP_ROOT/does-not-exist.md" >/dev/null 2>&1; [ "$?" -eq 2 ] \
+  lint a b >/dev/null 2>&1; [ "$?" -eq 2 ] || fail "too many args should exit 2"
+  lint "$TMP_ROOT/does-not-exist.md" >/dev/null 2>&1; [ "$?" -eq 2 ] \
     || fail "missing file should exit 2"
   pass "bad usage / missing file exits 2"
 }

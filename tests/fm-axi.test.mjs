@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { decode } from "@toon-format/toon";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const cli = join(root, "sbin", "fm-axi");
+const cli = join(root, "sbin", "fm");
 const temp = mkdtempSync(join(tmpdir(), "fm-axi-test-"));
 const home = join(temp, "home");
 const secondmate = join(temp, "plum");
@@ -147,7 +147,7 @@ try {
   console.log("ok - fleet snapshot emits raw JSON, TOON, and metrics on demand");
 
   const help = toon(run(["fleet", "--help"]), "help");
-  if (help.command !== "fm-axi fleet" || help.commands.length !== 7) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
+  if (help.command !== "fm fleet" || help.commands.length !== 7) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
   const old = run(["fleet", "focus"]);
   if (old.status !== 2) throw new Error(`removed compatibility command accepted: ${old.status}`);
   console.log("ok - help and compatibility validation are TOON");

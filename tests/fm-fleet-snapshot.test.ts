@@ -444,7 +444,7 @@ describe("canonical FleetSnapshot collector", () => {
 	});
 
 	it("rejects missing snapshot option values before collecting", () => {
-		const cli = join(import.meta.dir, "..", "sbin", "fm-axi");
+		const cli = join(import.meta.dir, "..", "sbin", "fm");
 		for (const flag of ["--home", "--stats-file"]) {
 			const result = spawnSync(process.execPath, [cli, "fleet", "snapshot", flag, "--metrics"], {
 				cwd: join(import.meta.dir, ".."),

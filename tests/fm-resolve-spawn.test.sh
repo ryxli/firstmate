@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
-# Fast prerequisite checks for fm-resolve-spawn.sh.
+# Fast prerequisite checks for the resolve-spawn verb (sbin/fm resolve-spawn).
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RESOLVE="$ROOT/sbin/fm-resolve-spawn.sh"
+RESOLVE="$ROOT/sbin/fm"
 SPAWN="$ROOT/sbin/fm-spawn.sh"
+# Resolve bun once, before any test restricts PATH: the cases below narrow
+# PATH to exercise the *crew harness* PATH lookup, not bun's own #!/usr/bin/env
+# shebang resolution for the fm dispatcher itself.
+BUN="$(command -v bun)" || { printf 'not ok - bun not found on PATH\n' >&2; exit 1; }
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-resolve-spawn.XXXXXX")
+# A bun-only dir for cases that restrict PATH but exec fm-spawn.sh, which
+# shells back into sbin/fm: only the real bun binary is exposed (not the mise
+# shim dir, which would leak every other shimmed tool into the sandbox).
+BUNBIN="$TMP_ROOT/bunbin"
+mkdir -p "$BUNBIN"
+ln -s "$("$BUN" -e 'console.log(process.execPath)')" "$BUNBIN/bun"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
@@ -33,7 +43,7 @@ run_resolve() {
     FM_HOME="$home" \
     FM_DATA_OVERRIDE='' \
     FM_WORKTREE_BASE="$home/worktrees" \
-    "$RESOLVE" "$@" 2>&1
+    "$BUN" "$RESOLVE" resolve-spawn "$@" 2>&1
 }
 
 test_missing_harness_binary_blocks() {
@@ -80,7 +90,7 @@ test_missing_worktree_parent_blocks() {
   fakebin="$TMP_ROOT/fakebin-worktree"
   make_fakebin "$fakebin" omp
   missing_base="$home/no-such-parent/worktrees"
-  out=$(PATH="$fakebin:/usr/bin:/bin" FM_ROOT_OVERRIDE='' FM_HOME="$home" FM_WORKTREE_BASE="$missing_base" "$RESOLVE" alpha omp 2>&1)
+  out=$(PATH="$fakebin:/usr/bin:/bin" FM_ROOT_OVERRIDE='' FM_HOME="$home" FM_WORKTREE_BASE="$missing_base" "$BUN" "$RESOLVE" resolve-spawn alpha omp 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "missing worktree parent should fail"
   printf '%s\n' "$out" | grep -F "worktree base parent" >/dev/null \
@@ -102,7 +112,7 @@ test_spawn_aborts_before_worktree_or_pane() {
     git commit -qm init
   )
   printf 'brief\n' > "$home/data/preflight-z9/brief.md"
-  out=$(PATH="/usr/bin:/bin" FM_ROOT_OVERRIDE='' FM_HOME="$home" FM_SPAWN_NO_GUARD=1 "$SPAWN" preflight-z9 projects/alpha codex 2>&1)
+  out=$(PATH="/usr/bin:/bin:$BUNBIN" FM_ROOT_OVERRIDE='' FM_HOME="$home" FM_SPAWN_NO_GUARD=1 "$SPAWN" preflight-z9 projects/alpha codex 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn with missing harness should fail"
   printf '%s\n' "$out" | grep -F "spawn harness binary 'codex' was not found on PATH" >/dev/null \

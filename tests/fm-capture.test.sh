@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for fm-capture.sh (fleet plane event append) and the fm-send.sh
+# Tests for `fm capture` (fleet plane event append) and the fm-send.sh
 # --steer hook that calls it.
 set -u
 
@@ -19,19 +19,19 @@ trap cleanup EXIT
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-capture-tests.XXXXXX")
 
 # ---------------------------------------------------------------------------
-# fm-capture.sh: basic write
+# fm capture: basic write
 # ---------------------------------------------------------------------------
 
 EVENTS="$TMP_ROOT/events.jsonl"
 
-CAPTURE_EVENTS_PATH="$EVENTS" "$ROOT/sbin/fm-capture.sh" steer fm-riggs "focus on the dispatcher first" "" \
-  || fail "fm-capture.sh exited non-zero on first write"
+CAPTURE_EVENTS_PATH="$EVENTS" "$ROOT/sbin/fm" capture steer fm-riggs "focus on the dispatcher first" "" \
+  || fail "fm capture exited non-zero on first write"
 
 [ -f "$EVENTS" ] || fail "events.jsonl not created"
 
 line=$(head -n1 "$EVENTS")
 [ -n "$line" ] || fail "events.jsonl is empty after first write"
-pass "fm-capture.sh creates events.jsonl with a line"
+pass "fm capture creates events.jsonl with a line"
 
 # ---------------------------------------------------------------------------
 # Schema validation: all required fields present
@@ -84,8 +84,8 @@ pass "target field matches mate"
 # Append-only: second write adds a second line, first line intact
 # ---------------------------------------------------------------------------
 
-CAPTURE_EVENTS_PATH="$EVENTS" "$ROOT/sbin/fm-capture.sh" steer fm-atlas "check the GPU memory" "" \
-  || fail "second fm-capture.sh call failed"
+CAPTURE_EVENTS_PATH="$EVENTS" "$ROOT/sbin/fm" capture steer fm-atlas "check the GPU memory" "" \
+  || fail "second fm capture call failed"
 
 linecount=$(wc -l < "$EVENTS")
 [ "$linecount" -eq 2 ] || fail "expected 2 lines after second write, got $linecount"
@@ -121,7 +121,7 @@ pass "all written lines are valid JSON after process exit"
 
 SPECIAL_EVENTS="$TMP_ROOT/special.jsonl"
 # shellcheck disable=SC2016 # literal $vars/quotes are the special-character test payload
-CAPTURE_EVENTS_PATH="$SPECIAL_EVENTS" "$ROOT/sbin/fm-capture.sh" steer fm-fran \
+CAPTURE_EVENTS_PATH="$SPECIAL_EVENTS" "$ROOT/sbin/fm" capture steer fm-fran \
   'use "double quotes" and $vars and '\''single'\'' freely' "" \
   || fail "special char write failed"
 
@@ -137,7 +137,7 @@ pass "special characters in message are JSON-safe"
 # Fail-open: bad events path (unwritable dir) does not exit non-zero
 # ---------------------------------------------------------------------------
 
-if CAPTURE_EVENTS_PATH="/proc/no-such-path/events.jsonl" "$ROOT/sbin/fm-capture.sh" steer fm-riggs "test" ""; then
+if CAPTURE_EVENTS_PATH="/proc/no-such-path/events.jsonl" "$ROOT/sbin/fm" capture steer fm-riggs "test" ""; then
   pass "fail-open: bad path exits 0"
 else
   fail "fail-open: bad path should not exit non-zero"

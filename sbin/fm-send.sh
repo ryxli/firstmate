@@ -71,5 +71,5 @@ fi
 
 # Capture steer events: log to the events journal when a steering message was sent.
 if [ "$_steer" = "1" ] && [ "${1:-}" != "--key" ] && [ -n "${_steer_text:-}" ]; then
-  "${SCRIPT_DIR}/fm-capture.sh" steer "$_target" "$_steer_text" "" 2>/dev/null || true
+  "${SCRIPT_DIR}/fm" capture steer "$_target" "$_steer_text" "" 2>/dev/null || true
 fi

@@ -2,8 +2,8 @@
 # fm-herdr-lib.sh - shared herdr pane primitives for firstmate.
 #
 # Replaces fm-tmux-lib.sh. All functions operate on herdr pane IDs
-# (e.g. "w8:p3") rather than tmux targets. Sourced by fm-send.sh and
-# fm-peek.sh; live-pane resolution plus compose/submit logic stays in one place.
+# (e.g. "w8:p3") rather than tmux targets. Sourced by fm-send.sh; the
+# `fm peek` CLI verb inlines its own copy of the slice it needs.
 #
 # herdr tracks agent status natively (idle|working|blocked|done|unknown),
 # so the ANSI ghost-text stripping and pane-hash busy detection from the

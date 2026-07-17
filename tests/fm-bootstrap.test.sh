@@ -25,16 +25,28 @@ trap cleanup EXIT
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-bootstrap-tests.XXXXXX")
 
 make_fake_toolchain() {
-  local dir=$1 fakebin tool
+  local dir=$1 fakebin tool real_bun
   fakebin="$dir/fakebin"
   mkdir -p "$fakebin"
-  for tool in bun node gh-axi chrome-devtools-axi lavish-axi; do
+  for tool in node gh-axi chrome-devtools-axi lavish-axi; do
     cat > "$fakebin/$tool" <<'SH'
 #!/usr/bin/env bash
 exit 0
 SH
     chmod +x "$fakebin/$tool"
   done
+  # bootstrap now shells out to the bun-based `fm` CLI (e.g. handoff-check,
+  # self-pane), so the fake bun must really run that one script; every other
+  # bun invocation (e.g. `bun install --frozen-lockfile`) stays a fast no-op.
+  real_bun=$(command -v bun)
+  cat > "$fakebin/bun" <<SH
+#!/usr/bin/env bash
+case "\${1:-}" in
+  */sbin/fm) exec "$real_bun" "\$@" ;;
+  *) exit 0 ;;
+esac
+SH
+  chmod +x "$fakebin/bun"
   cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = status ]; then

@@ -26,7 +26,7 @@ OMP owns delivery timing through `deliverAs: nextTurn` and `triggerTurn`, so an 
 3. If `state/.idle-digest.md` already exists after a restart, resume it with:
 
 ```sh
-sbin/fm-idle-digest.sh begin
+sbin/fm idle-digest begin
 ```
 
 ## While the captain is away
@@ -36,7 +36,7 @@ The helper consolidates updates in `state/.idle-digest.md` and permits only safe
 The hard bounds are `FM_IDLE_DIGEST_WINDOW_SECS`, default 1800 seconds, and `FM_IDLE_DIGEST_MAX_PASSES`, default 12.
 
 ```sh
-sbin/fm-idle-digest.sh begin
+sbin/fm idle-digest begin
 ```
 
 Keep approval boundaries unchanged.
@@ -53,7 +53,7 @@ On return:
 
 ```sh
 if [ -f state/.idle-digest.md ]; then
-  sbin/fm-idle-digest.sh screen
+  sbin/fm idle-digest screen
 fi
 ```
 
@@ -62,7 +62,7 @@ fi
 
 ```sh
 if [ -f state/.idle-digest.md ]; then
-  sbin/fm-idle-digest.sh clear
+  sbin/fm idle-digest clear
 fi
 ```
 

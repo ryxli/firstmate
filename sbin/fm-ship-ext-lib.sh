@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared ship omp-extension symlink logic.
-# Sourced by fm-home-seed.sh (transactional seed) and fm-link-ship-ext.sh (CLI);
+# Sourced by fm-home-seed.sh (transactional seed); the `fm link-ship-ext` CLI verb
+# inlines its own copy of this logic;
 # not meant to be executed directly.
 #
 # fm_link_ship_extensions <home> <ext_src>

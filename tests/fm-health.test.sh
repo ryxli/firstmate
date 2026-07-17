@@ -20,20 +20,18 @@ if [ "${1:-}" = status ]; then printf 'status: running\n'
 elif [ "${1:-}" = pane ] && [ "${2:-}" = list ]; then cat "${FM_HEALTH_TEST_PANES:-/dev/null}"
 else printf 'status: running\n'; fi
 EOF
-cat >"$TMP/fake-sbin/fm-capture-status.sh" <<'EOF'
+cat >"$TMP/fake-sbin/fm" <<'EOF'
 #!/usr/bin/env bash
-printf 'fleet_hook\tpresent\nsupervisor_auto\tlive\n'
+case "${1:-}" in
+  capture-status) printf 'fleet_hook\tpresent\nsupervisor_auto\tlive\n' ;;
+  panes) printf 'Demo\tidle\twH:p9\n' ;;
+  home-link)
+    if [ "${FM_HEALTH_TEST_FAIL_HOME:-}" = 1 ]; then printf 'result=blocked\n'; exit 1; fi
+    printf 'result=ok\n'
+    ;;
+esac
 EOF
-cat >"$TMP/fake-sbin/fm-panes.sh" <<'EOF'
-#!/usr/bin/env bash
-printf 'Demo\tidle\twH:p9\n'
-EOF
-cat >"$TMP/fake-sbin/fm-home-link.sh" <<'EOF'
-#!/usr/bin/env bash
-if [ "${FM_HEALTH_TEST_FAIL_HOME:-}" = 1 ]; then printf 'result=blocked\n'; exit 1; fi
-printf 'result=ok\n'
-EOF
-chmod +x "$TMP/bin/herdr" "$TMP/fake-sbin"/*.sh
+chmod +x "$TMP/bin/herdr" "$TMP/fake-sbin/fm"
 
 # make_current_home <dir> <name> <bin: none|valid|stale>
 make_current_home() {
@@ -56,7 +54,7 @@ make_current_home() {
 # run <fm-home> [panes-json] -> writes stdout to $OUT, returns exit code
 run() {
   PATH="$TMP/bin:$PATH" FM_HOME="$1" FM_HEALTH_SCRIPT_DIR="$TMP/fake-sbin" \
-    FM_HEALTH_TIMEOUT=3 FM_HEALTH_TEST_PANES="${2:-}" "$ROOT/sbin/fm-health.sh"
+    FM_HEALTH_TIMEOUT=3 FM_HEALTH_TEST_PANES="${2:-}" "$ROOT/sbin/fm" health
 }
 
 # =====================================================================

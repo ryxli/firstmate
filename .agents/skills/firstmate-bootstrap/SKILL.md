@@ -31,9 +31,9 @@ Otherwise it prints one line per problem or capability fact; handle each:
 
 Bootstrap's fleet refresh is bounded by `FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT` seconds, default 20; a timeout is reported as a `FLEET_SYNC` skip and does not block startup.
 
-After bootstrap, run `sbin/fm-identity-migrate.sh check` and resolve any `UNRESOLVED` named-home identity before routing work.
-Run `sbin/fm-home-link.sh <home> --check` for every registered home, including nested secondmate registries; use `--repair` only for an observed link drift.
-Run `sbin/fm-axi fleet` for the compact overview, then `sbin/fm-axi fleet --check` when a gate needs a nonzero result; activation, health, topology, and attention remain visible in the TOON output, and non-fresh or incomplete state fails the check.
+After bootstrap, run `sbin/fm identity-migrate check` and resolve any `UNRESOLVED` named-home identity before routing work.
+Run `sbin/fm home-link <home> --check` for every registered home, including nested secondmate registries; use `--repair` only for an observed link drift.
+Run `sbin/fm fleet` for the compact overview, then `sbin/fm fleet --check` when a gate needs a nonzero result; activation, health, topology, and attention remain visible in the TOON output, and non-fresh or incomplete state fails the check.
 When a load-once source changed, restart affected OMP sessions before trusting the new extension or instructions.
 If bootstrap reports that the Herdr reporter patch needs a restart, restart OMP panes first, then rerun bootstrap to verify activation.
 
