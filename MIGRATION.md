@@ -3,6 +3,10 @@
 This file landing on `main` is the cutover signal: the consolidation is fully landed and reconcile work can resume on any surface.
 Delete this file once both machines have completed the steps below.
 
+**Status: the originating machine (Keel's laptop) confirmed complete on 2026-07-17** - local `cap.md` renamed, `fm health` smoke clean, global omp config trimmed.
+One step was missing from the original checklist and remains for the second machine (step 5 below).
+The second machine deletes this file after finishing it - no further cross-machine confirmation needed.
+
 ## What changed
 
 1. **The typed `fm` CLI replaced most of sbin's bash.**
@@ -21,3 +25,6 @@ Delete this file once both machines have completed the steps below.
 2. Restart any live firstmate session so nothing calls deleted script paths from stale context.
 3. Smoke check: `sbin/fm health` should run clean end-to-end (warns about genuinely stale fleet state are fine).
 4. Trust CI for the full suite; run individual `tests/*.test.sh` only when touching that surface.
+5. Trim firstmate skills out of the machine-global omp config: in `~/.omp/agent/config.yml` under `skills.includeSkills`, remove `afk`, `crew-supervisor`, `updatefirstmate`, and `firstmate-evaluation` (keep personal machine-wide tools such as `lavish`, `gh-axi`).
+   Firstmate skills load per-home only: the template's `.omp/config.yml` covers firstmate sessions, and each secondmate home's `config/omp.yml` covers that mate; a home list REPLACES the global array wholesale, so homes must list everything they need.
+   If a secondmate home has no `config/omp.yml`, create one (see the note in any existing mate's copy).
