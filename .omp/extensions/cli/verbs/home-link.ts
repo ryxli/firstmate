@@ -341,6 +341,11 @@ async function run(argv: string[]): Promise<number> {
 		process.stderr.write(`error: firstmate code root is not a directory: ${fmRoot}\n`);
 		return 1;
 	}
+	if (homePath === codeRoot) {
+		process.stderr.write("error: firstmate code root cannot be a link-managed home\n");
+		return 1;
+	}
+
 
 	const ompDir = join(homePath, ".omp");
 	const currentOmp = isDirectoryFollow(ompDir) && !isSymlink(ompDir);
