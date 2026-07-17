@@ -193,7 +193,7 @@ Before raw typing into a human shell pane, read its prompt for a pending draft; 
 Covered by section 8.
 Steer a crewmate only with short single lines via `sbin/fm-send.sh`; anything long belongs in a file the crewmate can read.
 Steer a secondmate the same way.
-Its charter escalates per the peer bus discipline owned by AGENTS.md: captain-relevant outcomes only, routine internal churn never touches the supervisor channel.
+Its charter escalates per the peer bus discipline in the lane-governance section below: captain-relevant outcomes only, routine internal churn never touches the supervisor channel.
 A successful steer send proves only queued delivery, not that the target consumed or acted on it.
 For time-sensitive steers, peek promptly and distinguish sent, queued, observed, and acted-on; nudge once or use the existing stuck-crewmate ladder only when the queued instruction is urgent, rather than duplicating steers or interrupting productive work.
 
@@ -372,7 +372,7 @@ Prevention: every board claim that says reconcile clean, no divergence, armed sa
 
 ### Peer bus discipline
 
-This extends the secondmate charter's fleet-peer-bus escalation rule in `skill://firstmate-task-lifecycle`.
+This extends the secondmate charter's fleet-peer-bus escalation rule above.
 `done`, `blocked`, `needs-decision`, `failed`, and a material phase change are captain-relevant outcomes; the whiteboard records their state for the fleet.
 The fleet peer bus is not a second state channel.
 It carries only the action needed when a board update cannot itself cause the recipient to act.
