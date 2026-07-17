@@ -60,7 +60,9 @@ This repo follows a main-only workflow for shared firstmate infrastructure. Comm
 This repo does not use no-mistakes unless the captain explicitly requests it; the main-only workflow and fast-forward-only constraints subsume its assurance.
 **Shared-template push audit.** Before pushing this reusable firstmate repository, inspect the tracked change set for personal names, fleet identities, absolute home paths, hostnames, and tracked operational directories.
 Scrub genuine leaks to the repository's generic default, confirm local `config/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.lavish/` material is untracked, and state whether the remote update is fast-forward or would require a force.
-Never force-push a shared template without the captain's explicit approval.
+Standing captain approval: `git push --force-with-lease` history rewrites are pre-approved for harness-layer repos only, meaning this template and personal harness tooling; project repos and anything trading keep full push discipline, and bare `--force` is never used.
+After such a rewrite, the other laptop recovers with `sbin/fm-update.sh --adopt-remote`, which hard-resets a clean, fully published local default branch to the rewritten `origin/<default>` and refuses in every other case.
+Outside that standing approval, never force-push a shared template without the captain's explicit word.
 Never add an agent name as co-author.
 
 ### Thinking and execution discipline

@@ -15,14 +15,26 @@
 # default branch, so a fast-forward there advances HEAD only and never touches
 # any other worktree's checkout or the shared `main` branch.
 #
+# --adopt-remote is the one deliberate, captain-approved exception to the
+# fast-forward-only rule, run on the OTHER machine after a sanctioned
+# force-with-lease history rewrite of a harness-layer repo. For each target it
+# hard-resets the local default branch to origin/<default> ONLY when all three
+# hold: origin's history was rewritten (local and origin/<default> have
+# diverged), the local branch has zero unpushed commits (every local commit was
+# already published on origin, verified against the origin/<default> reflog),
+# and the working tree is clean. Every other case refuses with a one-line
+# reason (dirty tree, local-only commits, not diverged so the normal
+# fast-forward applies, detached HEAD, ...). Nothing under projects/ is ever
+# touched, and default mode behavior is completely unchanged.
+#
 # It does NOT re-read AGENTS.md or nudge secondmates itself - those are LLM /
 # tmux actions the skill performs. The script's job is the safe git mechanics
 # plus a parseable summary telling the caller what to do next:
-#   - one status line per target (updated/already current/skipped)
+#   - one status line per target (updated/adopted/already current/skipped)
 #   - reread-firstmate: yes|no    (did the running firstmate's instructions change)
 #   - nudge-secondmates: <window-targets...>|none   (updated live secondmates to nudge)
 #
-# Usage: fm-update.sh [--repair-links] [--help]
+# Usage: fm-update.sh [--repair-links] [--adopt-remote] [--help]
 set -eu
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,15 +44,17 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 SECONDMATES_MD="$FM_HOME/data/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
 REPAIR_LINKS=0
+ADOPT_REMOTE=0
 
 # shellcheck source=sbin/fm-ff-lib.sh
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 
-usage() { echo "usage: fm-update.sh [--repair-links] [--help]" >&2; }
+usage() { echo "usage: fm-update.sh [--repair-links] [--adopt-remote] [--help]" >&2; }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repair-links) REPAIR_LINKS=1 ;;
+    --adopt-remote) ADOPT_REMOTE=1 ;;
     --help|-h) usage; exit 0 ;;
     *) usage; exit 1 ;;
   esac
@@ -332,11 +346,145 @@ ff_target() {
   return 0
 }
 
+# Was every commit on HEAD already published on origin/<default>? True when
+# HEAD is an ancestor of the current or any recorded prior position of the
+# remote-tracking ref (its reflog). After a remote history rewrite, a purely
+# pulled local branch is an ancestor of the pre-rewrite position; an unpushed
+# local commit is an ancestor of none. No reflog means it cannot be verified,
+# so the caller refuses (fail closed).
+head_published_on_origin() {
+  local dir=$1 default=$2 sha
+  while IFS= read -r sha; do
+    [ -n "$sha" ] || continue
+    if git -C "$dir" merge-base --is-ancestor HEAD "$sha" 2>/dev/null; then
+      return 0
+    fi
+  done <<EOF
+$(git -C "$dir" rev-list -g "refs/remotes/origin/$default" 2>/dev/null || true)
+EOF
+  return 1
+}
+
+# Adopt-remote one target: after origin's default branch history was REWRITTEN
+# (local and origin/<default> diverged), hard-reset the local default branch to
+# origin/<default> - but only when the working tree is clean and every local
+# commit was already published on origin, so no unpushed work can be discarded.
+# Every other case refuses with a one-line reason. Prints its status line and
+# sets the same globals as ff_target (FF_STATUS=adopted on success).
+adopt_target() {
+  local dir=$1 label=$2 allow_detached=${3:-no} ignore_seed_marker=${4:-no}
+  FF_STATUS="skipped"
+  FF_INSTR=""
+
+  if [ ! -d "$dir" ]; then
+    echo "$label: skipped: not a directory"
+    return 0
+  fi
+  if ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "$label: skipped: not a git repo ($dir)"
+    return 0
+  fi
+  if ! git -C "$dir" remote get-url origin >/dev/null 2>&1; then
+    echo "$label: skipped: no origin remote"
+    return 0
+  fi
+  if ! fetch_once "$dir"; then
+    echo "$label: skipped: fetch failed"
+    return 0
+  fi
+
+  local default base cur instr
+  default=$(default_branch "$dir") || {
+    echo "$label: skipped: cannot determine default branch"
+    return 0
+  }
+  base="origin/$default"
+  if ! git -C "$dir" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+    echo "$label: skipped: $base does not exist"
+    return 0
+  fi
+
+  cur=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo "")
+  if [ -z "$cur" ] && [ "$allow_detached" != yes ]; then
+    echo "$label: skipped: detached HEAD, expected $default"
+    return 0
+  fi
+  if [ -n "$cur" ] && [ "$cur" != "$default" ]; then
+    local upstream
+    upstream=$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" 2>/dev/null || true)
+    if [ -n "$upstream" ] && [ "$upstream" = "origin/$cur" ]; then
+      default="$cur"
+      base="origin/$cur"
+    else
+      echo "$label: skipped: on $cur, expected $default"
+      return 0
+    fi
+  fi
+
+  if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ]; then
+    ff_skip "$label" "dirty working tree"
+    return 0
+  fi
+
+  local local_rev remote_rev
+  local_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || {
+    ff_skip "$label" "cannot read HEAD"
+    return 0
+  }
+  remote_rev=$(git -C "$dir" rev-parse "$base" 2>/dev/null) || {
+    ff_skip "$label" "cannot read $base"
+    return 0
+  }
+  if [ "$local_rev" = "$remote_rev" ]; then
+    ff_skip "$label" "already current, nothing to adopt"
+    return 0
+  fi
+  if git -C "$dir" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
+    ff_skip "$label" "not diverged from $base, normal fast-forward applies"
+    return 0
+  fi
+  if git -C "$dir" merge-base --is-ancestor "$base" HEAD 2>/dev/null; then
+    ff_skip "$label" "local-only commits ahead of $base, nothing to adopt"
+    return 0
+  fi
+  if ! head_published_on_origin "$dir" "$default"; then
+    ff_skip "$label" "local-only commits present, refusing to discard"
+    return 0
+  fi
+
+  instr=$(changed_instr "$dir" "$base")
+  local before after out
+  before=$(git -C "$dir" rev-parse --short HEAD)
+  if ! out=$(git -C "$dir" reset --hard "$base" 2>&1); then
+    ff_skip "$label" "hard reset failed: $(ff_first_line "$out")"
+    return 0
+  fi
+  after=$(git -C "$dir" rev-parse --short HEAD)
+  FF_STATUS="adopted"
+  FF_INSTR="$instr"
+  if [ -n "$instr" ]; then
+    echo "$label: adopted $before..$after (instructions changed: $instr)"
+  else
+    echo "$label: adopted $before..$after"
+  fi
+  return 0
+}
+
+# Dispatch one target through the selected mode: the fast-forward default, or
+# the adopt-remote recovery when --adopt-remote was given.
+update_target() {
+  if [ "$ADOPT_REMOTE" -eq 1 ]; then
+    adopt_target "$@"
+  else
+    ff_target "$@"
+  fi
+}
+
 # --- main firstmate repo ---------------------------------------------------
 
 reread_firstmate="no"
-ff_target "$FM_ROOT" "firstmate" no no
-if [ "$FF_STATUS" = "updated" ] && [ -n "$FF_INSTR" ]; then
+update_target "$FM_ROOT" "firstmate" no no
+if { [ "$FF_STATUS" = "updated" ] || [ "$FF_STATUS" = "adopted" ]; } && [ -n "$FF_INSTR" ]; then
   reread_firstmate="yes"
 fi
 
@@ -385,8 +533,8 @@ process_secondmate() {
   esac
   seen_homes="$seen_homes $home_real"
 
-  ff_target "$home_real" "secondmate $id" yes yes
-  if [ "$FF_STATUS" = "updated" ] && [ -n "$pane" ]; then
+  update_target "$home_real" "secondmate $id" yes yes
+  if { [ "$FF_STATUS" = "updated" ] || [ "$FF_STATUS" = "adopted" ]; } && [ -n "$pane" ]; then
     nudge_windows="$nudge_windows fm-$id"
   fi
 }
