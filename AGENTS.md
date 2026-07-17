@@ -344,7 +344,7 @@ A stale wake directs you to peek the pane (`sbin/fm-peek.sh <pane_id>`) to diagn
 Stale is SKIPPED for `kind=secondmate` panes (an idle secondmate is healthy - it runs its own supervision) and for ship tasks parked on a green PR (`pr=` set and a terminal `done: PR`/PR-ready status line); those stay covered by the merge `check.sh` and the status stream.
 
 Token discipline: the injected digest is self-contained - act on it without re-reading; default any pane peek to 40 lines; batch what you tell the captain.
-Herdr's native agent status is the ground truth, so the omp<->herdr integration must be installed once per machine (`herdr integration install omp`); without it crewmate panes report `unknown` and only the status-file stream carries signals.
+Herdr's native agent status is the ground truth, so each harness's herdr integration must be installed once per machine: `herdr integration install omp` for omp panes and `herdr integration install claude` (which manages the `~/.claude/hooks/herdr-agent-state.sh` SessionStart hook) for Claude panes; without it crewmate panes report `unknown` and only the status-file stream carries signals.
 
 Lean-loop discipline: keep your own loop lean for reasoning and decisions - fork self-contained side-work to a disposable `task` subagent (or route domain work to a secondmate) rather than burning your context on it; the thinking and execution discipline in section 1 governs the rest.
 For autonomous-loop incidents (notification spam, 429s, repeated blocked wakes, cost growth), follow `docs/runbooks/autonomous-loop-incident-triage.md`.
