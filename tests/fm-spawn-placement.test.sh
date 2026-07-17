@@ -119,7 +119,7 @@ captured_command() {
 secondmate_prefix() {
   local secondmate_home=$1 sq_home
   sq_home=$(fm_shell_quote "$secondmate_home")
-  printf 'FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=%s ' "$sq_home"
+  printf 'FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=%s PYTHONDONTWRITEBYTECODE=1 ' "$sq_home"
 }
 
 test_omp_secondmate_uses_launched_home_overlay_once() {
@@ -274,6 +274,24 @@ test_secondmate_meta_records_crew_model() {
   pass "secondmate meta records the pinned crew model so a later relaunch can restore it"
 }
 
+test_secondmate_launch_disables_python_bytecode() {
+  local home fakebin secondmate secondmate_abs actual
+  home=$(make_supervisor_home no-pycache)
+  fakebin=$(make_fake_herdr "$home")
+  secondmate=$(make_secondmate_home no-pycache-secondmate no-pycache-mate)
+  secondmate_abs=$(cd "$secondmate" && pwd -P)
+
+  run_spawn "$home" "$fakebin" no-pycache-mate "$secondmate" omp --secondmate \
+    || fail "OMP secondmate spawn failed"
+
+  actual=$(captured_command "$home")
+  case "$actual" in
+    *"PYTHONDONTWRITEBYTECODE=1"*) ;;
+    *) fail "secondmate launch did not disable python bytecode caching in its home: $actual" ;;
+  esac
+  pass "secondmate launch sets PYTHONDONTWRITEBYTECODE=1 to keep __pycache__ out of its home"
+}
+
 expected_ordinary_template() {
   local harness=$1 model=$2 brief=$3 sq_model sq_brief
   sq_model=$(fm_shell_quote "$model")
@@ -340,5 +358,6 @@ test_raw_secondmate_launch_is_exact_baseline
 test_omp_secondmate_fresh_spawn_threads_crew_model
 test_omp_secondmate_resume_threads_crew_model
 test_secondmate_meta_records_crew_model
+test_secondmate_launch_disables_python_bytecode
 test_all_ordinary_templates_are_exact_baselines
 test_raw_ordinary_launch_is_exact_baseline

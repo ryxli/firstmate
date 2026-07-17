@@ -503,7 +503,7 @@ test_secondmate_pin_restored_on_reload() {
 
   local sq_home
   sq_home=$(. "$ROOT/sbin/fm-spawn-lib.sh" && fm_shell_quote "$home")
-  herdr_log "$CASE" | grep -qF "pane run w10:p1 FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home omp --model 'anthropic/opus' --resume $sid" \
+  herdr_log "$CASE" | grep -qF "pane run w10:p1 FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home PYTHONDONTWRITEBYTECODE=1 omp --model 'anthropic/opus' --resume $sid" \
     || fail "(i2) expected FM_HOME prefix and --model on the restored resume command"
 
   pass "(i2) durable secondmate target restores FM_HOME and pinned crew_model on reload"
@@ -560,7 +560,7 @@ test_reverse_lookup_restores_pin_for_raw_pane_target() {
 
   local sq_home
   sq_home=$(. "$ROOT/sbin/fm-spawn-lib.sh" && fm_shell_quote "$home")
-  herdr_log "$CASE" | grep -qF "pane run w12:p1 FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home omp --model 'anthropic/opus' --resume $sid" \
+  herdr_log "$CASE" | grep -qF "pane run w12:p1 FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home PYTHONDONTWRITEBYTECODE=1 omp --model 'anthropic/opus' --resume $sid" \
     || fail "(i4) raw pane target did not restore the pin via reverse meta lookup"
 
   pass "(i4) raw pane target reverse-matches state meta to restore the pin too"

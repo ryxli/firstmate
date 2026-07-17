@@ -552,7 +552,9 @@ if [ "$LAUNCH_FROM_TEMPLATE" -eq 1 ] && [ "$KIND" = secondmate ] && [ "$HARNESS"
 fi
 if [ "$KIND" = secondmate ]; then
   sq_home=$(fm_shell_quote "$PROJ_ABS")
-  LAUNCH_CMD="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH_CMD"
+  # PYTHONDONTWRITEBYTECODE=1 keeps a secondmate's python-based mate tooling
+  # from littering __pycache__ into its persistent home directory.
+  LAUNCH_CMD="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home PYTHONDONTWRITEBYTECODE=1 $LAUNCH_CMD"
 fi
 PANE_CMD="$LAUNCH_CMD; exec \"\${SHELL:-/bin/zsh}\" -l"
 

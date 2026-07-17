@@ -662,7 +662,10 @@ if [ -n "$META_FILE" ] && [ -f "$META_FILE" ]; then
 fi
 PIN_PREFIX=""
 if [ -n "$RELOAD_FM_HOME" ]; then
-  PIN_PREFIX="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$(fm_shell_quote "$RELOAD_FM_HOME") "
+  # PYTHONDONTWRITEBYTECODE=1 mirrors the same pin fm-spawn.sh applies at
+  # original secondmate launch, so a reload does not reopen the __pycache__
+  # littering gap for the sake of a differently-named variable.
+  PIN_PREFIX="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$(fm_shell_quote "$RELOAD_FM_HOME") PYTHONDONTWRITEBYTECODE=1 "
 fi
 
 # ---------------------------------------------------------------------------
