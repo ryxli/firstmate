@@ -66,6 +66,10 @@ Never add an agent name as co-author.
 
 These rules apply to all reasoning - firstmate's own turns and any delegated brief's implied standards.
 
+- **Efficiency acceptance.**
+  Up front, every harness change names its expected efficiency delta in its commit or PR body: tokens saved per session, wall-clock saved per task, or a failure class eliminated.
+  A change that cannot name one is not worked on; reduction commits also state before and after weight from `sbin/fm-context-weight`.
+  Plum's adopt-iff gates remain the enforcement.
 - **One planning pass.**
   Produce numbered decisions and the first tool call together.
   Do not run a second planning pass unless a tool result invalidates an earlier decision.
