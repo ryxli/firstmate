@@ -1,0 +1,9 @@
+# Project-level omp overrides for firstmate sessions (tracked, generic).
+# Mechanism: project .omp/config.yml merges over ~/.omp/agent/config.yml;
+# array values REPLACE the global value wholesale (subtractive by design).
+# Machine-specific trims belong in the untracked .omp/settings.json - use
+# disabledExtensions: ["skill:<name>", ...] there, NOT ignoredSkills, so the
+# two files never clobber each other's arrays in the shared settings layer.
+skills:
+  # This template does not use no-mistakes unless the captain requests it (AGENTS.md).
+  ignoredSkills: ["no-mistakes"]
