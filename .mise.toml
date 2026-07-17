@@ -1,0 +1,6 @@
+# Firstmate checkout environment (tracked, generic).
+# Entering this directory puts the fm CLI and remaining ship scripts on PATH
+# (plus the optional untracked per-home bin/), so commands are just
+# `fm start`, `fm health`, etc. Requires `mise trust` once per checkout.
+[env]
+_.path = ["{{config_root}}/sbin", "{{config_root}}/bin"]

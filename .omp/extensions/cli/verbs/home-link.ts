@@ -15,12 +15,14 @@ import {
 	lstatSync,
 	mkdirSync,
 	readdirSync,
+	readFileSync,
 	readlinkSync,
 	realpathSync,
 	rmSync,
 	rmdirSync,
 	statSync,
 	symlinkSync,
+	writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -298,6 +300,41 @@ function checkCurrentOmp(ctx: Ctx): void {
 	}
 }
 
+// Canonical per-home mise env: entering the home puts the shared fm CLI
+// (symlinked sbin/) and the home's personal bin/ on PATH.
+const MISE_TOML = `# Mate home environment (local). Puts the shared fm CLI (symlinked sbin/) and
+# this home's personal bin/ on PATH when entering it. Run \`mise trust\` once.
+[env]
+_.path = ["{{config_root}}/sbin", "{{config_root}}/bin"]
+`;
+
+function checkMiseToml(ctx: Ctx): void {
+	// Either mise config name satisfies the check; repair writes the hidden one.
+	const existing = [".mise.toml", "mise.toml"]
+		.map((name) => join(ctx.homePath, name))
+		.find((p) => isFileFollow(p) && !isSymlink(p));
+	if (existing) {
+		// Never clobber an existing (possibly customized) file; only require the
+		// PATH entry that makes the fm CLI resolve inside the home.
+		ctx.status = readFileSync(existing, "utf8").includes("{{config_root}}/sbin") ? "ok" : "drift-no-sbin-path";
+		return;
+	}
+	const path = join(ctx.homePath, ".mise.toml");
+	if (ctx.mode === "check") {
+		// Warn, not block: absence is converged by the next `home repair`, and
+		// pre-mise homes must not fail their link checks over it.
+		ctx.status = "missing";
+		return;
+	}
+	try {
+		writeFileSync(path, MISE_TOML);
+	} catch {
+		setBlock(ctx, "repair-failed");
+		return;
+	}
+	ctx.status = "repaired";
+}
+
 function checkOperationalDir(ctx: Ctx, name: string): void {
 	const dir = join(ctx.homePath, name);
 	if (!existsSync(dir)) {
@@ -382,6 +419,8 @@ async function run(argv: string[]): Promise<number> {
 		statusLine(ctx, "link..agents");
 		repairLink(ctx, ".tasks.toml", join(codeRoot, ".tasks.toml"));
 		statusLine(ctx, "link..tasks.toml");
+		checkMiseToml(ctx);
+		statusLine(ctx, "mise.toml");
 
 		if (currentOmp) {
 			checkCurrentOmp(ctx);
