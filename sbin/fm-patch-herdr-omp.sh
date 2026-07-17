@@ -20,6 +20,20 @@
 # replace it; reload, session_init, agentKind=sub, and headless contexts
 # cannot mint or overwrite authority.
 #
+# LEASE (v5): ownership alone proved too strict. An fm-reload replaces this
+# extension module WITHOUT emitting any session lifecycle event, so the fresh
+# module never gets an owner-transfer opportunity: the heartbeat requires
+# ownership, ownership requires the module-local token, and the token died with
+# the old module. The pane's agent label then goes permanently stale in Herdr
+# (agent=None/status=unknown) while omp runs fine. The claim therefore carries
+# a liveness lease: every successful owner validation re-stamps a timestamp on
+# globalThis, and a non-owner module may seize the claim only when its exact
+# session tuple matches the claim AND the lease has expired - the previous
+# owner is provably dead. A live owner refreshes the lease every heartbeat
+# tick and can never be usurped; children, headless, and moved-session stale
+# modules remain vetoed because they fail the exact-tuple match or the child
+# markers.
+#
 # herdr owns this file ("reinstalling or updating overwrites this file"), so we
 # cannot fix it upstream and cannot expect edits to survive an update. This
 # patch is self-contained and version-shape checked; run it after any herdr
@@ -53,7 +67,7 @@ set -u
 
 MARKER="fm-resync-heartbeat"
 PATCH_MARKER="fm-resync-heartbeat-lifecycle-invariant"
-ROOT_CLAIM_MARKER="fm-exact-root-session-claim-v4"
+ROOT_CLAIM_MARKER="fm-exact-root-session-claim-v5"
 RESYNC_MS="${FM_HERDR_RESYNC_MS:-15000}"
 
 TARGET="$HOME/.omp/agent/extensions/herdr-omp-agent-state.ts"
@@ -115,6 +129,9 @@ def is_patched(text: str) -> bool:
         root_claim_marker,
         'Symbol.for("herdr:omp:root-session-claim:v1")',
         'Symbol.for("herdr:omp:root-session-claim-owner:v1")',
+        'Symbol.for("herdr:omp:root-session-claim-lease:v1")',
+        "function rootSessionLeaseLive(): boolean",
+        "const staleOwnerTakeover =",
         "const rootSessionReporterToken = {};",
         "function ownsRootSessionClaim(): boolean",
         "function setRootSessionClaim(claim: RootSessionClaim): void",
@@ -128,7 +145,7 @@ def is_patched(text: str) -> bool:
         "allowOwnerTransfer = false",
         "sameRootSessionClaim(claim, tuple, allowStableId || claimOwned)",
         'allowedRootStartReasons = new Set(["startup", "new", "resume", "fork", "handoff"])',
-        "claimOwned || allowOwnerTransfer",
+        "claimOwned || allowOwnerTransfer || staleOwnerTakeover",
         "ctx?.hasUI !== true ||",
         "let latestCtx: any | undefined;",
         "function restoreAgentActiveFromCtx(ctx: any = latestCtx): void",
@@ -164,7 +181,7 @@ src = heartbeat_re.sub("", src)
 # integration. A Symbol.for key gives reload continuity without crossing a
 # process boundary.
 root_helper_re = re.compile(
-    r'// fm-exact-root-session-claim-v(?:1|2|3|4): process-local exact root authority\.\n'
+    r'// fm-exact-root-session-claim-v(?:1|2|3|4|5): process-local exact root authority\.\n'
     r'.*?(?=export default function)',
     re.S,
 )
@@ -182,8 +199,16 @@ type RootSessionClaim = {{
 
 const rootSessionClaimKey = Symbol.for("herdr:omp:root-session-claim:v1");
 const rootSessionClaimOwnerKey = Symbol.for("herdr:omp:root-session-claim-owner:v1");
+const rootSessionClaimLeaseKey = Symbol.for("herdr:omp:root-session-claim-lease:v1");
 const rootSessionReporterToken = {{}};
+// Three missed owner heartbeats (plus margin) prove the owning module is dead.
+const rootSessionLeaseTtlMs = {int(resync_ms) * 3 + 1000};
 const allowedRootStartReasons = new Set(["startup", "new", "resume", "fork", "handoff"]);
+
+function rootSessionLeaseLive(): boolean {{
+  const stamp = (globalThis as any)[rootSessionClaimLeaseKey];
+  return typeof stamp === "number" && Date.now() - stamp < rootSessionLeaseTtlMs;
+}}
 
 function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined {{
   try {{
@@ -238,6 +263,7 @@ function ownsRootSessionClaim(): boolean {{
 function setRootSessionClaim(claim: RootSessionClaim): void {{
   (globalThis as any)[rootSessionClaimKey] = claim;
   (globalThis as any)[rootSessionClaimOwnerKey] = rootSessionReporterToken;
+  (globalThis as any)[rootSessionClaimLeaseKey] = Date.now();
 }}
 
 function sameRootSessionClaim(
@@ -303,10 +329,16 @@ activation = '''  function validateRootSession(
     const tuple = exactRootSessionTuple(ctx);
     const claim = processRootSessionClaim();
     const claimOwned = ownsRootSessionClaim();
+    // A dead owner (expired lease) may be succeeded, but only by the exact
+    // same session tuple - never via stable-ID matching or child contexts.
+    const staleOwnerTakeover =
+      !claimOwned &&
+      !rootSessionLeaseLive() &&
+      sameRootSessionClaim(claim, tuple, false);
     const valid =
       !hasRootChildMarker(event, ctx) &&
       sameRootSessionClaim(claim, tuple, allowStableId || claimOwned) &&
-      (claimOwned || allowOwnerTransfer);
+      (claimOwned || allowOwnerTransfer || staleOwnerTakeover);
     rootSession = valid;
     if (valid) {
       setRootSessionClaim(tuple);
@@ -497,6 +529,9 @@ block = (
     "  // module cannot reclaim a moved session's former file. This lets a\n"
     "  // lifecycle handoff refresh the optional file without stale intervals\n"
     "  // claiming or overwriting pane authority.\n"
+    "  // A claim whose liveness lease expired (owner module dead, e.g. after\n"
+    "  // an eventless extension reload) may be seized here by the exact same\n"
+    "  // session tuple, restoring publication without any lifecycle event.\n"
     "  // ctx.isIdle() is sampled only when this module-local runtime first recovers\n"
     "  // the persisted claim; lifecycle hooks own agentActive after that.\n"
     "  try {\n"

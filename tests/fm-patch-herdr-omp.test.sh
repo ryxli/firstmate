@@ -362,7 +362,7 @@ prior = '''    const isSameSessionReload =
 '''
 assert modern in src, "fresh v4 activation gate missing"
 src = src.replace(modern, prior, 1)
-src = src.replace("// fm-exact-root-session-claim-v4:", "// fm-exact-root-session-claim-v3:", 1)
+src = src.replace("// fm-exact-root-session-claim-v5:", "// fm-exact-root-session-claim-v3:", 1)
 src = src.replace("      lacksFreshResumeProof ||\n      isStaleSameSessionReload", "      isSameSessionReload", 1)
 io.open(path, "w", encoding="utf-8").write(src)
 PY
@@ -460,7 +460,7 @@ function sameRootSessionClaim(
 
 '''
 helper_re = re.compile(
-    r'// fm-exact-root-session-claim-v4: process-local exact root authority\.\n'
+    r'// fm-exact-root-session-claim-v5: process-local exact root authority\.\n'
     r'.*?(?=export default function)',
     re.S,
 )
@@ -477,7 +477,7 @@ PY
   "$PATCHER" --check --file "$fixture" \
     || fail "--check rejected the upgraded parent output"
 
-  grep -q "fm-exact-root-session-claim-v4" "$fixture" \
+  grep -q "fm-exact-root-session-claim-v5" "$fixture" \
     || fail "upgrade did not version the root helper marker"
   grep -q "rootSessionFile?: string;" "$fixture" \
     || fail "upgrade did not install the ID-only root helper"
@@ -1232,6 +1232,134 @@ MJS
   pass "live resumed root stays non-Idle through three real 15-second heartbeat samples"
 }
 
+# The live fleet failure this pins: fm-reload replaces the extension module
+# WITHOUT emitting any session lifecycle event. The v4 exact-claim model left
+# the fresh module permanently unable to own the claim (heartbeats have no
+# owner-transfer authority and the owner token died with the old module), so
+# the pane's herdr agent label went stale forever (agent=None/status=unknown)
+# while omp kept running. The v5 lease lets the exact same session tuple seize
+# a claim whose owner stopped refreshing its liveness lease - and nobody else.
+test_eventless_reload_recovers_via_expired_lease() {
+  command -v bun >/dev/null 2>&1 \
+    || fail "bun is required for the eventless-reload lease regression"
+
+  local fixture="$TMP_ROOT/lease-runtime.ts"
+  local harness="$TMP_ROOT/lease-harness.mjs"
+  write_pristine_fixture "$fixture"
+  "$PATCHER" --file "$fixture" || fail "apply for the eventless-reload lease fixture failed"
+
+  cat >"$harness" <<'MJS'
+const fixturePath = process.argv[2];
+const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
+const ownerKey = Symbol.for("herdr:omp:root-session-claim-owner:v1");
+const leaseKey = Symbol.for("herdr:omp:root-session-claim-lease:v1");
+const leaseTtlMs = 15000 * 3 + 1000;
+
+function assert(condition, message) {
+  if (!condition) {
+    console.error(`FAIL: ${message}`);
+    process.exit(1);
+  }
+}
+
+function ctx(file, id, { sessionInit = false, idle = false } = {}) {
+  return {
+    hasUI: true,
+    agentKind: "main",
+    isIdle: () => idle,
+    sessionManager: {
+      getSessionFile: () => file,
+      getSessionId: () => id,
+      getBranch: () => sessionInit ? [{ type: "session_init" }] : [],
+    },
+  };
+}
+
+let serial = 0;
+async function loadRuntime() {
+  const handlers = new Map();
+  let heartbeat = null;
+  const pi = {
+    on(event, fn) {
+      handlers.set(event, fn);
+      return pi;
+    },
+  };
+  const originalSetInterval = globalThis.setInterval;
+  globalThis.setInterval = (fn, ms) => {
+    if (ms === 15000) heartbeat = fn;
+    return { unref() {} };
+  };
+  const mod = await import(`${fixturePath}?lease=${++serial}`);
+  mod.default(pi);
+  globalThis.setInterval = originalSetInterval;
+  return { handlers, pi, heartbeat };
+}
+
+delete globalThis[claimKey];
+delete globalThis[ownerKey];
+delete globalThis[leaseKey];
+
+const rootFile = "/sessions/lease-root.jsonl";
+const rootId = "lease-root-id";
+
+// The interactive root claims normally and publishes.
+const root = await loadRuntime();
+root.handlers.get("session_start")?.({ reason: "startup" }, ctx(rootFile, rootId));
+assert(root.pi.__test.getLog().length > 0, "root did not publish at startup");
+
+// fm-reload: a fresh module replaces the old one with NO lifecycle event.
+// Only a tool hook stashes ctx into the new module.
+const reloaded = await loadRuntime();
+reloaded.handlers.get("tool_execution_start")?.({ toolName: "bash" }, ctx(rootFile, rootId));
+
+// While the old owner's lease is still live, the fresh module must stay out.
+reloaded.heartbeat?.();
+assert(reloaded.pi.__test.getLog().length === 0, "fresh module published while the owner lease was still live");
+assert(reloaded.pi.__test.getCalls().length === 0, "fresh module registered while the owner lease was still live");
+
+// The old module is dead: its lease expires with no refresh.
+globalThis[leaseKey] = Date.now() - leaseTtlMs - 1;
+
+// A child context sharing the pane must still never seize the expired claim.
+const child = await loadRuntime();
+child.handlers.get("tool_execution_start")?.({ toolName: "bash" }, ctx(rootFile, rootId, { sessionInit: true }));
+child.heartbeat?.();
+assert(child.pi.__test.getLog().length === 0, "child context seized an expired lease");
+
+// A different session tuple must not seize it either.
+const stranger = await loadRuntime();
+stranger.handlers.get("tool_execution_start")?.({ toolName: "bash" }, ctx("/sessions/other.jsonl", "other-id"));
+stranger.heartbeat?.();
+assert(stranger.pi.__test.getLog().length === 0, "a different session tuple seized an expired lease");
+
+// The exact-tuple successor recovers on its next heartbeat tick: it re-registers
+// the session and force-publishes, with no lifecycle event ever firing.
+reloaded.heartbeat?.();
+assert(
+  reloaded.pi.__test.getCalls().includes("reportSession:fm-reload-resync"),
+  `successor did not re-register the session: ${JSON.stringify(reloaded.pi.__test.getCalls())}`,
+);
+assert(reloaded.pi.__test.getLog().length > 0, "successor did not force-publish after seizing the expired lease");
+
+// Ownership transferred: the takeover re-stamped the lease, so the old module
+// (if some interval survived) is blocked again.
+assert(typeof globalThis[leaseKey] === "number" && Date.now() - globalThis[leaseKey] < leaseTtlMs, "takeover did not refresh the lease");
+const rootPublishCount = root.pi.__test.getLog().length;
+root.heartbeat?.();
+assert(root.pi.__test.getLog().length === rootPublishCount, "the usurped old module still published after the lease takeover");
+
+console.log("PASS: an eventless reload recovers publication via the expired lease, while live owners, children, and foreign tuples stay blocked");
+MJS
+
+  local out
+  out=$(bun run "$harness" "$fixture" 2>&1)
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "eventless-reload lease recovery regressed: $out"
+  printf '%s' "$out" | grep -q "^PASS" || fail "lease harness did not report PASS: $out"
+  pass "an eventless extension reload recovers herdr publication once the dead owner's lease expires"
+}
+
 test_pristine_check_reports_unpatched
 test_apply_enforces_invariant
 test_patch_check_requires_publish_guard_at_publish_state
@@ -1244,3 +1372,4 @@ test_active_turn_survives_background_job_wait_across_heartbeat
 test_exact_session_root_claim_lifecycle
 test_live_resumed_root_heartbeat_proof
 test_root_move_and_id_only_claims
+test_eventless_reload_recovers_via_expired_lease
