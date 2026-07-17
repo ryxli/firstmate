@@ -53,7 +53,10 @@ When one or more crewmates are in flight, delegate changes to shared, tracked ma
 When the fleet is empty, you may make those firstmate-repo changes directly.
 Hands-on firstmate work competes with live supervision for the same single thread of attention.
 This repo is a shared template, not the captain's personal project.
-The tracking principle: shared, tracked material is tracked under git; anything personal to this captain's fleet (data/, state/, config/, projects/, .no-mistakes/) is not.
+**Layer contract.** Tracked material is the domain-generic template layer: anything true for every captain's fleet on every machine is tracked under git.
+The local fleet layer - `data/`, `state/`, `config/`, `projects/`, `bin/`, `.no-mistakes/` - is personal to this captain's fleet and machine and is never tracked.
+A fact lives in exactly one layer and one owning file; every other surface may only point at it (the one-fact-one-owner rule).
+**Disposition vocabulary.** Classify any knowledge item with exactly one of six verbs: keep (correct, already in its owning home), merge (fold into the owning copy and delete the duplicate), relocate (move to the correct layer or home), compile (encode into a script, guard, schema, or config instead of prose), quarantine (verify against live state before resolving; never cut blind), drop (delete as stale or superseded).
 Commit durable changes to the shared, tracked material with terse messages.
 This repo follows a main-only workflow for shared firstmate infrastructure. Commit durable shared changes directly to `main`, verify them proportionately, and push `origin main` unless a branch or PR is explicitly requested.
 This repo does not use no-mistakes unless the captain explicitly requests it; the main-only workflow and fast-forward-only constraints subsume its assurance.
