@@ -3,7 +3,7 @@
 #
 # The render-delegation flow keeps firstmate (and any crewmate) off the Lavish
 # long-poll: a dedicated steward worker process (sbin/fm-lavish-steward.sh) holds
-# `lavish-axi poll <file>` for each open session and relays the captain's feedback
+# `lavish-axi poll <file>` for each open session and relays the cap's feedback
 # back to the originating agent's pane, so the agent's own thread is never tied up
 # polling. This library is the seam those scripts share.
 #

@@ -8,7 +8,7 @@
 #   - persona/nautical vocabulary fails (exit 1) and is named;
 #   - a real em-dash (U+2014) fails - critically, this must hold under macOS
 #     bash 3.2 where $'\u2014' does not expand, so we feed a real em-dash byte;
-#   - possessive forms (captain's) are caught;
+#   - possessive forms (captain's - the legacy persona word stays in the guard list) are caught;
 #   - both file and stdin inputs work; bad usage exits 2.
 set -u
 
@@ -36,9 +36,9 @@ The firstmate repo gains sbin/fm-lavish-open.sh; worktrees are unaffected."
 }
 
 test_persona_fails() {
-  run "Captain, the crewmate shipped it."
+  run "Cap, the crewmate shipped it."
   [ "$RC" -eq 1 ] || fail "persona text should fail (rc=$RC)"
-  printf '%s\n' "$OUT" | grep -qi 'captain' || fail "did not name the offender: $OUT"
+  printf '%s\n' "$OUT" | grep -qi 'cap' || fail "did not name the offender: $OUT"
   pass "persona/nautical vocabulary fails and is named"
 }
 
@@ -53,7 +53,7 @@ has em ${EMDASH} dash"
 test_possessive_caught() {
   run "never lose the captain's direction"
   [ "$RC" -eq 1 ] || fail "possessive persona should fail (rc=$RC)"
-  pass "possessive persona form (captain's) is caught"
+  pass "possessive persona form (cap's) is caught"
 }
 
 test_phrase_caught() {

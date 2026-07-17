@@ -15,7 +15,7 @@ interface CaptureEvent {
 	ts: number;
 	plane: "fleet";
 	kind: string;
-	author: "captain";
+	author: "cap";
 	target: string;
 	raw: string;
 	corrected: string;
@@ -47,7 +47,7 @@ async function run(argv: string[]): Promise<number> {
 			ts: Date.now(),
 			plane: "fleet",
 			kind,
-			author: "captain",
+			author: "cap",
 			target,
 			raw: raw ?? "",
 			corrected,

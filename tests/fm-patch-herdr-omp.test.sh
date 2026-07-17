@@ -577,7 +577,7 @@ test_missing_target_skips_cleanly() {
   pass "a missing integration file skips cleanly instead of failing bootstrap"
 }
 
-# Captain-reported live failure case: the agent is inside an active
+# Cap-reported live failure case: the agent is inside an active
 # whiteboard-driven turn, waiting on one background watcher job (a curl
 # poll loop) - agent_start has fired and agent_end has not, so the turn is
 # still open - while Herdr/omp's own ctx.isIdle() reads true because the
@@ -641,7 +641,7 @@ if (mockPi.__test.getAgentActive() !== true) {
   process.exit(1);
 }
 
-// The captain-reported case: the turn is still open (no agent_end fired)
+// The cap-reported case: the turn is still open (no agent_end fired)
 // but the agent is waiting on a background watcher job (curl loop);
 // ctx.isIdle() reads true while waiting even though the turn is active.
 idle = true;

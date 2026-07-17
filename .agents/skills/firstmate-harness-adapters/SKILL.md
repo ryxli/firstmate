@@ -11,21 +11,21 @@ Read it before any harness selection, override, adapter verification, trust-dial
 ## 4. Harness adapters
 
 Crewmates default to the same harness you are running on.
-The captain may override this at any time, typically at bootstrap: record the choice in `config/crew-harness` (a single word - an adapter name below; the file is local and gitignored, so each machine keeps its own; absent or `default` means mirror your own harness).
-The recorded harness is used for every dispatch until changed; a per-task instruction from the captain ("run this one on codex") overrides it for that dispatch only.
+The cap may override this at any time, typically at bootstrap: record the choice in `config/crew-harness` (a single word - an adapter name below; the file is local and gitignored, so each machine keeps its own; absent or `default` means mirror your own harness).
+The recorded harness is used for every dispatch until changed; a per-task instruction from the cap ("run this one on codex") overrides it for that dispatch only.
 Resolve `default` by detecting your own harness (below).
 
 Each adapter splits into mechanics and knowledge.
 The mechanics (launch command, autonomy flag) live in `sbin/fm-spawn.sh`; the knowledge you need while supervising (exit, interrupt, dialogs, quirks) lives in the tables below.
 Herdr provides native agent status tracking (`idle`/`working`/`blocked`/`done`) for all adapters; turn-end detection is via `working→idle` transitions, not per-harness hook files.
 **Never dispatch a crewmate on an unverified adapter.**
-If `config/crew-harness` names an unverified one, tell the captain and fall back to your own harness until it is verified.
-If the captain asks for a new harness, propose verifying it first: spawn a trivial supervised task using fm-spawn's raw-launch-command escape hatch, confirm every fact empirically, then record the mechanics in fm-spawn, any needed `FM_COMPOSER_IDLE_RE` empty-composer override, and the knowledge here, and commit.
+If `config/crew-harness` names an unverified one, tell the cap and fall back to your own harness until it is verified.
+If the cap asks for a new harness, propose verifying it first: spawn a trivial supervised task using fm-spawn's raw-launch-command escape hatch, confirm every fact empirically, then record the mechanics in fm-spawn, any needed `FM_COMPOSER_IDLE_RE` empty-composer override, and the knowledge here, and commit.
 
 ### Detecting harnesses
 
 `sbin/fm harness` prints your own harness (verified env markers first, then process ancestry); `sbin/fm harness crew` resolves the effective crewmate harness from `config/crew-harness`.
-On `unknown`, ask the captain instead of guessing; a captain override always beats detection.
+On `unknown`, ask the cap instead of guessing; a cap override always beats detection.
 When you verify a new adapter, record its env marker and command name in that script.
 
 ### omp (oh-my-pi)

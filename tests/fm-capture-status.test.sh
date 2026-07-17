@@ -12,7 +12,7 @@ EVENTS="$TMP_ROOT/events.jsonl"
 LOADED="$TMP_ROOT/loaded.json"
 
 cat >"$EVENTS" <<'EOF'
-{"ts": 1700000000000, "plane": "fleet", "kind": "steer", "author": "captain", "target": "fm-riggs", "raw": "", "corrected": "demo", "trace_ref": "", "session_id": "", "reachable": null}
+{"ts": 1700000000000, "plane": "fleet", "kind": "steer", "author": "cap", "target": "fm-riggs", "raw": "", "corrected": "demo", "trace_ref": "", "session_id": "", "reachable": null}
 EOF
 
 python3 - "$LOADED" <<'PYEOF'

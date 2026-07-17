@@ -6,7 +6,7 @@
 // needs no network and spends no tokens - it only proves the wiring is correct.
 //
 // Every artifact this file produces is written under a per-test mkdtemp dir, NEVER
-// under benchmarks/action-bench/results/: that directory stays untouched (a captain
+// under benchmarks/action-bench/results/: that directory stays untouched (a cap
 // decision on seeding historical results data is pending), and the milestone layer
 // must prove it runs cleanly from an empty results dir.
 import { describe, expect, it } from "bun:test";

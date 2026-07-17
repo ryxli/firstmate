@@ -14,7 +14,7 @@ You may have been restarted mid-flight.
 Reconcile reality with your records before doing anything else:
 
 1. Run `sbin/fm lock` to acquire the session lock (it records the harness process PID, which is session-stable).
-   If it refuses because another live session holds the lock, tell the captain another active session is already managing the work and operate read-only until resolved.
+   If it refuses because another live session holds the lock, tell the cap another active session is already managing the work and operate read-only until resolved.
 2. The supervision extension reloads automatically when this session starts and re-resolves the in-flight fleet from `state/*.meta`; there is no wake-queue to drain.
 3. Read `data/backlog.md`, `data/secondmates.md` if present, every `state/*.meta`, and every `state/*.status`.
 4. Use the `pane=` values from this home's `state/*.meta` files as the live direct-report set, then check those herdr panes via `herdr pane get <pane_id>`.
@@ -30,7 +30,7 @@ Reconcile reality with your records before doing anything else:
    A secondmate's recovery reconciles only work that is already its own; on finding no assigned or in-flight work it goes idle and waits for the main firstmate to route it a task, never initiating a survey or audit of its own (see `skill://firstmate-task-lifecycle`).
 8. If `state/.afk` is present (away-mode was active before the restart): stay in afk - the supervision extension reloads with this session and honors `state/.afk` to batch escalations; just keep the flag set and follow `skill://afk`.
    If `state/.idle-digest.md` is present, an idle-digest loop was in flight before the restart: resume it through `skill://afk`; the helper preserves the refinement window and folded updates across restart.
-9. Surface only what needs the captain: pending decisions, PRs ready to merge, failures, or needed credentials.
+9. Surface only what needs the cap: pending decisions, PRs ready to merge, failures, or needed credentials.
    If there is nothing that needs them, say nothing and resume.
 10. The supervision extension is already running (it loaded with this session); there is nothing to arm.
     If `state/.afk` is present, follow `skill://afk` so relevant events remain batched into one digest.

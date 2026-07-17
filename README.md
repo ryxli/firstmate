@@ -21,7 +21,7 @@ There is no app to install; the whole orchestrator is an `AGENTS.md` file that a
 
 This is not an agent harness. This is not a skill. This is not a CLI.
 
-This is.. a directory that turns any agent into your firstmate, and you the captain.
+This is.. a directory that turns any agent into your firstmate, and you the cap.
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ $ claude   # launch your agent harness here; AGENTS.md takes over
 # fm-fix-login-k3 and fm-dark-mode-p7.
 # Minutes later:
 
-  PR ready for review, captain: https://github.com/you/xyz/pull/42
+  PR ready for review, cap: https://github.com/you/xyz/pull/42
   (fix flaky login test - risk: low - CI green)
 
 > alright merge it
@@ -68,7 +68,7 @@ Run `sbin/fm-toolbelt` for the live, generated tool list, one line per script.
 ## Configuration
 
 Shared orchestrator behavior lives in `AGENTS.md`.
-`AGENTS.md` section 2 documents `FM_HOME` and its override behavior, the environment variables that tune runtime timing, and the registry files (`data/projects.md`, `data/secondmates.md`, `data/captain.md`, `.tasks.toml`) that drive routing and backlog behavior.
+`AGENTS.md` section 2 documents `FM_HOME` and its override behavior, the environment variables that tune runtime timing, and the registry files (`data/projects.md`, `data/secondmates.md`, `data/cap.md`, `.tasks.toml`) that drive routing and backlog behavior.
 Personal fleet state under `data/`, `state/`, and `config/` is gitignored and never tracked.
 
 ## Development

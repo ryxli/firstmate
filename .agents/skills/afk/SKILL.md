@@ -8,7 +8,7 @@ user-invocable: true
 
 Away mode is presence-gated and never the default.
 It changes notification batching, not approval authority.
-A PR merge, needs-decision finding, destructive action, irreversible action, or security-sensitive action still waits for the captain unless existing policy already grants that authority.
+A PR merge, needs-decision finding, destructive action, irreversible action, or security-sensitive action still waits for the cap unless existing policy already grants that authority.
 
 ## Enter
 
@@ -29,7 +29,7 @@ OMP owns delivery timing through `deliverAs: nextTurn` and `triggerTurn`, so an 
 sbin/fm idle-digest begin
 ```
 
-## While the captain is away
+## While the cap is away
 
 When firstmate would otherwise go idle and work remains in flight, use the bounded idle-digest loop instead of emitting a trickle of small closeouts.
 The helper consolidates updates in `state/.idle-digest.md` and permits only safe, read-only firstmate-side refinement.
@@ -44,8 +44,8 @@ Keep approval boundaries unchanged.
 ## Exit
 
 A message beginning with `/afk` refreshes away mode and does not exit it.
-Any other real captain message ends away mode.
-Bias ambiguity toward exit because a present captain beats token savings.
+Any other real cap message ends away mode.
+Bias ambiguity toward exit because a present cap beats token savings.
 
 On return:
 

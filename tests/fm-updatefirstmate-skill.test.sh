@@ -2,7 +2,7 @@
 # Contract checks for the tracked updatefirstmate skill.
 #
 # The shared procedure must update the generic firstmate fleet first, then read
-# an optional local target list from data/captain.md. The list is intentionally
+# an optional local target list from data/cap.md. The list is intentionally
 # local and untracked: a missing section means there are no extra repositories.
 set -u
 
@@ -31,7 +31,7 @@ assert_not_contains() {
 # Interpret the documented local section shape. Only direct bullets in the
 # section name additional checkouts; the next level-two heading ends the set.
 read_optional_targets() {
-  local captain=$1 line in_set=0
+  local cap=$1 line in_set=0
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$line" = "## Personal infrastructure update set" ]; then
       in_set=1
@@ -43,7 +43,7 @@ read_optional_targets() {
     if [ "$in_set" -eq 1 ] && [[ "$line" == '- '* ]]; then
       printf '%s\n' "${line#- }"
     fi
-  done < "$captain"
+  done < "$cap"
 }
 
 test_generic_skill_source() {
@@ -54,7 +54,7 @@ test_generic_skill_source() {
   assert_contains "$before_targets" 'sbin/fm-update.sh' \
     "generic fleet update precedes optional local targets"
   # shellcheck disable=SC2016
-  assert_contains "$source" 'read the optional `## Personal infrastructure update set` section in local `data/captain.md`' \
+  assert_contains "$source" 'read the optional `## Personal infrastructure update set` section in local `data/cap.md`' \
     "skill documents the local target contract"
   assert_contains "$source" 'If the section is missing or has no entries, update no optional repositories.' \
     "skill defines the absent-target behavior"
@@ -68,9 +68,9 @@ test_generic_skill_source() {
 }
 
 test_configured_local_targets() {
-  local captain out expected
-  captain="$TMP_ROOT/configured-captain.md"
-  cat > "$captain" <<'EOF'
+  local cap out expected
+  cap="$TMP_ROOT/configured-cap.md"
+  cat > "$cap" <<'EOF'
 ## Preferences
 - Keep updates safe.
 
@@ -82,21 +82,21 @@ test_configured_local_targets() {
 - Be concise.
 EOF
 
-  out=$(read_optional_targets "$captain")
+  out=$(read_optional_targets "$cap")
   expected=$'/tmp/private-tooling-a\n/tmp/private-tooling-b'
   [ "$out" = "$expected" ] || fail "configured local targets were not read exactly"
   pass "configured local targets are selected from the documented section"
 }
 
 test_absent_local_targets() {
-  local captain out
-  captain="$TMP_ROOT/absent-captain.md"
-  cat > "$captain" <<'EOF'
+  local cap out
+  cap="$TMP_ROOT/absent-cap.md"
+  cat > "$cap" <<'EOF'
 ## Preferences
 - Keep updates safe.
 EOF
 
-  out=$(read_optional_targets "$captain")
+  out=$(read_optional_targets "$cap")
   [ -z "$out" ] || fail "missing local target section must select no repositories"
   pass "absent local target section selects no optional repositories"
 }

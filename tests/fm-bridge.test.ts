@@ -211,7 +211,7 @@ describe("render robustness: width + surrogate safety", () => {
 	const stress: FleetSnapshot = {
 		generatedAt: NOW,
 		pending: [{
-			cls: "CAPTAIN-BLOCKED",
+			cls: "CAP-BLOCKED",
 			clsRank: 4,
 			home: "really-long-project-name",
 			id: "a-very-long-task-id-exceeding-its-budget",

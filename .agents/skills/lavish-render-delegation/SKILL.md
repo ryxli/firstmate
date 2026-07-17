@@ -1,13 +1,13 @@
 ---
 name: lavish-render-delegation
-description: "Open a Lavish review artifact without tying up your own thread polling for feedback. Use whenever you (firstmate or a crewmate) are about to show the captain a Lavish artifact - plan, comparison, report, decision surface - and would otherwise run `lavish-axi poll`. A dedicated steward worker process holds the long-poll per session and relays the captain's feedback back to your pane, so your thread stays free."
+description: "Open a Lavish review artifact without tying up your own thread polling for feedback. Use whenever you (firstmate or a crewmate) are about to show the cap a Lavish artifact - plan, comparison, report, decision surface - and would otherwise run `lavish-axi poll`. A dedicated steward worker process holds the long-poll per session and relays the cap's feedback back to your pane, so your thread stays free."
 ---
 
 # lavish-render-delegation
 
 Opening a Lavish artifact must never tie up the opener's own thread on
 `lavish-axi poll`. `poll` is a *blocking* long-poll: it sits silent until the
-captain sends feedback or closes the session, which can be many minutes. If the
+cap sends feedback or closes the session, which can be many minutes. If the
 first mate runs it inline, its whole supervision loop is frozen for that whole
 time; if a crewmate runs it inline, that worker is frozen instead.
 
@@ -41,13 +41,13 @@ immediately. This is the standard way to open any Lavish artifact here.
    command. Read the feedback, apply the requested changes to the artifact, then
    acknowledge in the browser - non-blocking, write-only:
    ```sh
-   sbin/fm lavish-reply <file.html> "<message for the captain>"
+   sbin/fm lavish-reply <file.html> "<message for the cap>"
    ```
    `fm lavish-reply` POSTs to the write-only `agent-reply` endpoint and
    returns instantly; it NEVER polls, so it can never consume feedback or race
    the steward. The steward keeps the session open and relays the next round.
 
-5. **The captain closes the session** when done. The steward's poll returns
+5. **The cap closes the session** when done. The steward's poll returns
    `ended`, the steward exits and cleans up its own state. Nothing to stop.
 
 ## Recovery
@@ -64,17 +64,17 @@ session), and drops state for sessions that already ended.
 ## Why this matters
 
 - **The first mate never polls Lavish on its own thread.** Its supervision loop
-  stays responsive while the captain reviews at human pace.
+  stays responsive while the cap reviews at human pace.
 - **Feedback is durable.** Every round is appended to
   `state/lavish/<key>.feedback.md` before the wake, so a missed wake or a crash
-  never loses the captain's direction.
+  never loses the cap's direction.
 - **Replies can't race the poll.** The steward is the sole consumer of a
   session's feedback (via the CLI `poll`); replies are write-only HTTP. They run
   concurrently without clobbering each other.
 
 ## Review standards for visual artifacts
 
-Before showing the captain any reviewed visual artifact:
+Before showing the cap any reviewed visual artifact:
 
 - A collapsed section must remove its hidden content from layout; browser verification must prove zero closed height, positive open height, and no horizontal overflow.
 - Motion must be pinned, respect reduced motion, and fail open so content remains visible when JavaScript or the CDN fails; verify both fallback and animation paths in a real browser before review.

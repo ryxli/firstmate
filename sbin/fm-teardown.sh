@@ -6,7 +6,7 @@
 # REFUSES if the worktree holds work not on any remote. A fork counts as a
 # remote, so upstream-contribution PRs pushed to a fork satisfy this in any mode.
 # local-only projects additionally accept work merged into the local default
-# branch (firstmate performs that merge on the captain's approval) as a fallback
+# branch (firstmate performs that merge on the cap's approval) as a fallback
 # for the common case where there is no remote at all.
 # Scout tasks (kind=scout in meta) carve out of that check: their worktree is
 # declared scratch and the report at data/<task-id>/report.md is the work
@@ -19,7 +19,7 @@
 # prune the git worktree cleanly. A plain-clone home is removed with rm -rf.
 # Usage: fm-teardown.sh <task-id> [--force]
 #   --force skips the unpushed-work check for ordinary tasks and discards
-#   secondmate child work for kind=secondmate. Only use it when the captain has
+#   secondmate child work for kind=secondmate. Only use it when the cap has
 #   explicitly said to discard the work.
 set -eu
 
@@ -427,7 +427,7 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
     REPORT="$DATA/$ID/report.md"
     if [ ! -f "$REPORT" ]; then
       echo "REFUSED: scout task $ID has no report at $REPORT." >&2
-      echo "The report is the work product. Have the crewmate write it (or get the captain's explicit OK to discard, then --force)." >&2
+      echo "The report is the work product. Have the crewmate write it (or get the cap's explicit OK to discard, then --force)." >&2
       exit 1
     fi
   else
@@ -440,7 +440,7 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
     if [ -n "$unpushed" ] && [ "$MODE" = local-only ]; then
       # local-only ships have no remote in the common case, so the "on a remote"
       # test above is expected to be non-empty. The work is safe once it is merged
-      # into the local default branch (firstmate does that merge on the captain's
+      # into the local default branch (firstmate does that merge on the cap's
       # approval). Refuse until then.
       DEFAULT=$(default_branch) || { echo "REFUSED: cannot determine default branch for $PROJ; expected origin/HEAD, main, or master." >&2; exit 1; }
       unmerged=$(git -C "$WT" log --oneline HEAD --not "$DEFAULT" -- 2>/dev/null | head -5 || true)
@@ -448,14 +448,14 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
         echo "REFUSED: local-only worktree $WT has work not yet merged into $DEFAULT and not on any remote." >&2
         [ -n "$dirty" ] && echo "uncommitted changes present" >&2
         [ -n "$unmerged" ] && printf 'commits not yet on %s:\n%s\n' "$DEFAULT" "$unmerged" >&2
-        echo "Merge the branch into local $DEFAULT first (sbin/fm-merge-local.sh after the captain approves), or push to a fork/remote, or get the captain's explicit OK to discard, then --force." >&2
+        echo "Merge the branch into local $DEFAULT first (sbin/fm-merge-local.sh after the cap approves), or push to a fork/remote, or get the cap's explicit OK to discard, then --force." >&2
         exit 1
       fi
     elif [ -n "$dirty" ] || [ -n "$unpushed" ]; then
       echo "REFUSED: worktree $WT has work not on any remote." >&2
       [ -n "$dirty" ] && echo "uncommitted changes present" >&2
       [ -n "$unpushed" ] && printf 'unpushed commits:\n%s\n' "$unpushed" >&2
-      echo "Push the branch (or get the captain's explicit OK to discard, then --force)." >&2
+      echo "Push the branch (or get the cap's explicit OK to discard, then --force)." >&2
       exit 1
     fi
   fi

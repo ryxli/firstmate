@@ -13,15 +13,15 @@
 #   --secondmate writes a persistent secondmate charter. The project list
 #   is cloned into the secondmate home, while the natural-language scope
 #   tells the main firstmate when to route work there; routine churn stays in its own home;
-#   only captain-relevant escalations reach the main firstmate through the fleet peer bus.
+#   only cap-relevant escalations reach the main firstmate through the fleet peer bus.
 #   Set FM_SECONDMATE_CHARTER='<charter>' to fill the charter text.
 #   Set FM_SECONDMATE_SCOPE='<scope>' to write a routing scope distinct from the charter text.
 # For ship tasks, the definition of done is shaped by the project's delivery mode
 # (data/projects.md via fm project-mode; see AGENTS.md section 6):
-#   direct-PR    implement, focused review + tests, push + open PR via gh-axi -> captain merge (default)
+#   direct-PR    implement, focused review + tests, push + open PR via gh-axi -> cap merge (default)
 #   direct-main  implement, focused review + tests, guarded non-force push to origin/main, no PR
 #   local-only   implement on branch, stop and report "ready in branch" (no push/PR);
-#                firstmate reviews, captain approves, firstmate merges to local main
+#                firstmate reviews, cap approves, firstmate merges to local main
 # Scout tasks ignore mode - their deliverable is a report, not a merge.
 # Ship tasks include a project-memory section so durable project-intrinsic
 # learnings can be committed to AGENTS.md through the project's delivery path.
@@ -214,7 +214,7 @@ Your local \`data/\`, \`state/\`, \`config/\`, and \`projects/\` directories are
 The projects above are local clones for work you supervise; they are not an exclusive ownership claim.
 OMP injects the applicable \`AGENTS.md\` at session start.
 Do not tool-read it during ordinary boot or recovery.
-At startup, read only this charter, compact \`data/captain.md\`, \`data/backlog.md:1-20\`, the local \`state/\` listing plus active \`.meta\` and \`.status\` files, pending peer messages, and the current whiteboard diff.
+At startup, read only this charter, compact \`data/cap.md\`, \`data/backlog.md:1-20\`, the local \`state/\` listing plus active \`.meta\` and \`.status\` files, pending peer messages, and the current whiteboard diff.
 Use selectors and persisted artifacts instead of whole-file evidence reads or broad directory searches.
 Delegate investigation after three primary-thread tool calls unless the next call conclusively closes the decision.
 Delegate project work to your own crewmates with the normal firstmate lifecycle: brief, spawn, direct crewmate status-file reporting, \`fm-send.sh\` pane steering, teardown, and recovery.
@@ -232,8 +232,8 @@ $HOUSE_TOOLING_BLOCK
 
 # Escalation to main firstmate
 Handle routine work yourself.
-Escalate only captain-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
-Use the agent tool peer_send when available, or type /peer send $escalation_slug "{state}: {one short line}" from the composer, addressed to $escalation_name; set priority only for captain-blocking decisions, failures, or work ready for review.
+Escalate only cap-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
+Use the agent tool peer_send when available, or type /peer send $escalation_slug "{state}: {one short line}" from the composer, addressed to $escalation_name; set priority only for cap-blocking decisions, failures, or work ready for review.
 States: needs-decision, blocked, done, failed.
 Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
 
@@ -414,10 +414,10 @@ $HOUSE_TOOLING_BLOCK
 
 # Escalation to main firstmate
 Handle routine work yourself.
-Escalate only captain-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
-Use the agent tool peer_send when available, or type /peer send $SUPERVISOR_ID "{state}: {one short line}" from the composer; set priority only for captain-blocking decisions, failures, or work ready for review.
+Escalate only cap-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
+Use the agent tool peer_send when available, or type /peer send $SUPERVISOR_ID "{state}: {one short line}" from the composer; set priority only for cap-blocking decisions, failures, or work ready for review.
 States: needs-decision, blocked, done, failed.
-Use this only for material phase changes, a captain decision, a real blocker, a failure, or work ready for review.
+Use this only for material phase changes, a cap decision, a real blocker, a failure, or work ready for review.
 Derive decisions from evidence before escalating: for a config, parameter, or design choice, first consult relevant papers/sources, project docs, and prior fleet research (other mates' worktrees, reports, decision journals). If the evidence points to a clearly better option, take it and justify it - escalate a decision ONLY for a genuine toss-up between equally good options or a destructive/irreversible/live-capital-risk action. Never punt a solvable decision upward.
 Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
 
@@ -500,7 +500,7 @@ The task is complete only when committed on your branch \`fm/$ID\`. Do NOT push,
 Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass; fix anything you broke.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
 When it is implemented and committed, append \`done: ready in branch fm/$ID; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
-Firstmate then reviews your branch diff, the captain approves, and firstmate merges it into local \`main\`.
+Firstmate then reviews your branch diff, the cap approves, and firstmate merges it into local \`main\`.
 EOF
 )
     ;;
@@ -509,7 +509,7 @@ EOF
     RULE1='1. Never open a PR, never force-push, and never push any commit except the reviewed `fm/'"$ID"'` head to `origin/main` after every direct-main delivery check below passes.'
     DOD=$(cat <<EOF
 # Definition of done
-This project ships **direct-main**: the captain has authorized this project to land by guarded direct push to \`origin/main\`. Do NOT open a PR under any circumstances. Do NOT force-push.
+This project ships **direct-main**: the cap has authorized this project to land by guarded direct push to \`origin/main\`. Do NOT open a PR under any circumstances. Do NOT force-push.
 The task is complete only when your \`fm/$ID\` branch is clean, reviewed by you, committed, delivered as the exact remote \`origin/main\` SHA, and fetch-back verified. The \`+yolo\` flag never relaxes these safeguards.
 Before delivery, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
 Deliver with exactly one writer and a fresh remote proof. Acquire the shared delivery lock, fetch \`origin/main\` immediately before the ancestry check, prove that fetched \`origin/main\` is an ancestor of your intended head, push that exact head normally to \`origin/main\`, fetch back, and verify the remote SHA:
@@ -546,7 +546,7 @@ The task is complete only when committed on your branch.
 Before you push, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
 When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
 Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
-The captain reviews and merges the PR; firstmate relays it.
+The cap reviews and merges the PR; firstmate relays it.
 EOF
 )
     ;;

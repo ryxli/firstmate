@@ -41,7 +41,7 @@ describe("fm-context-weight", () => {
 		const inputs = {
 			"AGENTS.md": "# Agent\nshared context\n## Rules\nkeep it small\n",
 			".agents/skills/alpha/SKILL.md": "# Alpha\nskill context\n",
-			"data/captain.md": "# Preferences\ncaptain context\n",
+			"data/cap.md": "# Preferences\ncaptain context\n",
 			"data/mate/brief.md": "You are a secondmate: supervise.\n\n# Charter\ncharter context\n",
 		};
 		for (const [path, text] of Object.entries(inputs)) {
@@ -70,7 +70,7 @@ describe("fm-context-weight", () => {
 		expect(stdout).toContain("tokenizer\tchars/4\n");
 		expect(stdout).toContain("\tAGENTS.md\n");
 		expect(stdout).toContain("\t.agents/skills/alpha/SKILL.md\n");
-		expect(stdout).toContain("\tdata/captain.md\n");
+		expect(stdout).toContain("\tdata/cap.md\n");
 		expect(stdout).toContain("\tdata/mate/brief.md\n");
 		expect(stdout).not.toContain("data/ordinary/brief.md");
 		expect(stdout).toContain("\tAGENTS.md\tAgent\n");

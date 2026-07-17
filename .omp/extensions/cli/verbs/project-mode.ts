@@ -11,13 +11,13 @@
 //   - <name> [<mode> +yolo] - <desc> (added <date>)    -> <mode> on
 //
 // mode = how a finished change reaches main:
-//   direct-PR    push + PR via gh-axi, focused review + tests, no pipeline -> captain merge (default)
-//   direct-main  captain-authorized project mode: reviewed clean branch -> guarded direct push to origin/main, no PR
+//   direct-PR    push + PR via gh-axi, focused review + tests, no pipeline -> cap merge (default)
+//   direct-main  cap-authorized project mode: reviewed clean branch -> guarded direct push to origin/main, no PR
 //   no-mistakes  legacy registry alias; canonicalized to direct-PR on output, so
 //                consumers only ever see direct-PR|direct-main|local-only
-//   local-only   local branch, no remote/PR -> firstmate review -> captain approve -> local merge
+//   local-only   local branch, no remote/PR -> firstmate review -> cap approve -> local merge
 // yolo (orthogonal) = when on, firstmate makes approval decisions itself (PR merges,
-//   ask-user findings, local-only merge approval) without checking the captain - except
+//   ask-user findings, local-only merge approval) without checking the cap - except
 //   anything destructive/irreversible/security-sensitive, which still escalates.
 //
 // An unknown/missing project or unknown mode falls back to "direct-PR off" and warns

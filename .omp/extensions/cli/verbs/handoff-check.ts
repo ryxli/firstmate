@@ -1,4 +1,4 @@
-// fm verb: handoff-check - cross-check captain handoff records for overlap.
+// fm verb: handoff-check - cross-check cap handoff records for overlap.
 // Ported verbatim (behavior-preserving) from the former sbin/fm handoff-check.
 // Verifies every pending/active row in data/handoff/current-actions.md has a
 // corresponding, sufficiently-overlapping entry in data/handoff/firstmate-readback.md
@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/+$/, "");
 
 const IGNORED_WORDS = new Set([
-	"a", "an", "and", "are", "as", "at", "be", "between", "by", "captain",
+	"a", "an", "and", "are", "as", "at", "be", "between", "by", "cap",
 	"conversation", "do", "for", "from", "in", "is", "it", "its", "of", "on",
 	"or", "that", "the", "this", "to", "with", "work", "your",
 ]);
@@ -234,6 +234,6 @@ async function run(_argv: string[]): Promise<number> {
 
 export default {
 	name: "handoff-check",
-	describe: "Cross-check captain handoff records for sufficient token overlap.",
+	describe: "Cross-check cap handoff records for sufficient token overlap.",
 	run,
 };

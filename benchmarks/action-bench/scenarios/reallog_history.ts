@@ -10,9 +10,9 @@
 //                          clean vs open-blocker.
 //
 //   fm-status-escalation   source class: state/*.status (crewmate-appended "<state>: <note>"
-//                          lines). The supervisor must escalate captain-relevant lines and
+//                          lines). The supervisor must escalate cap-relevant lines and
 //                          suppress internal chatter, exactly per sbin/fm-classify-status.sh.
-//                          Over-escalating spams the captain; under-escalating drops a real
+//                          Over-escalating spams the cap; under-escalating drops a real
 //                          blocker/done/PR-ready signal.
 //
 //   fm-turn-board-audit    source class: session history (the whiteboard turn loop, per
@@ -38,20 +38,20 @@ const DONE_ENTRIES: Record<string, string> = {
 	"task-alpha": "landed via review; verified: focused tests, full behavior suite, integrity gates all green.",
 	"task-bravo": "labels polished + a stale test realigned; landed on the default branch, verified green, torn down clean.",
 	"task-charlie":
-		"reset the review gate base clean; registration verified. SEPARATE remaining blocker escalated to captain: the headless review agent fails authentication, so rebase and review cannot complete.",
+		"reset the review gate base clean; registration verified. SEPARATE remaining blocker escalated to cap: the headless review agent fails authentication, so rebase and review cannot complete.",
 	"task-delta": "baseline-vs-new A/B bench adopted on all deterministic gates; verified green and landed.",
 	"task-echo": "pipeline reworked and shipped; verified. Remaining blocker: needs credential refresh before the nightly run can start.",
 	"task-foxtrot": "docs + wrapper cleanup only; verified with shellcheck and the focused test, landed clean.",
 };
 // A Done entry is OPEN if its note carries any blocker marker; CLEAN otherwise.
-const BLOCKER_MARKS = ["remaining blocker", "escalated to captain", "cannot complete", "needs credential", "needs auth", "blocked-by"];
+const BLOCKER_MARKS = ["remaining blocker", "escalated to cap", "cannot complete", "needs credential", "needs auth", "blocked-by"];
 const DONE_ACTIONS = ["clean", "open-blocker"];
 const DONE_RULES =
 	"# Scan finished tasks for open blockers\n" +
 	"Each done/<slug>.txt is the completion note of a task already marked done. Classify EVERY entry as:\n" +
 	"  clean         - fully landed AND verified, with no open thread left behind.\n" +
 	"  open-blocker  - marked done but the note still records an UNRESOLVED blocker: a remaining\n" +
-	"                  blocker, something escalated to the captain, work that cannot complete, or a\n" +
+	"                  blocker, something escalated to the cap, work that cannot complete, or a\n" +
 	"                  dependency it still needs (credential/auth/blocked-by).\n" +
 	"Write blocker_scan.json as { \"<slug>\": \"clean\"|\"open-blocker\", ... } covering every entry exactly once.\n";
 
@@ -120,12 +120,12 @@ function dbOracle(d: string): Trace {
 }
 
 // ===========================================================================
-// fm-status-escalation : captain-relevant vs internal status lines (state-status)
+// fm-status-escalation : cap-relevant vs internal status lines (state-status)
 // ===========================================================================
 // Generic crewmate status lines. The classifier mirrors sbin/fm-classify-status.sh:
 // a leading ISO timestamp is ignored; a `working` prefix is internal; a
 // done/blocked/failed/needs-decision prefix OR a word-bounded PR ready / checks green
-// / ready in branch / merged phrase is captain; everything else is internal.
+// / ready in branch / merged phrase is cap; everything else is internal.
 const STATUS_LINES: Record<string, string> = {
 	s0: "working: setup complete, starting the implementation",
 	s1: "done: ready in branch feature-slug",
@@ -138,23 +138,23 @@ const STATUS_LINES: Record<string, string> = {
 	s8: "PR ready for review",
 	s9: "reading through the scenario files",
 };
-const STATUS_ACTIONS = ["captain", "internal"];
+const STATUS_ACTIONS = ["cap", "internal"];
 const STATUS_RULES =
 	"# Escalate crewmate status lines\n" +
 	"Each line in status_lines.txt is `<id> <status text>`. Classify each id as:\n" +
-	"  captain   - the supervisor must surface it: the text (after any leading ISO timestamp) begins\n" +
+	"  cap   - the supervisor must surface it: the text (after any leading ISO timestamp) begins\n" +
 	"              with done:, blocked:, failed:, or needs-decision:, OR it contains the phrase\n" +
 	"              'PR ready', 'checks green', 'ready in branch', or 'merged'.\n" +
 	"  internal  - routine progress the supervisor suppresses: a 'working' prefix, or anything else.\n" +
-	"Write escalation.json as { \"<id>\": \"captain\"|\"internal\", ... } covering every id exactly once.\n";
+	"Write escalation.json as { \"<id>\": \"cap\"|\"internal\", ... } covering every id exactly once.\n";
 
 const STATUS_PHRASE = /(^|[^a-z])(pr ready|checks green|ready in branch|merged)([^a-z]|$)/;
 
 function seExpected(text: string): string {
 	const line = text.replace(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T\S+\s+/, "").toLowerCase();
 	if (/^working([\s:])/.test(line)) return "internal";
-	if (/^(done|blocked|failed|needs-decision):/.test(line)) return "captain";
-	if (STATUS_PHRASE.test(line)) return "captain";
+	if (/^(done|blocked|failed|needs-decision):/.test(line)) return "cap";
+	if (STATUS_PHRASE.test(line)) return "cap";
 	return "internal";
 }
 
@@ -318,12 +318,12 @@ export const SCENARIOS: Scenario[] = [
 	{
 		id: "fm-status-escalation",
 		difficulty: "medium",
-		task: "status_lines.txt holds several crewmate status lines. Classify each per STATUS_RULES.md into captain vs internal and write escalation.json. Then stop.",
+		task: "status_lines.txt holds several crewmate status lines. Classify each per STATUS_RULES.md into cap vs internal and write escalation.json. Then stop.",
 		setup: seSetup,
 		goal: seGoal,
 		procedural: seProc,
 		oracle: seOracle,
-		leakMarkers: ['"s0": "internal"', '"s1": "captain"', '"s8": "captain"'],
+		leakMarkers: ['"s0": "internal"', '"s1": "cap"', '"s8": "cap"'],
 		history: { sourceClass: "state-status" },
 	},
 	{

@@ -75,8 +75,8 @@ These are facts that help any agent working in the repo and should travel with t
 This knowledge lives in the project's committed `AGENTS.md`.
 A project's `AGENTS.md` is the real file; `CLAUDE.md` is a symlink to it.
 
-**Fleet and captain-private knowledge** belongs to firstmate.
-Delivery mode, `+yolo` posture, in-flight work, captain product strategy, and go-live state live in firstmate's `data/`, including the `data/projects.md` registry line and any planning docs.
+**Fleet and cap-private knowledge** belongs to firstmate.
+Delivery mode, `+yolo` posture, in-flight work, cap product strategy, and go-live state live in firstmate's `data/`, including the `data/projects.md` registry line and any planning docs.
 Do not put that knowledge in the project.
 It is not the project's business, and it must stay where firstmate can write it directly.
 
@@ -92,21 +92,21 @@ Do not eagerly backfill every project.
 
 **Delivery mode (choose at add).** `<mode>` is how a finished change reaches `main`, picked per project when you add it and recorded in the registry line (`fm project-mode` parses it; `fm-spawn` records it into each task's meta):
 
-- `direct-PR` (default; `[...]` may be omitted) - push + open a PR via `gh-axi`, backed by focused review and tests, with no separate pipeline -> captain merge.
-- `local-only` - local branch, no remote, no PR; firstmate reviews the diff, the captain approves, firstmate merges to local `main` (section 7).
+- `direct-PR` (default; `[...]` may be omitted) - push + open a PR via `gh-axi`, backed by focused review and tests, with no separate pipeline -> cap merge.
+- `local-only` - local branch, no remote, no PR; firstmate reviews the diff, the cap approves, firstmate merges to local `main` (section 7).
 - `no-mistakes` - legacy alias retained so old registry lines still parse; treated as `direct-PR`, and the no-mistakes pipeline is no longer invoked.
 
-Orthogonal to mode is an optional `+yolo` flag (`[direct-PR +yolo]`), default off and **not recommended**: with `yolo` on, firstmate makes the approval decisions itself instead of asking the captain (section 7).
-When the captain adds a project without saying, default to `direct-PR` with yolo off; only set `local-only` or `+yolo` on the captain's explicit say-so.
+Orthogonal to mode is an optional `+yolo` flag (`[direct-PR +yolo]`), default off and **not recommended**: with `yolo` on, firstmate makes the approval decisions itself instead of asking the cap (section 7).
+When the cap adds a project without saying, default to `direct-PR` with yolo off; only set `local-only` or `+yolo` on the cap's explicit say-so.
 
 **Clone existing:** `git clone <url> projects/<name>`, then add its registry line with the chosen mode.
 
 **Create new:** a `direct-PR` project needs a GitHub repo first (it pushes to an `origin` remote); a `local-only` project needs no remote at all - a purely local git repo is fine.
-Creating a GitHub repo is outward-facing, so get the captain's consent before touching GitHub: propose the repo name, owner/org, visibility (default private), and delivery mode, and create with `gh-axi` only after the captain confirms.
+Creating a GitHub repo is outward-facing, so get the cap's consent before touching GitHub: propose the repo name, owner/org, visibility (default private), and delivery mode, and create with `gh-axi` only after the cap confirms.
 Then clone it into `projects/<name>`.
 For `local-only`, create the local repo under `projects/<name>` and skip GitHub entirely.
 
-There is no separate validation pipeline to install or run: a change reaches `main` through focused review and tests plus the captain's merge.
+There is no separate validation pipeline to install or run: a change reaches `main` through focused review and tests plus the cap's merge.
 
 ### Promotion path (mate knowledge to canonical home)
 
@@ -121,7 +121,7 @@ Tracked landings ride the normal main-only commit flow and reach the other lapto
 ### Intake
 
 **Resolve the project first.**
-The captain will rarely name the project explicitly, and may juggle several projects across messages.
+The cap will rarely name the project explicitly, and may juggle several projects across messages.
 Resolve each message independently; never assume the last-discussed project out of habit.
 Use these signals in order:
 
@@ -138,19 +138,19 @@ A project may appear in several `projects:` clone lists, so choose the secondmat
 If the resolved project is `local-only`, keep the work with the main firstmate even when a secondmate scope sounds relevant.
 If a secondmate's scope fits, steer that secondmate with one concise instruction via `sbin/fm-send.sh fm-<id> '<work request>'` and let it run the normal lifecycle inside its own home.
 The bare `fm-<id>` target resolves through this home's `state/<id>.meta`; pass a pane id directly only when intentionally targeting a pane outside this firstmate home.
-Do not spawn a direct crewmate for work that belongs to a secondmate scope unless the secondmate is blocked or the captain explicitly redirects it.
-If no secondmate scope fits, proceed in the main firstmate or create a new secondmate with the captain when that domain should become persistent.
+Do not spawn a direct crewmate for work that belongs to a secondmate scope unless the secondmate is blocked or the cap explicitly redirects it.
+If no secondmate scope fits, proceed in the main firstmate or create a new secondmate with the cap when that domain should become persistent.
 When you create a new secondmate, hand its in-scope queued items off from the main backlog into its home with `sbin/fm backlog-handoff` so it owns its domain's queue from day one (section 6).
 
 Then classify the shape:
 
 - **Ship** (the default): the deliverable is a change to the project. It ships through the project's delivery mode: `direct-PR` or `local-only`.
-- **Scout:** the deliverable is knowledge - an investigation, a plan, a bug reproduction, an audit. It ends in a report at `data/<id>/report.md`, never a PR. When the captain asks "what's wrong", "how would we", or "find out why" about a project, that is a scout task; dispatch it instead of doing the digging yourself.
+- **Scout:** the deliverable is knowledge - an investigation, a plan, a bug reproduction, an audit. It ends in a report at `data/<id>/report.md`, never a PR. When the cap asks "what's wrong", "how would we", or "find out why" about a project, that is a scout task; dispatch it instead of doing the digging yourself.
 
 Then classify readiness:
 
 - **Dispatchable:** no overlap with in-flight tasks. Dispatch immediately. There is no concurrency cap.
-- **Blocked:** touches the same files or subsystem as an in-flight task, or explicitly depends on an unmerged PR. Record it in `data/backlog.md` with `blocked-by: <id>` and tell the captain what work is waiting and why. Scout tasks are read-mostly and almost never block on anything.
+- **Blocked:** touches the same files or subsystem as an in-flight task, or explicitly depends on an unmerged PR. Record it in `data/backlog.md` with `blocked-by: <id>` and tell the cap what work is waiting and why. Scout tasks are read-mostly and almost never block on anything.
 
 Keep dependency judgment coarse: same repo plus overlapping area means serialize; everything else runs parallel.
 If work overlaps, have the crewmate rebase before review or merge.
@@ -193,7 +193,7 @@ Before raw typing into a human shell pane, read its prompt for a pending draft; 
 Covered by section 8.
 Steer a crewmate only with short single lines via `sbin/fm-send.sh`; anything long belongs in a file the crewmate can read.
 Steer a secondmate the same way.
-Its charter escalates per the peer bus discipline in the lane-governance section below: captain-relevant outcomes only, routine internal churn never touches the supervisor channel.
+Its charter escalates per the peer bus discipline in the lane-governance section below: cap-relevant outcomes only, routine internal churn never touches the supervisor channel.
 A successful steer send proves only queued delivery, not that the target consumed or acted on it.
 For time-sensitive steers, peek promptly and distinguish sent, queued, observed, and acted-on; nudge once or use the existing stuck-crewmate ladder only when the queued instruction is urgent, rather than duplicating steers or interrupting productive work.
 
@@ -202,20 +202,20 @@ For time-sensitive steers, peek promptly and distinguish sent, queued, observed,
 A ship task's path from `done` to landed on `main` is set by the project's `mode` (recorded in meta; section 6); `yolo` decides who approves. The PR ready / Ship teardown stages below apply per mode:
 
 - **direct-PR** (default) - the crewmate does focused review and tests, pushes, and opens the PR itself (its brief says so) and reports `done: PR <url>`. Firstmate runs `fm-pr-check` and relays the PR. Teardown uses the normal pushed-branch check.
-- **local-only** - no remote, no PR. The crewmate stops at `done: ready in branch fm/<id>`. Review the diff with `sbin/fm review-diff <id>`, relay a one-paragraph summary to the captain, and on approval run `sbin/fm-merge-local.sh <id>` to fast-forward local `main` (it refuses anything but a clean fast-forward - if it does, have the crewmate rebase). No `fm-pr-check`. Then teardown, whose safety check requires the branch already merged into local `main`, OR the work pushed to any remote (a fork counts - relevant for upstream-contribution PRs on a local-only-registered project).
+- **local-only** - no remote, no PR. The crewmate stops at `done: ready in branch fm/<id>`. Review the diff with `sbin/fm review-diff <id>`, relay a one-paragraph summary to the cap, and on approval run `sbin/fm-merge-local.sh <id>` to fast-forward local `main` (it refuses anything but a clean fast-forward - if it does, have the crewmate rebase). No `fm-pr-check`. Then teardown, whose safety check requires the branch already merged into local `main`, OR the work pushed to any remote (a fork counts - relevant for upstream-contribution PRs on a local-only-registered project).
 - **no-mistakes** - legacy alias; treated exactly as **direct-PR** (no pipeline is run).
 
 When reviewing any crewmate branch diff, use `sbin/fm review-diff <id>` rather than `git diff <default>...branch` directly.
 Pooled clones keep their local default refs frozen at clone time and can lag `origin`; the helper always compares against the authoritative base.
 
-**yolo (orthogonal).** With `yolo=off` (default) every approval is the captain's: ask-user findings, PR merges, the local-only merge. With `yolo=on`, firstmate makes those calls itself without asking - resolve ask-user findings on your judgment, and run `gh-axi pr merge` / `sbin/fm-merge-local.sh` once the work is green/approved - EXCEPT anything destructive, irreversible, or security-sensitive, which still escalates to the captain. Never merge a red PR even under yolo. After any merge you perform without asking the captain, post a one-line "merged <full PR URL or local main> after checks passed" FYI so the captain keeps a trail.
+**yolo (orthogonal).** With `yolo=off` (default) every approval is the cap's: ask-user findings, PR merges, the local-only merge. With `yolo=on`, firstmate makes those calls itself without asking - resolve ask-user findings on your judgment, and run `gh-axi pr merge` / `sbin/fm-merge-local.sh` once the work is green/approved - EXCEPT anything destructive, irreversible, or security-sensitive, which still escalates to the cap. Never merge a red PR even under yolo. After any merge you perform without asking the cap, post a one-line "merged <full PR URL or local main> after checks passed" FYI so the cap keeps a trail.
 
 ### Validate
 
 There is no separate firstmate-triggered validation pipeline.
 A ship crewmate runs the project's own focused checks (the tests and lints it already uses) and reviews its own diff before it reports `done` - for `direct-PR` before opening the PR, for `local-only` before reporting `ready in branch`.
 Firstmate's validation is review, not a pipeline: for `direct-PR`, read the opened PR and its CI if the project runs CI; for `local-only`, read the branch diff with `sbin/fm review-diff <id>`.
-Relay anything that needs a decision to the captain unless `yolo=on` permits routine approval on your judgment.
+Relay anything that needs a decision to the cap unless `yolo=on` permits routine approval on your judgment.
 Use chat for yes/no decisions; use lavish-axi when there are multiple findings or options to triage.
 
 **Repeated-miss completion gate.** When a change has missed the same semantic target more than once, normal focused checks are not enough to call it finished.
@@ -230,10 +230,10 @@ Review and evidence safeguards are owned by AGENTS.md; before parallel lane work
 
 For PR-based ship tasks (`direct-PR`), the crewmate reports `done: PR <url>` after opening the PR, adding `checks green` once the project's CI (if any) is green.
 Run `sbin/fm pr-check <id> <PR url>` - it records `pr=` in the task's meta and registers a merge check for the supervision extension's poll timer.
-Tell the captain: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the captain's terminal makes a full URL clickable) and a one-paragraph summary.
+Tell the cap: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the cap's terminal makes a full URL clickable) and a one-paragraph summary.
 (The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when firstmate should wake, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
 
-If the captain says "merge it", run `gh-axi pr merge` yourself; that instruction is the explicit approval. If `yolo=on`, merge a green/approved PR yourself and post the required FYI.
+If the cap says "merge it", run `gh-axi pr merge` yourself; that instruction is the explicit approval. If `yolo=on`, merge a green/approved PR yourself and post the required FYI.
 
 ### Ship teardown (only after merge is confirmed)
 
@@ -251,7 +251,7 @@ Re-evaluate the queue and dispatch only queued work whose blockers are gone and 
 
 A secondmate is persistent by default.
 An empty queue is healthy and does not trigger teardown.
-Run `sbin/fm-teardown.sh <id>` for `kind=secondmate` only when the captain or main firstmate explicitly decides to retire that persistent supervisor.
+Run `sbin/fm-teardown.sh <id>` for `kind=secondmate` only when the cap or main firstmate explicitly decides to retire that persistent supervisor.
 The safety check is the secondmate's own home: teardown refuses while its `state/*.meta` contains in-flight work.
 When it is safe, teardown closes the direct herdr pane, removes the `data/secondmates.md` route, clears the main home metadata, and removes the retired secondmate home.
 For herdr-managed homes (those with a `workspace:` field in `data/secondmates.md`), teardown calls `herdr worktree remove --workspace <id>` to remove the worktree and release the slot; a plain-clone home with no workspace field is removed directly with `rm -rf`.
@@ -263,11 +263,11 @@ With `--force`, teardown is the explicit discard path: it closes child herdr pan
 A scout task follows Intake, Spawn, and Supervise exactly as above - scaffold the brief with `sbin/fm-brief.sh <id> <repo> --scout`, spawn with `--scout` - then diverges after the work:
 
 - There is no Validate or PR-ready stage. When the crewmate's status says `done`, read `data/<id>/report.md`.
-- Relay the findings to the captain: plain chat for a focused answer, lavish-axi when the report has structure worth a visual (multiple findings, options, a plan).
+- Relay the findings to the cap: plain chat for a focused answer, lavish-axi when the report has structure worth a visual (multiple findings, options, a plan).
 - Tear down immediately - no merge gate. `sbin/fm-teardown.sh` allows a scout worktree's scratch commits and dirty files once the report exists; if the report is missing, it refuses, because the findings are the work product.
 - Record it in Done with the report path instead of a PR link using `tasks-axi done` when compatible tasks-axi is available, otherwise hand-edit `data/backlog.md` and keep Done to the 10 most recent, then re-evaluate the queue and dispatch only queued work whose blockers are gone and whose time/date gate, if any, has arrived.
 
-**Promotion.** When a scout's findings reveal shippable work (a reproduced bug with a clear fix) and the captain wants it shipped, promote the task in place instead of respawning: run `sbin/fm promote <id>` (flips `kind=` to ship in meta, restoring teardown's full protection), then send the crewmate its ship instructions - inventory scratch state, reset to a clean default-branch base, carry over only intended fix changes, create branch `fm/<id>`, implement, and report `done` according to the project's delivery mode.
+**Promotion.** When a scout's findings reveal shippable work (a reproduced bug with a clear fix) and the cap wants it shipped, promote the task in place instead of respawning: run `sbin/fm promote <id>` (flips `kind=` to ship in meta, restoring teardown's full protection), then send the crewmate its ship instructions - inventory scratch state, reset to a clean default-branch base, carry over only intended fix changes, create branch `fm/<id>`, implement, and report `done` according to the project's delivery mode.
 The crewmate keeps its worktree, loaded context, and repro, but the ship branch must start from a clean base with only intended changes; scratch commits and debug edits from the scout phase never ride along.
 The repro becomes the regression test.
 From there the task is an ordinary ship task through its mode-specific validation, PR or local merge, and Teardown.
@@ -351,16 +351,16 @@ Relocated verbatim from AGENTS.md. This binds every spawned lane (crewmate, seco
 
 ### Whiteboard operator-view contract
 
-Every whiteboard begins with a captain-first band, before any agent detail; the board is not compliant without it.
+Every whiteboard begins with a cap-first band, before any agent detail; the board is not compliant without it.
 
 ```
 ## OPERATOR VIEW
 🟢|🟡|🔴|🔵 <one plain-language line per active lane>   (hard cap: 8 lines)
-⚠ Needs captain: <decision or "nothing">
+⚠ Needs cap: <decision or "nothing">
 → For supervisor: <handoff/ask or "nothing">
 ```
 
-Rules for the operator view: plain language a non-reader can skim in ten seconds; one status glyph per line (🟢 healthy, 🟡 degraded/waiting, 🔴 broken/blocked, 🔵 in progress); no commit SHAs, file paths, or links unless a pending decision needs one; the "Needs captain" and "For supervisor" lines are mandatory even when the answer is "nothing".
+Rules for the operator view: plain language a non-reader can skim in ten seconds; one status glyph per line (🟢 healthy, 🟡 degraded/waiting, 🔴 broken/blocked, 🔵 in progress); no commit SHAs, file paths, or links unless a pending decision needs one; the "Needs cap" and "For supervisor" lines are mandatory even when the answer is "nothing".
 Everything below the operator view (Working / Evidence / Preserved / Reply sections, SHAs, evidence chains, exclusion rules) remains unconstrained agent detail - move precision down there, never delete it.
 The operator view is a verified deliverable: supervisors check it for presence, currency, and the line cap on their ticks and steer when it degrades, the same way artifact claims are verified.
 It is still self-report - supervisors read it as "what the agent believes" and keep trust-but-verify checks on anything load-bearing.
@@ -373,7 +373,7 @@ Prevention: every board claim that says reconcile clean, no divergence, armed sa
 ### Peer bus discipline
 
 This extends the secondmate charter's fleet-peer-bus escalation rule above.
-`done`, `blocked`, `needs-decision`, `failed`, and a material phase change are captain-relevant outcomes; the whiteboard records their state for the fleet.
+`done`, `blocked`, `needs-decision`, `failed`, and a material phase change are cap-relevant outcomes; the whiteboard records their state for the fleet.
 The fleet peer bus is not a second state channel.
 It carries only the action needed when a board update cannot itself cause the recipient to act.
 
@@ -429,7 +429,7 @@ No section has a silent or null move: when no listed move obviously applies, the
    Maximize wall-clock throughput: when independent critical-path items exist and worker slots are free, spawn them in parallel in the same turn - design acceptance, test coverage, breaker repair, push/deploy, and live verification parallelize wherever dependencies permit.
    Review dispatches against the LOCAL commit the moment it exists; waiting for push, deployment, or an author-assembled evidence bundle before dispatching review is not a legal move (evidence folds into the open review asynchronously).
    Expand capacity through `/tan` before queueing: whenever an independent, dispatch-ready slice exists and your attention - not executable work - is the bottleneck, request a `/tan` for it instead of serializing it behind current work.
-   Mechanics: `/tan` is a pane command that only the supervisor (or captain) can type and submit into your pane - you cannot self-spawn one; publish a "tan requested: <bounded slice>" board line and the supervisor executes the spawn.
+   Mechanics: `/tan` is a pane command that only the supervisor (or cap) can type and submit into your pane - you cannot self-spawn one; publish a "tan requested: <bounded slice>" board line and the supervisor executes the spawn.
    Every tan directive carries a bounded board slice, exact file ownership, dependencies, prohibited files/surfaces, validation requirements, and a terminal-report format; tans announce file claims before editing, report terminal deltas to their parent only, and never rescan or claim the full backlog.
 6. **Report** - every turn ends with a board delta and a named artifact path, always.
    A claim with no named artifact is this section's failure mode.
@@ -446,7 +446,7 @@ No section has a silent or null move: when no listed move obviously applies, the
 7. **Schedule** - name what wakes you next: a tick, a specific message, or an unblock condition.
    Ending a turn with nothing named to wake it is not a legal move.
    Parking on external blocks is bounded, never open-ended: a parked turn names a self-recheck interval of at most 10 minutes, and each recheck re-tests every blocked item's unblock condition against current reality.
-   If idleness persists past one recheck while any queue anywhere is non-empty (own queue, the captain's stated priorities, docs/PLAN.md backlog), the next turn MUST either pull new work from it or write an explicit escalating work request addressed to the captain on the board.
+   If idleness persists past one recheck while any queue anywhere is non-empty (own queue, the cap's stated priorities, docs/PLAN.md backlog), the next turn MUST either pull new work from it or write an explicit escalating work request addressed to the cap on the board.
    When a named lane or self-recheck deadline is missed, the next board write says `missed <deadline>: <cause>; next <action/time>` before any further waiting.
    Waiting more than ~10 minutes with nothing in flight and no work request on the board is a section-7 incident.
 

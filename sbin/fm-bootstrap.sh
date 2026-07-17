@@ -18,7 +18,7 @@
 #          it is bounded by FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT, default 20s.
 #          Set FM_FLEET_PRUNE=0 to skip branch pruning during that refresh.
 #        fm-bootstrap.sh install <tool>...
-#          Install the named tools (only ones the captain approved).
+#          Install the named tools (only ones the cap approved).
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -175,7 +175,7 @@ crew=
 [ -f "$CONFIG/crew-harness" ] && crew=$(tr -d '[:space:]' < "$CONFIG/crew-harness" || true)
 [ -n "$crew" ] && [ "$crew" != "default" ] && echo "CREW_HARNESS_OVERRIDE: $crew"
 fm_tasks_axi_compatible && echo "TASKS_AXI: available"
-# Do not sync dependencies or fleet state from an unchecked captain handoff.
+# Do not sync dependencies or fleet state from an unchecked cap handoff.
 handoff_check_output=$("$FM_ROOT/sbin/fm" handoff-check 2>&1) || {
   printf '%s\n' "$handoff_check_output"
   exit 1

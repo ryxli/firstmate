@@ -5,5 +5,5 @@
 # disabledExtensions: ["skill:<name>", ...] there, NOT ignoredSkills, so the
 # two files never clobber each other's arrays in the shared settings layer.
 skills:
-  # This template does not use no-mistakes unless the captain requests it (AGENTS.md).
+  # This template does not use no-mistakes unless the cap requests it (AGENTS.md).
   ignoredSkills: ["no-mistakes"]

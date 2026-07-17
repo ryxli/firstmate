@@ -126,9 +126,9 @@ describe("canonical FleetSnapshot collector", () => {
 				statusFile: { state: "done", text: "PR checks green" },
 				topology: { degraded: "missing-pane" },
 			});
-			writeFileSync(join(fixture.home, "state", "self.status"), "blocked: waiting on captain\n");
+			writeFileSync(join(fixture.home, "state", "self.status"), "blocked: waiting on cap\n");
 			const blocked = await collectSnapshot("2026-07-13T00:00:00.500Z");
-			expect(blocked.pending?.find(item => item.id === "self")?.cls).toBe("CAPTAIN-BLOCKED");
+			expect(blocked.pending?.find(item => item.id === "self")?.cls).toBe("CAP-BLOCKED");
 			writeFileSync(join(fixture.home, "state", "self.status"), "working: building\n");
 
 			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent: "omp" }] } }));
@@ -530,8 +530,8 @@ describe("canonical FleetSnapshot collector", () => {
 		], homes, "2026-07-13T00:00:00Z");
 		const byId = (id: string) => pending.find(item => item.id === id);
 		expect(pending.map(item => item.key)).toEqual(["home/failed", "home/add-tests", "home/wire-api", "home/grandkid", "home/refactor", "home/cleanup", "home/working", "home/idle", "home/plum", "home/unknown"]);
-		expect(byId("failed")?.cls).toBe("CAPTAIN-BLOCKED");
-		expect(byId("add-tests")?.cls).toBe("CAPTAIN-BLOCKED");
+		expect(byId("failed")?.cls).toBe("CAP-BLOCKED");
+		expect(byId("add-tests")?.cls).toBe("CAP-BLOCKED");
 		expect(byId("refactor")?.cls).toBe("REVIEW-READY");
 		expect(byId("cleanup")?.cls).toBe("REVIEW-READY");
 		expect(byId("working")?.cls).toBe("IN-FLIGHT");
@@ -558,11 +558,11 @@ describe("canonical FleetSnapshot collector", () => {
 			liveRow("other", "other"),
 		], [], "2026-07-13T00:00:00Z");
 		expect(livePending.map(item => item.key)).toEqual(["live/failed", "live/blocked", "live/needs", "live/done", "live/working", "live/idle", "live/other", "live/unknown"]);
-		expect(livePending.find(item => item.id === "blocked")?.cls).toBe("CAPTAIN-BLOCKED");
+		expect(livePending.find(item => item.id === "blocked")?.cls).toBe("CAP-BLOCKED");
 		expect(livePending.find(item => item.id === "done")?.cls).toBe("REVIEW-READY");
 		expect(livePending.find(item => item.id === "working")?.cls).toBe("IN-FLIGHT");
-		expect(livePending.find(item => item.id === "failed")?.cls).toBe("CAPTAIN-BLOCKED");
-		expect(livePending.find(item => item.id === "needs")?.cls).toBe("CAPTAIN-BLOCKED");
+		expect(livePending.find(item => item.id === "failed")?.cls).toBe("CAP-BLOCKED");
+		expect(livePending.find(item => item.id === "needs")?.cls).toBe("CAP-BLOCKED");
 		expect(livePending.find(item => item.id === "unknown")?.cls).toBe("UNKNOWN");
 		expect(pending.find(item => item.id === "add-tests")?.reason).toContain("blocks 3");
 		expect(pending.find(item => item.id === "wire-api")?.reason).toContain("blocks 1");
@@ -595,7 +595,7 @@ describe("canonical FleetSnapshot collector", () => {
 		], duplicateHomes, "2026-07-13T00:00:00Z");
 		expect(crossOwnerPending.map(item => item.key)).toEqual(["z/aaa", "a/zzz"]);
 	});
-	it("maps live secondmate terminal states to captain attention", () => {
+	it("maps live secondmate terminal states to cap attention", () => {
 		const liveSecondmate = (id: string, liveStatus: string): AgentRow => ({
 			key: `secondmate/${id}`,
 			id,
@@ -610,8 +610,8 @@ describe("canonical FleetSnapshot collector", () => {
 			liveSecondmate("needs", "needs-decision"),
 		], [], "2026-07-13T00:00:00Z");
 		expect(pending.map(item => item.key)).toEqual(["secondmate/failed", "secondmate/needs"]);
-		expect(pending.find(item => item.id === "failed")?.cls).toBe("CAPTAIN-BLOCKED");
-		expect(pending.find(item => item.id === "needs")?.cls).toBe("CAPTAIN-BLOCKED");
+		expect(pending.find(item => item.id === "failed")?.cls).toBe("CAP-BLOCKED");
+		expect(pending.find(item => item.id === "needs")?.cls).toBe("CAP-BLOCKED");
 	});
 	it("hashes symlinked bridge sources in the activation manifest", async () => {
 		const fixture = fixtureHome();
@@ -712,7 +712,7 @@ describe("canonical FleetSnapshot collector", () => {
 				status: "working",
 				statusFile: { state: "failed", text: "override state" },
 			});
-			expect(snapshot.pending?.find(item => item.id === "self")?.cls).toBe("CAPTAIN-BLOCKED");
+			expect(snapshot.pending?.find(item => item.id === "self")?.cls).toBe("CAP-BLOCKED");
 		} finally {
 			if (oldHome === undefined) delete process.env.FM_HOME;
 			else process.env.FM_HOME = oldHome;

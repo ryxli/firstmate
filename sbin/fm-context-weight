@@ -264,7 +264,7 @@ function collectContext(): ContextFile[] {
 		}
 	}
 
-	addFile(files, seen, join(dataRoot, "captain.md"), "data/captain.md");
+	addFile(files, seen, join(dataRoot, "cap.md"), "data/cap.md");
 	addFile(files, seen, join(dataRoot, "charter.md"), "data/charter.md");
 	if (existsSync(dataRoot)) {
 		for (const entry of readdirSync(dataRoot, { withFileTypes: true })) {

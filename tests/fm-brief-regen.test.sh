@@ -22,7 +22,7 @@ cat > "$HOME_DIR/config/identity" <<'EOF'
 schema_version=1
 name=Riggs
 role=Main firstmate crew supervisor
-parent=captain
+parent=cap
 EOF
 
 cat > "$HOME_DIR/data/secondmates.md" <<EOF

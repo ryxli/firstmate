@@ -2,10 +2,10 @@
 # Perform the approved local merge for a local-only ship task: fast-forward the
 # project's default branch to the crewmate's fm/<id> branch.
 #
-# This is firstmate's merge gate-action (the captain's merge authority applied
+# This is firstmate's merge gate-action (the cap's merge authority applied
 # locally instead of via a GitHub PR). It is the one sanctioned exception to hard
 # rule #1 "never run state-changing git in projects/", and it is narrow: it only
-# runs for mode=local-only tasks, only after the captain approves (or yolo=on
+# runs for mode=local-only tasks, only after the cap approves (or yolo=on
 # auto-approves), and only as a clean fast-forward - it refuses a diverged branch
 # and tells you to have the crewmate rebase. See AGENTS.md sections 1 and 6.
 # Usage: fm-merge-local.sh <task-id>
@@ -21,7 +21,7 @@ META="$STATE/$ID.meta"
 
 PROJ=$(grep '^project=' "$META" | cut -d= -f2-)
 MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
-[ "$MODE" = local-only ] || { echo "error: task $ID is mode=$MODE, not local-only; merge it the normal way (gh-axi pr merge / captain)" >&2; exit 1; }
+[ "$MODE" = local-only ] || { echo "error: task $ID is mode=$MODE, not local-only; merge it the normal way (gh-axi pr merge / cap)" >&2; exit 1; }
 
 default_branch() {
   local ref branch

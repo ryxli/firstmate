@@ -1,6 +1,6 @@
 // bridge - an always-fresh, read-only fleet snapshot reachable from ANY omp pane.
 //
-// The captain runs many parallel sessions and loses the thread between panes.
+// The cap runs many parallel sessions and loses the thread between panes.
 // `/bridge` is the single place his fleet context lives: on each invocation it
 // reads the live on-disk fleet state (the constantly-mutating source of truth)
 // across ALL firstmate homes and renders a compact board. Two lenses, by argument:

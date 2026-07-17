@@ -432,7 +432,7 @@ export function attentionFor(agents: AgentRow[], homes: ParsedHome[], now: strin
 		if (proximity < 0 && clsRank >= 3) extras.push("forwarded");
 		rows.push({
 			key: agent.key,
-			cls: clsRank === 4 ? "CAPTAIN-BLOCKED" : clsRank === 3 ? "REVIEW-READY" : clsRank === 2 ? "IN-FLIGHT" : clsRank === 1 ? "DORMANT" : "UNKNOWN",
+			cls: clsRank === 4 ? "CAP-BLOCKED" : clsRank === 3 ? "REVIEW-READY" : clsRank === 2 ? "IN-FLIGHT" : clsRank === 1 ? "DORMANT" : "UNKNOWN",
 			clsRank,
 			home: basename(agent.home),
 			id: agent.id,

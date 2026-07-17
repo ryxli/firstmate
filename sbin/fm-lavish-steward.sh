@@ -3,11 +3,11 @@
 #
 # ONE steward process owns the long-poll for ONE Lavish session. It holds
 # `bunx lavish-axi poll <file>` (the official, stable long-poll), and every time
-# the captain sends feedback it:
+# the cap sends feedback it:
 #   1. appends the feedback to state/lavish/<key>.feedback.md (durable record),
 #   2. wakes the ORIGINATING agent's pane via sbin/fm-send.sh with a one-line
 #      pointer to that file plus the reply command,
-# then loops back into the poll. It exits when the session ends (the captain
+# then loops back into the poll. It exits when the session ends (the cap
 # closes it) or when it is told to stop. Because the steward is a separate
 # process from the agent that opened the artifact, the agent's own thread is
 # NEVER tied up polling Lavish - it just gets woken when there is feedback.
@@ -113,7 +113,7 @@ while [ "$running" -eq 1 ]; do
   if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
     # A non-zero/empty return is an error (e.g. server down), not feedback.
     # Revive the server/session headlessly; if the revive reports the session is
-    # ended (or gone), stop - the captain closed it. Otherwise back off and retry,
+    # ended (or gone), stop - the cap closed it. Otherwise back off and retry,
     # giving up after FAIL_MAX consecutive failures so a permanently dead server
     # never leaves a steward spinning forever.
     fails=$((fails + 1))
@@ -154,7 +154,7 @@ while [ "$running" -eq 1 ]; do
         printf '\n## Feedback %s (%s item(s))\n\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$n"
         printf '%s\n%s\n%s\n' "$fence" "$body" "$fence"
         printf '\nApply the requested changes to %s, then acknowledge in-browser:\n' "$FILE"
-        printf '    %s/fm lavish-reply "%s" "<message for the captain>"\n' "$SCRIPT_DIR" "$FILE"
+        printf '    %s/fm lavish-reply "%s" "<message for the cap>"\n' "$SCRIPT_DIR" "$FILE"
         printf "Do NOT run 'lavish-axi poll' yourself - the steward owns the poll and will relay the next round here.\n"
       } >> "$FEEDBACK"
       log "feedback received ($n items); appended to $FEEDBACK"

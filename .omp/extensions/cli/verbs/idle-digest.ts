@@ -1,11 +1,11 @@
 // fm verb: idle-digest - the bounded away-mode idle-digest loop's state machine.
 // Ported verbatim (behavior-preserving) out of the former sbin/fm idle-digest.
 //
-// When the first mate would otherwise go idle and the captain is away (the
-// /afk flag is set, or the captain has been silent past a threshold), it does
+// When the first mate would otherwise go idle and the cap is away (the
+// /afk flag is set, or the cap has been silent past a threshold), it does
 // not emit a trickle of tiny per-event closeouts. Instead it consolidates every
 // update into ONE running digest and relays a single ~one-screen summary the
-// moment the captain returns. This module owns the mechanical, testable bounds
+// moment the cap returns. This module owns the mechanical, testable bounds
 // of that loop so the documented protocol (skill://idle-digest, AGENTS.md s.8)
 // is enforced rather than trusted:
 //
@@ -17,13 +17,13 @@
 //             AFTER the increment so the loop self-terminates.
 //   - fold    append one bullet under a canonical section (dedups exact repeats,
 //             rejects unknown sections) - this is how a closeout that WOULD have
-//             woken the captain is folded into the digest instead.
+//             woken the cap is folded into the digest instead.
 //   - render  print the full accumulated digest (empty sections omitted).
 //   - screen  print the one-screen-capped digest: "Needs you" is NEVER
 //             truncated; other sections cap at FM_IDLE_DIGEST_SECTION_MAX with
-//             an overflow pointer. This is what the captain sees on return.
+//             an overflow pointer. This is what the cap sees on return.
 //   - status  one machine-readable line: started/passes/elapsed/window/active.
-//   - clear   delete the running digest (captain returned and was caught up).
+//   - clear   delete the running digest (cap returned and was caught up).
 //
 // Bounds (seconds / counts; 0 disables that bound's refinement entirely):
 //   FM_IDLE_DIGEST_WINDOW_SECS   refinement window           (default 1800)
@@ -60,11 +60,11 @@ const SECTION_MAX = Number(envOrDefault("FM_IDLE_DIGEST_SECTION_MAX", "6"));
 
 const USAGE = `fm idle-digest - the bounded idle-digest loop's state machine.
 
-When the first mate would otherwise go idle and the captain is away (the
-/afk flag is set, or the captain has been silent past a threshold), it does
+When the first mate would otherwise go idle and the cap is away (the
+/afk flag is set, or the cap has been silent past a threshold), it does
 not emit a trickle of tiny per-event closeouts. Instead it consolidates every
 update into ONE running digest and relays a single ~one-screen summary the
-moment the captain returns. This helper owns the mechanical, testable bounds
+moment the cap returns. This helper owns the mechanical, testable bounds
 of that loop so the documented protocol (skill://idle-digest, AGENTS.md s.8)
 is enforced rather than trusted:
 
@@ -76,13 +76,13 @@ is enforced rather than trusted:
             AFTER the increment so the loop self-terminates.
   - fold    append one bullet under a canonical section (dedups exact repeats,
             rejects unknown sections) - this is how a closeout that WOULD have
-            woken the captain is folded into the digest instead.
+            woken the cap is folded into the digest instead.
   - render  print the full accumulated digest (empty sections omitted).
   - screen  print the one-screen-capped digest: "Needs you" is NEVER
             truncated; other sections cap at FM_IDLE_DIGEST_SECTION_MAX with
-            an overflow pointer. This is what the captain sees on return.
+            an overflow pointer. This is what the cap sees on return.
   - status  one machine-readable line: started/passes/elapsed/window/active.
-  - clear   delete the running digest (captain returned and was caught up).
+  - clear   delete the running digest (cap returned and was caught up).
 
 Bounds (seconds / counts; 0 disables that bound's refinement entirely):
   FM_IDLE_DIGEST_WINDOW_SECS   refinement window           (default 1800)

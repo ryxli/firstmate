@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for sbin/fm-update.sh --adopt-remote: the captain-approved recovery
+# Tests for sbin/fm-update.sh --adopt-remote: the cap-approved recovery
 # verb the OTHER machine runs after a sanctioned force-with-lease history
 # rewrite of a harness-layer repo.
 #

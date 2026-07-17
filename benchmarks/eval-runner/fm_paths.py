@@ -4,7 +4,7 @@ Mirrors sbin/fm-root-lib.sh for shell: separates the canonical code root
 (derived from this file's own on-disk location, i.e. wherever the repo was
 cloned) from the operational home that owns data/, state/, config/, and
 projects/ (FM_HOME, defaulting to the code root when unset). This lets the
-same scripts run unmodified for any captain's checkout or secondmate home,
+same scripts run unmodified for any cap's checkout or secondmate home,
 with no machine-specific absolute paths baked in.
 """
 from __future__ import annotations

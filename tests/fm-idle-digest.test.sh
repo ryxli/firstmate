@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Behavior tests for `sbin/fm idle-digest`, the bounded idle-digest loop's state
 # machine. The loop replaces a trickle of tiny idle closeouts with ONE running
-# digest the first mate relays as a single ~one-screen summary when the captain
+# digest the first mate relays as a single ~one-screen summary when the cap
 # returns. This helper owns the mechanical bounds the documented protocol relies
 # on, so these tests pin them down:
 #
@@ -13,7 +13,7 @@
 #     time window, and WINDOW=0 / MAX_PASSES=0 disable refinement immediately;
 #   - render prints the full digest (empty sections omitted, metadata hidden);
 #   - screen caps each section at SECTION_MAX with an overflow pointer but NEVER
-#     truncates "Needs you" (the captain must always see pending decisions);
+#     truncates "Needs you" (the cap must always see pending decisions);
 #   - clear removes the running digest, and verbs error cleanly with no digest.
 set -u
 

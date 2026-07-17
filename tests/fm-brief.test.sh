@@ -170,7 +170,7 @@ grep -qF 'direct crewmate status-file reporting' "$secondmate" \
   || fail "secondmate charter dropped direct status-file reporting"
 grep -qF 'fm-send.sh' "$secondmate" \
   || fail "secondmate charter dropped fm-send.sh pane steering"
-grep -qF 'Escalate only captain-actionable transition states' "$secondmate" \
+grep -qF 'Escalate only cap-actionable transition states' "$secondmate" \
   || fail "secondmate charter did not restrict escalation states"
 grep -qF 'through the fleet peer bus' "$secondmate" \
   || fail "secondmate charter dropped peer-bus escalation"

@@ -8,7 +8,7 @@
 # brief scaffolder (which propagates the same identity downward in prose).
 #
 # The canonical per-instance identity file is config/identity (key=value,
-# e.g. `name=<name>`, `role=Main firstmate crew supervisor`, `parent=captain`),
+# e.g. `name=<name>`, `role=Main firstmate crew supervisor`, `parent=cap`),
 # the same LOCAL/gitignored config/ pattern as config/crew-harness. It is
 # optional: when absent every helper falls back to neutral defaults so the
 # tooling works on a fresh checkout with no identity configured.
@@ -44,10 +44,10 @@ fm_supervisor_role() {
 }
 
 # fm_supervisor_parent <config-dir>
-# Parent in the supervision chain (e.g. "captain"); "captain" when unset,
-# since every firstmate ultimately answers to the captain.
+# Parent in the supervision chain (e.g. "cap"); "cap" when unset,
+# since every firstmate ultimately answers to the cap.
 fm_supervisor_parent() {
-  fm_identity_value "$1" parent 2>/dev/null || printf 'captain\n'
+  fm_identity_value "$1" parent 2>/dev/null || printf 'cap\n'
 }
 
 # fm_supervisor_slug <config-dir>

@@ -65,7 +65,7 @@
  *     takes a SINGLE status (no unions) and rejects `done` ("UI attention
  *     state; use idle"). The socket stream is strictly better and is the only
  *     transport here; if the socket is unavailable, status-file watching below
- *     still carries every captain-relevant signal (crewmates write blocked:/
+ *     still carries every cap-relevant signal (crewmates write blocked:/
  *     done: lines to disk), so coverage degrades gracefully.
  *
  * ===================== firstmate state contract (parity with sbin/) ==========
@@ -133,8 +133,8 @@ export interface ClassifyResult {
 	detected: number; // distinct relevant events that produced a wake
 }
 
-// Canonical captain-relevance classifier: optional ISO-ish timestamp prefix, then
-// captain-relevant status prefixes or whole status phrases. Avoid substring
+// Canonical cap-relevance classifier: optional ISO-ish timestamp prefix, then
+// cap-relevant status prefixes or whole status phrases. Avoid substring
 // matches such as "already", "unmerged", or "readying". Working reports are
 // internal even when they mention a completed merge elsewhere.
 const STATUS_PREFIX_RE = /^(done|blocked|failed|needs-decision):/i;
@@ -169,7 +169,7 @@ function isRelevant(e: FleetEvent): boolean {
 	}
 }
 
-// The recommended captain action for a relevant state string. Ordered so the
+// The recommended cap action for a relevant state string. Ordered so the
 // most specific terminal outcome wins.
 function actionFor(state: string): string {
 	if (/merged/i.test(state)) return "confirm merge + teardown";
@@ -909,7 +909,7 @@ function applyHerdrPush(sup: Supervisor, push: HerdrPush): void {
 	if (push.status === "blocked") {
 		clearStaleTimer(sup, push.pane);
 		// Secondmates self-manage and escalate material blockers through the peer
-		// bus. Their transient blocked states must not wake the captain.
+		// bus. Their transient blocked states must not wake the cap.
 		if (crew.kind === "secondmate") return;
 		const nowMs = Date.now();
 		const lastBlocked = sup.lastBlockedWakeMs.get(push.pane) ?? 0;
@@ -989,7 +989,7 @@ async function reconciledPaneStatus(sup: Supervisor, pane: string): Promise<Herd
 // Startup-only diagnostic (NON-WAKING). An OMP pane whose authoritative agent
 // identity is still `omp` but seeds as `unknown` usually means an accidental
 // `herdr agent rename` (which pins agent_status to unknown) or a missing OMP
-// herdr status integration. Surfaced through the logger only; never a captain
+// herdr status integration. Surfaced through the logger only; never a cap
 // wake, because stale or non-agent panes can legitimately read unknown.
 async function diagnoseOmpUnknown(sup: Supervisor): Promise<void> {
 	if (!sup.socket || sup.socket.destroyed) return; // herdr unreachable: seedStatuses already read unknown for every pane; skip the per-pane probe storm
@@ -1054,7 +1054,7 @@ async function fireStale(sup: Supervisor, crew: Crewmate, idleStart: number): Pr
 	if (await isAwaitingMerge(sup, crew)) return; // parked on a green PR: by design
 	const last = await lastStatusLine(sup, crew.task);
 	const mins = Math.max(1, Math.round((Date.now() - idleStart) / 60_000));
-	if (last && captainRelevantStatusLine(last)) return; // already reported something captain-worthy
+	if (last && captainRelevantStatusLine(last)) return; // already reported something cap-worthy
 	const lineage = crew.worker ? ` ${crew.worker}` : "";
 	enqueueStale(
 		sup,
@@ -1288,7 +1288,7 @@ async function runChecks(sup: Supervisor): Promise<void> {
 		const task = f.slice(0, -".check.sh".length);
 		const metaPath = join(sup.stateDir, `${task}.meta`);
 		// A check script can outlive teardown or a manually removed task meta.
-		// Never poll an orphaned check: its output must not wake the captain.
+		// Never poll an orphaned check: its output must not wake the cap.
 		if (!existsSync(metaPath)) continue;
 		const crew = findCrewByTask(sup, task);
 		let out = "";

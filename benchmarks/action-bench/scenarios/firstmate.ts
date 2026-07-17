@@ -138,7 +138,7 @@ def run(tid):
 // 2. fm-bugfix-repro : symptom vs root-cause, hidden held-out set (hard)
 // ===========================================================================
 const CLS_RULES = `# Status-line relevance rules
-A status line is captain-relevant IF AND ONLY IF, after removing an optional leading
+A status line is cap-relevant IF AND ONLY IF, after removing an optional leading
 ISO-8601 timestamp token (e.g. "2026-06-29T10:00:00") and the single space after it,
 the remaining text:
   (a) begins with one of these EXACT prefixes:
@@ -167,7 +167,7 @@ const CLS_REPRO = `from classify import is_captain_relevant
 line = "already working on the fix"
 got = is_captain_relevant(line)
 print("line:", repr(line), "-> got:", got, "want: False")
-assert got is False, "'already' must NOT be captain-relevant (it only contains the substring 'ready')"
+assert got is False, "'already' must NOT be cap-relevant (it only contains the substring 'ready')"
 print("repro PASS")
 `;
 const CLS_CORRECT = `import re

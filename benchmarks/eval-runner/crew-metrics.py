@@ -7,7 +7,7 @@ signals no agent sees or optimizes for, so they cannot be gamed:
 
   - cost / output-tokens / requests / avg-duration / cache / error   (omp stats byFolder)
   - per-task attribution                                              (state/<id>.meta worktree -> folder)
-  - supervisor attention: wakes (captain-relevant status) vs suppressed (state/.status-internal.log)
+  - supervisor attention: wakes (cap-relevant status) vs suppressed (state/.status-internal.log)
   - cycle time: estimated-vs-actual per task                         (state/timeline.log)
   - outcomes: landed / in-flight / queued                            (data/backlog.md)
 
@@ -69,7 +69,7 @@ def collect(state, home, backlog, user, omp="omp"):
     fmap = {f.get("folder", ""): f for f in folders}
     home_folder = folder_of(home, user)
 
-    # suppressed events (supervisor saw, did NOT wake the captain), per task
+    # suppressed events (supervisor saw, did NOT wake the cap), per task
     supp = {}
     il = os.path.join(state, ".status-internal.log")
     if os.path.exists(il):
@@ -151,7 +151,7 @@ def collect(state, home, backlog, user, omp="omp"):
         "tasks": sorted(tasks, key=lambda x: -x["cost_usd"]),
         "gaps": [
             "wakes are counted from the cumulative <id>.status file, so long-lived agents (supervisor/secondmate) over-count vs short crew tasks; window by task epoch for precision.",
-            "escalation_rate needs a NECESSITY label per wake for true precision/recall; this is the raw reached-captain fraction, and .status-internal.log is new so 'suppressed' is still sparse.",
+            "escalation_rate needs a NECESSITY label per wake for true precision/recall; this is the raw reached-cap fraction, and .status-internal.log is new so 'suppressed' is still sparse.",
             "cycle_time depends on timeline.log entries, which only exist for tasks that logged an actual; coverage grows as more tasks close.",
         ],
     }
@@ -168,7 +168,7 @@ def render(k):
           ""]
     s = k["supervision"]
     L += ["SUPERVISION (harness side-effect: what the crew needed from the supervisor)",
-          f"  wakes {s['wakes']} vs suppressed {s['suppressed']}  ->  escalation rate {s['escalation_rate_pct']}% reached captain", ""]
+          f"  wakes {s['wakes']} vs suppressed {s['suppressed']}  ->  escalation rate {s['escalation_rate_pct']}% reached cap", ""]
     ct = k["cycle_time_min"]
     L += ["CYCLE TIME (timeline.log actuals)",
           f"  n={ct['n']}  median {ct['median']}min  range {ct['min']}-{ct['max']}min" if ct["n"] else "  n=0 (no closed-task actuals logged yet)", ""]

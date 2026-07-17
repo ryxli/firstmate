@@ -117,7 +117,7 @@ writeFileSync(join(state, `${ship.task}.status`), "done: PR https://github.com/o
 await Bun.sleep(80);
 if (sent.length !== 0) throw new Error("status wake injected into an active firstmate turn");
 handlers.get("agent_end")?.({}, {});
-await waitFor(() => sent.length === 1, "captain-relevant status file wake");
+await waitFor(() => sent.length === 1, "cap-relevant status file wake");
 if (!String(sent[0].message.content).includes("done: PR")) throw new Error("status-file wake lost the terminal status");
 if (!/^\[wake \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] /.test(String(sent[0].message.content))) throw new Error("status wake missing compact UTC timestamp prefix");
 
@@ -126,7 +126,7 @@ emit(ship.pane, "blocked");
 await waitFor(() => sent.length === 2, "first ship blocked wake");
 if (!String(sent[1].message.content).includes("ship") || !/blocked/i.test(sent[1].message.content)) throw new Error("ship blocked wake lost task or state");
 if (!readFileSync(join(state, `${ship.task}.meta`), "utf8").includes(`pane=${ship.pane}`)) throw new Error("live pane identity did not refresh meta");
-if (osNotifications.length !== 2 || !osNotifications[0].join(" ").includes("firstmate")) throw new Error("captain-actionable wakes did not issue main-home OS notifications");
+if (osNotifications.length !== 2 || !osNotifications[0].join(" ").includes("firstmate")) throw new Error("cap-actionable wakes did not issue main-home OS notifications");
 
 emit(ship.pane, "working");
 emit(ship.pane, "blocked");
@@ -168,7 +168,7 @@ if (sent.length !== 4) throw new Error("ordinary crewmate idle replay produced a
 emit(ship.pane, "working");
 emit(ship.pane, "idle");
 await Bun.sleep(20);
-if (sent.length !== 4) throw new Error("captain-relevant crewmate status produced a duplicate completion wake");
+if (sent.length !== 4) throw new Error("cap-relevant crewmate status produced a duplicate completion wake");
 await handlers.get("session_shutdown")();
 client?.destroy();
 const closed = Promise.withResolvers();

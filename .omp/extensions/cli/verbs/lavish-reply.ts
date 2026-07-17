@@ -2,7 +2,7 @@
 // Lavish session via a one-shot, non-blocking HTTP POST to the agent-reply
 // endpoint.
 //
-// After an agent applies the captain's feedback (relayed by the steward), it
+// After an agent applies the cap's feedback (relayed by the steward), it
 // acknowledges in the browser with this command. It writes the reply to the
 // write-only HTTP `/api/<key>/agent-reply` endpoint and returns immediately -
 // it NEVER polls, so it can never consume feedback or race the steward's

@@ -1,6 +1,6 @@
 ---
 name: updatefirstmate
-description: Synchronize the firstmate fleet and optional captain-configured local infrastructure through an observed-state, fast-forward-only workflow. Use when the captain asks to update, pull, rebase, or sync firstmate or configured local tooling.
+description: Synchronize the firstmate fleet and optional cap-configured local infrastructure through an observed-state, fast-forward-only workflow. Use when the cap asks to update, pull, rebase, or sync firstmate or configured local tooling.
 user-invocable: true
 ---
 
@@ -26,7 +26,7 @@ If it prints updated secondmate targets, send each one a short re-read nudge and
 
 ## Personal infrastructure update set
 
-After the generic firstmate fleet update, read the optional `## Personal infrastructure update set` section in local `data/captain.md`.
+After the generic firstmate fleet update, read the optional `## Personal infrastructure update set` section in local `data/cap.md`.
 Each bullet in that section names one additional checkout to synchronize through this procedure.
 
 ```markdown
@@ -65,16 +65,16 @@ For every such repository, complete and observe each state before taking the nex
 ## Optional local infrastructure
 
 For every configured local target, use the state machine above.
-Honor any repository-specific policy documented alongside that target in `data/captain.md`.
+Honor any repository-specific policy documented alongside that target in `data/cap.md`.
 If a configured target is a protected fork or has both `origin` and `upstream`, fetch and compare both remotes first.
 Do not reset, silently rebase, or force-push until its documented fork policy and observed ancestry justify that action.
 A diverged or ambiguous fork is a report, not an automatic repair.
 
-Feature branches, scratch checkouts, local-only scaffolds, and dirty worktrees are not synchronized unless the captain names them and approves the branch-specific action.
+Feature branches, scratch checkouts, local-only scaffolds, and dirty worktrees are not synchronized unless the cap names them and approves the branch-specific action.
 ## Reporting contract
 
 Relay `fm-update.sh`'s native one-line-per-repository output (`<label>: updated <a>..<b>` / `already current` / `skipped: <exact reason>`), and keep manually synced targets in the same format.
-Separate synchronized, already current, safely skipped, and requires-a-captain-decision.
+Separate synchronized, already current, safely skipped, and requires-a-cap-decision.
 Never report "already current" until after the remote fetch and post-fetch observation.
 
 ## Safety

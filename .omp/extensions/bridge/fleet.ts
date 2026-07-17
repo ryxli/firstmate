@@ -311,7 +311,7 @@ export function prUrlsToFetch(homes: ParsedHome[]): string[] {
 export interface PendingItem {
 	/** Stable task/agent key, owner-qualified when available. */
 	key?: string;
-	/** Attention class, e.g. "CAPTAIN-BLOCKED" or "REVIEW-READY". */
+	/** Attention class, e.g. "CAP-BLOCKED" or "REVIEW-READY". */
 	cls: string;
 	/** Numeric class (4 highest) for ordering. */
 	clsRank: number;
@@ -703,7 +703,7 @@ const GLYPH = {
 	working: "\u25cf", // filled circle
 	idle: "\u25cb", // hollow circle
 	done: "\u2713", // check - done / review-ready
-	blocked: "\u2717", // ballot x - needs the captain
+	blocked: "\u2717", // ballot x - needs the cap
 	none: "\u00b7", // middot - unknown / dormant / no signal
 } as const;
 const RULE = "\u2500";
@@ -723,7 +723,7 @@ function truncate(s: string, n: number): string {
 	return cps.length > n ? `${cps.slice(0, n - 1).join("")}${ELLIPSIS}` : oneLine;
 }
 
-/** Captain's LOCAL time: "2026-06-28T22:31:10.207Z" -> "2026-06-28 15:31 PDT". */
+/** Cap's LOCAL time: "2026-06-28T22:31:10.207Z" -> "2026-06-28 15:31 PDT". */
 function fmtTime(iso: string): string {
 	const d = new Date(iso);
 	const p2 = (n: number): string => String(n).padStart(2, "0");
@@ -747,7 +747,7 @@ function statusGlyph(state?: string, herdr?: string): string {
 	return GLYPH.none;
 }
 
-/** Pending class -> glyph: x for CAPTAIN-BLOCKED (4), check for REVIEW-READY (3). */
+/** Pending class -> glyph: x for CAP-BLOCKED (4), check for REVIEW-READY (3). */
 function classGlyph(rank: number): string {
 	return rank >= 4 ? GLYPH.blocked : rank === 3 ? GLYPH.done : GLYPH.none;
 }

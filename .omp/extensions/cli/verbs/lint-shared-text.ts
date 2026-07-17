@@ -25,8 +25,10 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 // Persona / nautical address vocabulary. Case-insensitive, word-boundary matched.
-// These are the terms AGENTS.md forbids in captain-facing text; in a shared body
-// they are always a leak.
+// These are the terms AGENTS.md forbids in cap-facing text; in a shared body
+// they are always a leak. "captain" stays listed to catch legacy-style leaks;
+// bare "cap" is deliberately NOT listed - as an ordinary English word it would
+// false-positive on legitimate engineering prose ("cap the retries").
 const PERSONA_WORDS = [
 	"captain",
 	"first mate",

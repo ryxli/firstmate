@@ -91,7 +91,7 @@ test_send_blocks_human_draft() {
 
   rc=0
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
-    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ captain draft │" \
+    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ cap draft │" \
     "$ROOT/sbin/fm-send.sh" fm-task "must not land" >/dev/null 2>"$dir/err" \
     || rc=$?
 
@@ -144,7 +144,7 @@ test_send_blocks_human_draft_in_current_claude_code_ui() {
   rc=0
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" \
-    FM_FAKE_PANE_LINES=$'                                                                              350644 tokens\n──────────────────────────────────────── some task title ──\n❯ captain typed a draft\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent' \
+    FM_FAKE_PANE_LINES=$'                                                                              350644 tokens\n──────────────────────────────────────── some task title ──\n❯ cap typed a draft\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent' \
     "$ROOT/sbin/fm-send.sh" fm-task "must not land" >/dev/null 2>"$dir/err" \
     || rc=$?
 
@@ -210,7 +210,7 @@ test_key_bypasses_composer_guard() {
   fb=$(make_fake_herdr "$dir")
 
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
-    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ captain draft │" \
+    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ cap draft │" \
     "$ROOT/sbin/fm-send.sh" fm-task --key Escape \
     || fail "control key unexpectedly blocked"
   grep -F 'herdr pane send-keys w1:p1 Escape' "$dir/herdr.log" >/dev/null \

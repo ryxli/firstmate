@@ -15,7 +15,7 @@
 # default branch, so a fast-forward there advances HEAD only and never touches
 # any other worktree's checkout or the shared `main` branch.
 #
-# --adopt-remote is the one deliberate, captain-approved exception to the
+# --adopt-remote is the one deliberate, cap-approved exception to the
 # fast-forward-only rule, run on the OTHER machine after a sanctioned
 # force-with-lease history rewrite of a harness-layer repo. For each target it
 # hard-resets the local default branch to origin/<default> ONLY when all three

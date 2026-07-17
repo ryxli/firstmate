@@ -5,7 +5,7 @@
 # crew-metrics is documented as zero-cost / no agents, but this test only
 # exercises --help: a full run needs a live omp installation and a real
 # fleet's state/ dir, neither of which belong in the pure behavior suite.
-# What matters here is that the wrapper's no-op path is captain-machine-
+# What matters here is that the wrapper's no-op path is cap-machine-
 # agnostic and that its --home default derives from fm_paths rather than a
 # hardcoded absolute. Also covers fm_paths.py's own root-derivation contract
 # (migrated here from the retired benchmarks/eval-runner/fm-eval-run.py test,
@@ -60,7 +60,7 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/fm-crew-metrics.XXXXXX")"
 DECOY_HOME="$(mktemp -d "${TMPDIR:-/tmp}/fm-crew-metrics-decoy-home.XXXXXX")"
 
 # --- wrapper --help, from a neutral cwd, must exit 0 and never touch a
-#     captain-specific absolute path ------------------------------------------
+#     cap-specific absolute path ------------------------------------------
 before="$(find "$DECOY_HOME" | sort)"
 out="$(cd "$TMP" && HOME="$DECOY_HOME" "$RUN" --help 2>&1)"
 rc=$?
@@ -68,11 +68,11 @@ rc=$?
 after="$(find "$DECOY_HOME" | sort)"
 [ "$before" = "$after" ] || fail "fm-crew-metrics.sh --help wrote into \$HOME"
 assert_contains "$out" "--home" "help text documents --home"
-assert_not_contains "$out" "/Users/" "help text must not leak any captain absolute path"
+assert_not_contains "$out" "/Users/" "help text must not leak any cap absolute path"
 pass "fm-crew-metrics.sh --help is a clean no-op from a neutral cwd/HOME"
 
 # --- crew-metrics.py wires --home's default to fm_paths.fm_home(), which
-#     honors FM_HOME, instead of a hardcoded captain absolute -----------------
+#     honors FM_HOME, instead of a hardcoded cap absolute -----------------
 grep -q 'default=str(fm_paths.fm_home())' "$EVAL_DIR/crew-metrics.py" \
   || fail "crew-metrics.py --home default no longer derives from fm_paths.fm_home()"
 FAKE_HOME="$TMP/fake-home"
