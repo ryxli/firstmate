@@ -481,6 +481,92 @@ test_fm_name_target() {
 }
 
 # ---------------------------------------------------------------------------
+# (i2) fm-<name> durable secondmate target -> FM_HOME and pinned crew_model
+# are restored on the resume command, not just dropped on the floor.
+# ---------------------------------------------------------------------------
+test_secondmate_pin_restored_on_reload() {
+  local CASE="$TMP_ROOT/case-i2"
+  mkdir -p "$CASE/state"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local home="$CASE/secondmate-home"
+  mkdir -p "$home"
+  printf 'pane=w10:p1\nkind=secondmate\nhome=%s\ncrew_model=anthropic/opus\n' "$home" \
+    > "$CASE/state/pinmate.meta"
+
+  local sid="abcd1234-0000-0000-0000-000000000010"
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_STATE_OVERRIDE="$CASE/state" \
+    run_reload "$CASE" fm-pinmate >/dev/null \
+    || fail "(i2) fm-reload.sh exited non-zero for secondmate pin restoration"
+
+  local sq_home
+  sq_home=$(. "$ROOT/sbin/fm-spawn-lib.sh" && fm_shell_quote "$home")
+  herdr_log "$CASE" | grep -qF "pane run w10:p1 FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home omp --model 'anthropic/opus' --resume $sid" \
+    || fail "(i2) expected FM_HOME prefix and --model on the restored resume command"
+
+  pass "(i2) durable secondmate target restores FM_HOME and pinned crew_model on reload"
+}
+
+# ---------------------------------------------------------------------------
+# (i3) fm-<name> durable non-secondmate (ship/scout) target -> a pinned
+# crew_model is still restored, but no FM_HOME prefix is added (that pin only
+# ever applied to secondmates).
+# ---------------------------------------------------------------------------
+test_ship_crew_model_restored_no_fm_home() {
+  local CASE="$TMP_ROOT/case-i3"
+  mkdir -p "$CASE/state"
+  make_fake_herdr "$CASE" >/dev/null
+
+  printf 'pane=w11:p1\nkind=ship\ncrew_model=openai/gpt-5\n' > "$CASE/state/shipmate.meta"
+
+  local sid="abcd1234-0000-0000-0000-000000000011"
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_STATE_OVERRIDE="$CASE/state" \
+    run_reload "$CASE" fm-shipmate >/dev/null \
+    || fail "(i3) fm-reload.sh exited non-zero for ship crew_model restoration"
+
+  herdr_log "$CASE" | grep -qF "pane run w11:p1 omp --model 'openai/gpt-5' --resume $sid" \
+    || fail "(i3) expected --model restored without an FM_HOME prefix"
+  herdr_log "$CASE" | grep -q "FM_HOME=" \
+    && fail "(i3) a non-secondmate reload must never add an FM_HOME prefix"
+
+  pass "(i3) durable ship target restores pinned crew_model without an FM_HOME prefix"
+}
+
+# ---------------------------------------------------------------------------
+# (i4) raw pane id target (no fm-<name>) whose pane happens to match a
+# secondmate's recorded meta -> reverse lookup still restores the pin, so
+# "reload whatever pane I'm in" is not a second gap.
+# ---------------------------------------------------------------------------
+test_reverse_lookup_restores_pin_for_raw_pane_target() {
+  local CASE="$TMP_ROOT/case-i4"
+  mkdir -p "$CASE/state"
+  make_fake_herdr "$CASE" >/dev/null
+
+  local home="$CASE/reverse-secondmate-home"
+  mkdir -p "$home"
+  printf 'pane=w12:p1\nkind=secondmate\nhome=%s\ncrew_model=anthropic/opus\n' "$home" \
+    > "$CASE/state/reversemate.meta"
+
+  local sid="abcd1234-0000-0000-0000-000000000012"
+  FM_FAKE_HERDR_AGENT="" \
+  FM_FAKE_HERDR_SESSION="$sid" \
+  FM_STATE_OVERRIDE="$CASE/state" \
+    run_reload "$CASE" w12:p1 >/dev/null \
+    || fail "(i4) fm-reload.sh exited non-zero for raw-pane reverse lookup"
+
+  local sq_home
+  sq_home=$(. "$ROOT/sbin/fm-spawn-lib.sh" && fm_shell_quote "$home")
+  herdr_log "$CASE" | grep -qF "pane run w12:p1 FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home omp --model 'anthropic/opus' --resume $sid" \
+    || fail "(i4) raw pane target did not restore the pin via reverse meta lookup"
+
+  pass "(i4) raw pane target reverse-matches state meta to restore the pin too"
+}
+
+# ---------------------------------------------------------------------------
 # (j) post-reload proof timeout: omp does not restart -> exit 1
 # ---------------------------------------------------------------------------
 test_proof_timeout_fails() {
@@ -1250,6 +1336,9 @@ test_cmd_template_no_session_id_errors
 test_no_pane_determinable_errors
 test_allow_fresh_fallback
 test_fm_name_target
+test_secondmate_pin_restored_on_reload
+test_ship_crew_model_restored_no_fm_home
+test_reverse_lookup_restores_pin_for_raw_pane_target
 test_proof_timeout_fails
 test_session_id_mismatch_proof
 test_deterministic_session_lookup

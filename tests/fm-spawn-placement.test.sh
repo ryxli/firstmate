@@ -220,6 +220,60 @@ test_raw_secondmate_launch_is_exact_baseline() {
   pass "raw secondmate launch remains byte-for-byte unchanged"
 }
 
+test_omp_secondmate_fresh_spawn_threads_crew_model() {
+  local home fakebin secondmate secondmate_abs sq_model sq_brief expected actual model
+  model='anthropic/opus'
+  home=$(make_supervisor_home crew-model-fresh)
+  fakebin=$(make_fake_herdr "$home")
+  secondmate=$(make_secondmate_home crew-model-fresh-secondmate model-mate)
+  secondmate_abs=$(cd "$secondmate" && pwd -P)
+
+  run_spawn "$home" "$fakebin" model-mate "$secondmate" omp --secondmate --crew-model "$model" \
+    || fail "OMP secondmate spawn with --crew-model failed"
+
+  sq_model=$(fm_shell_quote "$model")
+  sq_brief=$(fm_shell_quote "$secondmate_abs/data/charter.md")
+  expected="$(secondmate_prefix "$secondmate_abs")omp --model $sq_model --auto-approve \"\$(cat $sq_brief)\"; exec \"\${SHELL:-/bin/zsh}\" -l"
+  actual=$(captured_command "$home")
+  assert_equal "$expected" "$actual" "secondmate fresh spawn dropped the pinned crew model"
+  pass "secondmate fresh spawn threads --crew-model into the launch template"
+}
+
+test_omp_secondmate_resume_threads_crew_model() {
+  local home fakebin secondmate secondmate_abs sq_model expected actual model
+  model='anthropic/opus'
+  home=$(make_supervisor_home crew-model-resume)
+  fakebin=$(make_fake_herdr "$home")
+  secondmate=$(make_secondmate_home crew-model-resume-secondmate resume-model-mate)
+  secondmate_abs=$(cd "$secondmate" && pwd -P)
+  printf 'home=%s\n' "$secondmate_abs" > "$home/state/resume-model-mate.meta"
+
+  run_spawn "$home" "$fakebin" resume-model-mate "$secondmate" omp --secondmate --crew-model "$model" \
+    || fail "resumed OMP secondmate spawn with --crew-model failed"
+
+  sq_model=$(fm_shell_quote "$model")
+  expected="$(secondmate_prefix "$secondmate_abs")omp --model $sq_model --auto-approve -c; exec \"\${SHELL:-/bin/zsh}\" -l"
+  actual=$(captured_command "$home")
+  assert_equal "$expected" "$actual" "secondmate resume dropped the pinned crew model"
+  pass "secondmate resume threads --crew-model into the -c relaunch"
+}
+
+test_secondmate_meta_records_crew_model() {
+  local home fakebin secondmate secondmate_abs model meta_value
+  model='anthropic/opus'
+  home=$(make_supervisor_home crew-model-meta)
+  fakebin=$(make_fake_herdr "$home")
+  secondmate=$(make_secondmate_home crew-model-meta-secondmate meta-model-mate)
+  secondmate_abs=$(cd "$secondmate" && pwd -P)
+
+  run_spawn "$home" "$fakebin" meta-model-mate "$secondmate" omp --secondmate --crew-model "$model" \
+    || fail "OMP secondmate spawn with --crew-model failed"
+
+  meta_value=$(grep '^crew_model=' "$home/state/meta-model-mate.meta" | cut -d= -f2-)
+  [ "$meta_value" = "$model" ] || fail "secondmate meta did not record crew_model=$model (got: $meta_value)"
+  pass "secondmate meta records the pinned crew model so a later relaunch can restore it"
+}
+
 expected_ordinary_template() {
   local harness=$1 model=$2 brief=$3 sq_model sq_brief
   sq_model=$(fm_shell_quote "$model")
@@ -283,5 +337,8 @@ test_omp_secondmate_resume_uses_home_overlay_once
 test_omp_secondmate_without_home_overlay_is_exact_baseline
 test_non_omp_secondmate_is_exact_baseline
 test_raw_secondmate_launch_is_exact_baseline
+test_omp_secondmate_fresh_spawn_threads_crew_model
+test_omp_secondmate_resume_threads_crew_model
+test_secondmate_meta_records_crew_model
 test_all_ordinary_templates_are_exact_baselines
 test_raw_ordinary_launch_is_exact_baseline

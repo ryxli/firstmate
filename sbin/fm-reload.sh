@@ -37,6 +37,15 @@
 # before success is reported, so supervision and later recovery follow the
 # resumed session instead of the closed pane.
 #
+# Pin restoration: a secondmate's FM_HOME and any pinned crew_model are
+# spawn-time-only artifacts (a one-shot env prefix and CLI text respectively)
+# that a pane's persistent shell never retains once the harness process
+# exits. Before typing the relaunch command back into the pane, this script
+# re-reads state/<id>.meta (resolved for a durable fm-<id> target, or by
+# reverse-matching the pane for a raw pane id / auto-detected target) and
+# reapplies FM_HOME=... (secondmate only) and `--model <crew_model>` so a
+# manual reload cannot silently drop either pin.
+#
 # Options:
 #   --cmd <template>       Custom relaunch command. '{id}' is replaced with the
 #                          captured session id (error if unavailable).
@@ -69,6 +78,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 # shellcheck source=sbin/fm-herdr-lib.sh
 . "$SCRIPT_DIR/fm-herdr-lib.sh"
+# shellcheck source=sbin/fm-spawn-lib.sh
+. "$SCRIPT_DIR/fm-spawn-lib.sh"
 
 TARGET=""
 RESUME_CMD="${FM_RELOAD_CMD:-}"
@@ -385,6 +396,17 @@ if [ -z "$PANE" ]; then
   exit 1
 fi
 
+# When no durable fm-<id> target was named (raw pane id or auto-detect), still
+# try to recover the pin metadata by reverse-matching this pane against every
+# state/<id>.meta, so "reload whatever pane I'm in" gets the same FM_HOME/model
+# restoration below as a named durable target.
+if [ -z "$META_FILE" ]; then
+  _RELOAD_TASK="$(fm_task_for_pane "$PANE" "$STATE" 2>/dev/null || true)"
+  if [ -n "$_RELOAD_TASK" ]; then
+    META_FILE="$STATE/$_RELOAD_TASK.meta"
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Capture the session id BEFORE sending /quit.
 # The startup banner ("omp --resume <id>") is in the scrollback now; after
@@ -619,6 +641,31 @@ if [ -z "$EXIT_CONFIRMED" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Reapply the pins fm-spawn.sh applied at original launch. Both are lost the
+# moment the harness process exits: FM_HOME was only ever a one-shot env
+# prefix on that single invocation (a persistent-shell pane never had it
+# exported into it), and a model tier is CLI text, never exported into the
+# pane's persistent shell either. Restore them here from the durable meta
+# before typing anything back into the pane. `--model` alongside `--resume`
+# is supported by omp (packages/coding-agent/src/main.ts: an explicit
+# `parsed.model` sets `options.model` unconditionally, and
+# packages/coding-agent/src/sdk.ts's `hasExplicitModel` check then skips
+# restoring the resumed session's own saved model in favor of it).
+# ---------------------------------------------------------------------------
+RELOAD_FM_HOME=""
+RELOAD_CREW_MODEL=""
+if [ -n "$META_FILE" ] && [ -f "$META_FILE" ]; then
+  if [ "$(fm_meta_value "$META_FILE" kind)" = "secondmate" ]; then
+    RELOAD_FM_HOME="$(fm_meta_value "$META_FILE" home)"
+  fi
+  RELOAD_CREW_MODEL="$(fm_meta_value "$META_FILE" crew_model)"
+fi
+PIN_PREFIX=""
+if [ -n "$RELOAD_FM_HOME" ]; then
+  PIN_PREFIX="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$(fm_shell_quote "$RELOAD_FM_HOME") "
+fi
+
+# ---------------------------------------------------------------------------
 # Build the relaunch command.
 # ---------------------------------------------------------------------------
 EFFECTIVE_CMD=""
@@ -634,13 +681,20 @@ if [ -n "$RESUME_CMD" ]; then
   esac
 elif [ -n "$SESSION_ID" ]; then
   EFFECTIVE_CMD="omp --resume $SESSION_ID"
+  if [ -n "$RELOAD_CREW_MODEL" ]; then
+    EFFECTIVE_CMD="omp --model $(fm_shell_quote "$RELOAD_CREW_MODEL") --resume $SESSION_ID"
+  fi
 elif [ -n "$ALLOW_FRESH" ]; then
   EFFECTIVE_CMD="omp -c"
+  if [ -n "$RELOAD_CREW_MODEL" ]; then
+    EFFECTIVE_CMD="omp --model $(fm_shell_quote "$RELOAD_CREW_MODEL") -c"
+  fi
 else
   # Defensive: caught before /quit, but guard against logic drift.
   echo "fm-reload.sh: no session id found and --allow-fresh not set" >&2
   exit 1
 fi
+EFFECTIVE_CMD="${PIN_PREFIX}${EFFECTIVE_CMD}"
 
 # ---------------------------------------------------------------------------
 # Pick the relaunch pane. Reuse the target pane when it survived the quit

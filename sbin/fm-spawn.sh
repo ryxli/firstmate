@@ -168,20 +168,12 @@ case "$ARG3" in
     ;;
   '')
     HARNESS=$("$FM_ROOT/sbin/fm-harness.sh" crew)
-    if [ "$KIND" = secondmate ]; then
-      LAUNCH=$(launch_template "$HARNESS") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
-    else
-      LAUNCH=$(launch_template "$HARNESS" "$CREW_MODEL") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
-    fi
+    LAUNCH=$(launch_template "$HARNESS" "$CREW_MODEL") || { echo "error: no launch template for harness '$HARNESS' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     LAUNCH_FROM_TEMPLATE=1
     ;;
   *)
     HARNESS=$ARG3
-    if [ "$KIND" = secondmate ]; then
-      LAUNCH=$(launch_template "$HARNESS") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
-    else
-      LAUNCH=$(launch_template "$HARNESS" "$CREW_MODEL") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
-    fi
+    LAUNCH=$(launch_template "$HARNESS" "$CREW_MODEL") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     LAUNCH_FROM_TEMPLATE=1
     ;;
 esac
@@ -545,7 +537,11 @@ fi
 # session rather than injecting the charter as a new prompt.
 sq_brief=$(fm_shell_quote "$BRIEF")
 if [ "$HARNESS" = omp ] && [ "$KIND" = secondmate ] && [ "$SECONDMATE_RESUME" -eq 1 ]; then
-  LAUNCH_CMD="omp --auto-approve -c"
+  if [ -n "$CREW_MODEL" ]; then
+    LAUNCH_CMD="omp --model $(fm_shell_quote "$CREW_MODEL") --auto-approve -c"
+  else
+    LAUNCH_CMD="omp --auto-approve -c"
+  fi
 else
   LAUNCH_CMD=${LAUNCH//__BRIEF__/$sq_brief}
 fi
@@ -645,7 +641,7 @@ mkdir -p "$STATE"
   echo "supervisor=$(fm_supervisor_name "$CONFIG")"
   echo "agent_slot=$AGENT_SLOT"
   echo "agent_identity=$AGENT_IDENTITY"
-  if [ "$KIND" != secondmate ] && [ -n "$CREW_MODEL" ]; then echo "crew_model=$CREW_MODEL"; fi
+  if [ -n "$CREW_MODEL" ]; then echo "crew_model=$CREW_MODEL"; fi
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
