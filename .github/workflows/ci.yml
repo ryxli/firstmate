@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: shellcheck -x --severity=error sbin/*.sh tests/*.sh
+      - run: git ls-files -z -- '*.sh' | xargs -0 -r shellcheck -x --severity=error
 
   tests:
     name: Behavior tests

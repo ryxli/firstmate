@@ -13,14 +13,15 @@
 // reads and fails (exit 1) listing every offending line.
 //
 // Scanned surfaces under the root (default: this repo): README.md,
-// CONTRIBUTING.md, .agents/skills/*/SKILL.md, and sbin/*.sh help/echo text.
+// CONTRIBUTING.md, .agents/skills/*/SKILL.md, migrated CLI verb sources, and
+// any remaining sbin/*.sh help/echo text.
 //
 // Usage:
 //   fm tooling-lint            # scan this repo
 //   fm tooling-lint <root>     # scan an alternate root (used by the test)
 //
-// Two files are deliberately NOT scanned: the former guard script's basename
-// and sbin/fm brief. Both exist to STATE the convention, so they
+// Two files are deliberately NOT scanned: this guard's source and fm brief.
+// Both exist to STATE the convention, so they
 // legitimately name the forbidden forms as prohibition text; scanning them
 // would flag the very rule they define. For any other one-off counterexample
 // a line may carry the marker `fm-tooling-lint: allow` and it is skipped.
@@ -34,7 +35,7 @@ const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replac
 
 // The convention-definers: named by the forbidden forms on purpose, so exempt.
 const SELF = "tooling-lint.ts";
-const GENERATOR = "fm-brief.sh";
+const GENERATOR = "brief.ts";
 const ALLOW = "fm-tooling-lint: allow";
 
 function usage(): number {
@@ -126,6 +127,17 @@ async function run(argv: string[]): Promise<number> {
 
 	const skillsDir = join(root, ".agents", "skills");
 	if (isDir(skillsDir)) walk(skillsDir, name => name === "SKILL.md", files);
+
+	const verbsDir = join(root, ".omp", "extensions", "cli", "verbs");
+	if (isDir(verbsDir)) {
+		const verbFiles: string[] = [];
+		walk(verbsDir, name => name.endsWith(".ts"), verbFiles);
+		for (const f of verbFiles) {
+			const b = basename(f);
+			if (b === SELF || b === GENERATOR) continue;
+			files.push(f);
+		}
+	}
 
 	const sbinDir = join(root, "sbin");
 	if (isDir(sbinDir)) {

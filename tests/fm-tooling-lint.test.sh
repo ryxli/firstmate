@@ -29,7 +29,7 @@ pass() { printf 'ok - %s\n' "$1"; }
 # fixture <name> builds an isolated scan root under TMP_ROOT and echoes its path.
 fixture() {
   local d="$TMP_ROOT/$1"
-  mkdir -p "$d/sbin" "$d/.agents/skills/demo"
+  mkdir -p "$d/sbin" "$d/.agents/skills/demo" "$d/.omp/extensions/cli/verbs"
   printf '%s\n' "$d"
 }
 
@@ -92,11 +92,11 @@ test_definers_exempt() {
   # Both convention-definers name the forbidden forms as prohibition text and
   # must not be flagged, even though they contain the literal tokens.
   local d; d=$(fixture definers)
-  printf '#!/usr/bin/env bash\n# never npx, never node dist/x, never ./sbin/x.js\n' > "$d/sbin/fm" brief
-  printf '#!/usr/bin/env bash\n# scans for npx and node dist and ./sbin/x.js\n' > "$d/sbin/fm" tooling-lint
+  printf '// never npx, never node dist/x, never ./sbin/x.js\n' > "$d/.omp/extensions/cli/verbs/brief.ts"
+  printf '// scans for npx and node dist and ./sbin/x.js\n' > "$d/.omp/extensions/cli/verbs/tooling-lint.ts"
   OUT=$(GUARD "$d" 2>&1); RC=$?
   [ "$RC" -eq 0 ] || fail "convention-definers should be exempt (rc=$RC): $OUT"
-  pass "fm-brief.sh and fm tooling-lint are exempt"
+  pass "brief.ts and tooling-lint.ts are exempt"
 }
 
 test_allow_marker_exempt() {
