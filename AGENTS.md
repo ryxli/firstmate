@@ -434,6 +434,7 @@ Send only:
 2. A blocking question that the recipient alone can answer.
 3. A safety interrupt requiring immediate intervention.
 
+`peer_send`/`peer_pull` are canonical for mate-to-mate and secondmate escalation; `sbin/fm-send.sh` stays canonical for pane-local steering, interrupts, startup nudges, and explicit composer delivery; never substitute IRC for fleet peer-bus messages.
 Do not send acknowledgements, delivery receipts, routine status echoes, or FYI progress.
 The recipient's next board update is the receipt.
 Before every send, ask: **does this change what the peer does in their next step?**
