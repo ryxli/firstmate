@@ -613,7 +613,10 @@ if ! fm_herdr_reap_husk_slot "$AGENT_SLOT"; then
   exit 1
 fi
 
-LAUNCH_JSON=$(herdr agent start "$AGENT_SLOT" --cwd "$WT" --tab "$TAB_ID" --no-focus -- sh -c "$PANE_CMD" 2>&1) || {
+# PYTHONDONTWRITEBYTECODE keeps any Python tooling a crewmate/secondmate runs
+# from littering its worktree or home with __pycache__/*.pyc, the same way
+# herdr itself injects HERDR_SOCKET_PATH and friends into every pane it starts.
+LAUNCH_JSON=$(herdr agent start "$AGENT_SLOT" --cwd "$WT" --tab "$TAB_ID" --env PYTHONDONTWRITEBYTECODE=1 --no-focus -- sh -c "$PANE_CMD" 2>&1) || {
   cleanup_failed_spawn
   echo "error: herdr agent start failed for $ID" >&2
   echo "$LAUNCH_JSON" >&2

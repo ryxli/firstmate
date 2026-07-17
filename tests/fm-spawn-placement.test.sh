@@ -278,6 +278,45 @@ test_raw_ordinary_launch_is_exact_baseline() {
   pass "raw ordinary launch remains byte-for-byte unchanged"
 }
 
+test_agent_start_sets_pythondontwritebytecode() {
+  local home fakebin project id brief agent_start_line secondmate secondmate_abs
+  home=$(make_supervisor_home pyc-ordinary)
+  fakebin=$(make_fake_herdr "$home")
+  project=$(make_project "$home")
+  printf 'supervising: true\n' > "$home/config/omp.yml"
+  id=pyc-ordinary
+  brief="$home/data/$id/brief.md"
+  mkdir -p "$(dirname "$brief")"
+  printf 'ordinary brief\n' > "$brief"
+
+  run_spawn "$home" "$fakebin" "$id" "$project" omp \
+    || fail "ordinary spawn for pyc env assertion failed"
+
+  agent_start_line=$(grep '^herdr agent start ' "$home/herdr.log" | tail -1)
+  case "$agent_start_line" in
+    *' --env PYTHONDONTWRITEBYTECODE=1 '*) : ;;
+    *) fail "ordinary agent start did not set PYTHONDONTWRITEBYTECODE: $agent_start_line" ;;
+  esac
+  pass "ordinary agent start sets PYTHONDONTWRITEBYTECODE=1 to keep worktrees pyc-free"
+
+  home=$(make_supervisor_home pyc-secondmate)
+  fakebin=$(make_fake_herdr "$home")
+  secondmate=$(make_secondmate_home pyc-secondmate-home pyc-mate)
+  secondmate_abs=$(cd "$secondmate" && pwd -P)
+  printf 'secondmate: true\n' > "$secondmate/config/omp.yml"
+
+  run_spawn "$home" "$fakebin" pyc-mate "$secondmate" omp --secondmate \
+    || fail "secondmate spawn for pyc env assertion failed"
+
+  agent_start_line=$(grep '^herdr agent start ' "$home/herdr.log" | tail -1)
+  case "$agent_start_line" in
+    *' --env PYTHONDONTWRITEBYTECODE=1 '*) : ;;
+    *) fail "secondmate agent start did not set PYTHONDONTWRITEBYTECODE: $agent_start_line" ;;
+  esac
+  [ -n "$secondmate_abs" ] || fail "secondmate home resolution failed"
+  pass "secondmate agent start sets PYTHONDONTWRITEBYTECODE=1 to keep its home pyc-free"
+}
+
 test_omp_secondmate_uses_launched_home_overlay_once
 test_omp_secondmate_resume_uses_home_overlay_once
 test_omp_secondmate_without_home_overlay_is_exact_baseline
@@ -285,3 +324,4 @@ test_non_omp_secondmate_is_exact_baseline
 test_raw_secondmate_launch_is_exact_baseline
 test_all_ordinary_templates_are_exact_baselines
 test_raw_ordinary_launch_is_exact_baseline
+test_agent_start_sets_pythondontwritebytecode
