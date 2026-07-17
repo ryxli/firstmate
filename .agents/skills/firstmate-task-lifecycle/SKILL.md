@@ -149,16 +149,7 @@ If work overlaps, have the crewmate rebase before review or merge.
 
 ### Throughput discipline
 
-Maximize wall-clock throughput: keep every available worker slot occupied with a concrete, independent critical-path task.
-
-Dispatch review against local commits immediately; do not wait for a push or deployment.
-
-Replace repeated polling and broad “different perspective” work with terminal event reports carrying the commit, focused tests, verdict, and blocker.
-
-After compaction or interruption, take one aggregated fleet snapshot, reconcile it once, and refill every free slot before reading additional context.
-
-Parallelize design acceptance, test coverage, breaker repair, push/deploy, and live verification whenever their dependencies permit.
-
+Wall-clock throughput, terminal-event reporting, and post-compaction snapshot discipline are owned by AGENTS.md's turn decision sections; apply them here.
 Write the brief per section 11.
 **Parallel fanout safety.** Freeze shared contracts before implementation fanout, assign exclusive file ownership including an owner for every overlap, and give each lane a focused check plus a salvage-patch path.
 Use cheap or capped capacity only for bounded, one-file mechanical work or read-only collection; implementation that spans files, tests, coordination, live safety, uncertain interfaces, or uncommitted state requires a strong tier.
