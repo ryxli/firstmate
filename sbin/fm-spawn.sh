@@ -8,7 +8,7 @@
 #   opencode|pi) overrides it for this spawn. A non-flag string containing whitespace
 #   is treated as a RAW launch command - the escape hatch for verifying new adapters.
 #   --scout records kind=scout in the task's meta (report deliverable, scratch worktree;
-#   see AGENTS.md section 7); --secondmate records kind=secondmate and launches in a
+#   see AGENTS.md section 6); --secondmate records kind=secondmate and launches in a
 #   provisioned firstmate home; the default is kind=ship.
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>:
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]

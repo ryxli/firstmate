@@ -7,7 +7,7 @@
 # rule #1 "never run state-changing git in projects/", and it is narrow: it only
 # runs for mode=local-only tasks, only after the captain approves (or yolo=on
 # auto-approves), and only as a clean fast-forward - it refuses a diverged branch
-# and tells you to have the crewmate rebase. See AGENTS.md sections 1, 6, 7.
+# and tells you to have the crewmate rebase. See AGENTS.md sections 1 and 6.
 # Usage: fm-merge-local.sh <task-id>
 set -eu
 
