@@ -25,8 +25,8 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-handoff-check-tests.XXXXXX")
 seed_valid_fixture() {
   local fixture=$1
   mkdir -p "$fixture/data/handoff"
-  cp "$ROOT/data/handoff/current-actions.md" "$fixture/data/handoff/current-actions.md"
-  cp "$ROOT/data/handoff/firstmate-readback.md" "$fixture/data/handoff/firstmate-readback.md"
+  cp "$ROOT/tests/fixtures/handoff/current-actions.md" "$fixture/data/handoff/current-actions.md"
+  cp "$ROOT/tests/fixtures/handoff/firstmate-readback.md" "$fixture/data/handoff/firstmate-readback.md"
 }
 
 test_valid_pair() {

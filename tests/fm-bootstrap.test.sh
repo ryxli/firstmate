@@ -58,8 +58,8 @@ SH
 seed_handoff() {
   local home=$1
   mkdir -p "$home/data/handoff"
-  cp "$ROOT/data/handoff/current-actions.md" "$home/data/handoff/current-actions.md"
-  cp "$ROOT/data/handoff/firstmate-readback.md" "$home/data/handoff/firstmate-readback.md"
+  cp "$ROOT/tests/fixtures/handoff/current-actions.md" "$home/data/handoff/current-actions.md"
+  cp "$ROOT/tests/fixtures/handoff/firstmate-readback.md" "$home/data/handoff/firstmate-readback.md"
 }
 
 run_bootstrap() {
