@@ -18,6 +18,7 @@ cat > "$TMP/home/data/projects.md" <<'EOF'
 - app - default direct-PR project (added 2026-06-25)
 - legacy [no-mistakes] - pipeline-era project (added 2026-06-25)
 - local [local-only] - local delivery project (added 2026-06-25)
+- main [direct-main +yolo] - Direct main project (added 2026-07-16)
 EOF
 
 scaffold() {
@@ -73,6 +74,40 @@ check_assignment_completion() {
     || fail "$brief does not use the assignment completion return"
 }
 
+check_direct_main() {
+  local brief=$1
+  grep -qF 'This project ships **direct-main**' "$brief" \
+    || fail "$brief has no direct-main mode text"
+  grep -qF 'Do NOT open a PR' "$brief" \
+    || fail "$brief does not forbid PRs for direct-main"
+  grep -qF 'Do NOT force-push' "$brief" \
+    || fail "$brief does not forbid force pushes for direct-main"
+  grep -qF 'The `+yolo` flag never relaxes these safeguards.' "$brief" \
+    || fail "$brief has no direct-main yolo safeguard"
+  grep -qF 'reviewed by you' "$brief" \
+    || fail "$brief does not require a branch reviewed by you"
+  grep -qF 'test -z "$(git status --porcelain)"' "$brief" \
+    || fail "$brief does not require a clean branch"
+  grep -qF 'lock_dir="$(git rev-parse --git-common-dir)/fm-direct-main-delivery.lock"' "$brief" \
+    || fail "$brief has no direct-main shared writer lock"
+  grep -qF 'git fetch origin main' "$brief" \
+    || fail "$brief does not fetch before delivery"
+  grep -qF 'git merge-base --is-ancestor "$base" "$head"' "$brief" \
+    || fail "$brief does not prove ancestry"
+  grep -qF 'git push origin "$head:refs/heads/main"' "$brief" \
+    || fail "$brief does not push the exact head normally"
+  grep -qF 'remote=$(git rev-parse origin/main)' "$brief" \
+    || fail "$brief does not read the remote SHA back"
+  grep -qF 'test "$remote" = "$head"' "$brief" \
+    || fail "$brief does not verify the remote SHA"
+  ! grep -qF 'open a PR with `gh-axi`' "$brief" \
+    || fail "$brief has a PR creation path for direct-main"
+  ! grep -qF 'done: PR {url}' "$brief" \
+    || fail "$brief has a PR completion path for direct-main"
+  ! grep -qF -- '--force' "$brief" \
+    || fail "$brief has a force push flag for direct-main"
+}
+
 check_house_blocks() {
   local brief=$1
   grep -qF '# Lean-loop discipline' "$brief" \
@@ -101,6 +136,11 @@ check_assignment_completion "$brief" 'done: PR {url}'
 grep -qF 'This project ships **direct-PR**' "$brief" \
   || fail "no-mistakes registry entry did not produce a direct-PR ship brief"
 pass "legacy no-mistakes project scaffolds a direct-PR ship brief"
+
+brief=$(scaffold task-main main)
+check_ship_setup "$brief" task-main
+check_direct_main "$brief"
+pass "direct-main ship brief forbids PRs and force-push, and requires a guarded delivery"
 
 brief=$(scaffold task-local local)
 check_assignment_contract "$brief"
