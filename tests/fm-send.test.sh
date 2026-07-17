@@ -171,9 +171,58 @@ test_sendq_runtime_is_removed() {
   pass "background send queue is removed"
 }
 
+test_send_ignores_bypass_permissions_footer() {
+  local dir home fb count
+  dir="$TMP_ROOT/bypass-footer"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  # Reproduces the reported false-positive frame from a freshly-launched
+  # `claude --permission-mode bypassPermissions` session: an empty composer
+  # with the bypass-permissions mode footer as the last visible line.
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" \
+    FM_FAKE_PANE_LINES=$'                                       0 tokens\n────────────────────────────────────────────────────\n❯\n────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) \xc2\xb7 15% context left' \
+    "$ROOT/sbin/fm-send.sh" fm-task "atomic work" \
+    || fail "fm-send falsely blocked on an empty composer with bypass-permissions footer"
+
+  count=$(grep -cF 'herdr pane run w1:p1 atomic work' "$dir/herdr.log")
+  [ "$count" = "1" ] || fail "expected one pane run, got $count"
+  assert_no_sendq "$home"
+  pass "fm-send ignores the bypass-permissions mode footer on an empty composer"
+}
+
+test_send_blocks_genuine_draft_under_bypass_permissions_footer() {
+  local dir home fb rc count
+  dir="$TMP_ROOT/bypass-footer-draft"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  # Same chrome, but with real human-typed text on the composer's content
+  # line; fail-closed semantics must still block the send.
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" \
+    FM_FAKE_PANE_LINES=$'                                       12 tokens\n────────────────────────────────────────────────────\n❯ fix findings 1 and 3\n────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) \xc2\xb7 15% context left' \
+    "$ROOT/sbin/fm-send.sh" fm-task "must not land" >/dev/null 2>"$dir/err" \
+    || rc=$?
+
+  [ "$rc" = "75" ] || fail "expected genuine draft under bypass-permissions footer to exit 75, got $rc"
+  count=$(grep -cF 'herdr pane run ' "$dir/herdr.log" || true)
+  [ "$count" = "0" ] || fail "fm-send wrote into a human draft"
+  assert_no_sendq "$home"
+  pass "fm-send still blocks a genuine draft under the bypass-permissions footer"
+}
+
 test_send_submits_once
 test_send_blocks_human_draft
 test_send_failure_is_not_retried
 test_sequential_sends_do_not_amplify
 test_key_bypasses_composer_guard
 test_sendq_runtime_is_removed
+test_send_ignores_bypass_permissions_footer
+test_send_blocks_genuine_draft_under_bypass_permissions_footer
