@@ -505,14 +505,6 @@ No section has a silent or null move: when no listed move obviously applies, the
    When a named lane or self-recheck deadline is missed, the next board write says `missed <deadline>: <cause>; next <action/time>` before any further waiting.
    Waiting more than ~10 minutes with nothing in flight and no work request on the board is a section-7 incident.
 
-### Incident-attribution protocol
-
-Every observed suboptimal turn is attributed to exactly one of the seven sections above.
-The fix is amending that section's rule in this file, never a one-off steer to the agent.
-Incident forensics start by naming the emitting source and time window.
-For container incidents, capture Docker events with the exact read-only command in the artifact, for example `docker events --since <iso> --until <iso> --filter container=<name>`, before blaming app code.
-Incidents-per-section per day trending down is the convergence metric.
-The supervisor's monitor firing rate measures convergence; it is not itself the correction mechanism.
 
 ### Review and evidence safeguards
 
