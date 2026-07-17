@@ -7,12 +7,9 @@
 skills:
   # This template does not use no-mistakes unless the cap requests it (AGENTS.md).
   ignoredSkills: ["no-mistakes"]
-  # Preload the two skills AGENTS.md mandates at EVERY session start, so they
-  # sit in the stable cached prefix instead of costing uncached tool-reads each
-  # boot. All other skills stay lazy by design (skill:// reads on demand).
-  # NOTE: this array REPLACES any global includeSkills wholesale inside
-  # firstmate sessions - personal additions belong in the untracked local
-  # overlay, and firstmate skills must NOT be preloaded globally.
-  includeSkills:
-    - firstmate-bootstrap
-    - firstmate-recovery
+  # Do NOT set includeSkills here: it does not merely preload - it REPLACES
+  # the discoverable skill registry wholesale, making every unlisted skill
+  # unreadable via skill:// (verified live 2026-07-17: a session with only
+  # [bootstrap, recovery] listed got "Unknown skill: firstmate-task-lifecycle").
+  # The cached-prefix preload of the every-session skills is `fm start`'s
+  # --append-system-prompt injection; skill discovery must stay complete.

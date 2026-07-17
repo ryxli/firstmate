@@ -20,11 +20,28 @@ const KICKOFF = "Session start: run your session-start sequence, then report fle
 // uncached tool-reads per boot. All other skills stay lazy.
 const PRELOAD_SKILLS = ["firstmate-bootstrap", "firstmate-recovery"];
 
+// Stable fleet registries: change rarely, read at every session start. Loading
+// them at launch keeps them in the cached prefix and in a deterministic order,
+// instead of N tool-reads scattered through the first turns.
+const PRELOAD_REGISTRIES = ["data/projects.md", "data/secondmates.md", "data/cap.md"];
+
 function preloadBlock(): string {
 	const parts = ["# Preloaded skills", "The following mandatory session-start skills are already loaded in full - run them directly, never re-read them via a skill tool or file read."];
 	for (const name of PRELOAD_SKILLS) {
 		const path = join(REPO_ROOT, ".agents", "skills", name, "SKILL.md");
 		parts.push(`## skill://${name}\n\n${readFileSync(path, "utf8").trim()}`);
+	}
+	const home = process.env.FM_HOME?.trim() || REPO_ROOT;
+	const registries: string[] = [];
+	for (const rel of PRELOAD_REGISTRIES) {
+		try {
+			registries.push(`## ${rel}\n\n${readFileSync(join(home, rel), "utf8").trim()}`);
+		} catch {
+			// Local-layer file absent (fresh clone): the skill flow handles it.
+		}
+	}
+	if (registries.length > 0) {
+		parts.push("# Preloaded fleet registries", "Current as of session launch - do not re-read these files unless you have changed them this session. Live state (panes, tasks, locks) is NOT here; get it from one `fm fleet --check` call.", ...registries);
 	}
 	return parts.join("\n\n");
 }

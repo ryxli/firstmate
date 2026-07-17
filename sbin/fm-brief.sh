@@ -310,7 +310,19 @@ cmd_regen_or_check() {
   return 0
 }
 
+usage() {
+  cat >&2 <<'USAGE'
+usage: fm-brief.sh <id> <repo> [worker-args...]        generate a ship brief
+       fm-brief.sh --scout <id> <repo> [args...]       generate a scout brief
+       fm-brief.sh --secondmate <id> [project...]      scaffold a secondmate charter
+       fm-brief.sh --regen <id>                        regenerate projections
+       fm-brief.sh --check <id>                        verify projections
+USAGE
+  exit "${1:-1}"
+}
+
 case "${1:-}" in
+  -h|--help) usage 0 ;;
   --regen)
     [ $# -eq 2 ] || { echo "usage: fm-brief.sh --regen <id>" >&2; exit 1; }
     cmd_regen_or_check regen "$2"
@@ -329,9 +341,11 @@ for a in "$@"; do
   case "$a" in
     --scout) KIND=scout ;;
     --secondmate) KIND=secondmate ;;
+    -*) echo "error: unknown flag: $a" >&2; usage ;;
     *) POS+=("$a") ;;
   esac
 done
+[ "${#POS[@]}" -ge 1 ] || usage
 ID=${POS[0]}
 
 BRIEF="$DATA/$ID/brief.md"
@@ -436,6 +450,7 @@ fi
 exit 0
 fi
 
+[ "${#POS[@]}" -ge 2 ] || { echo "error: $KIND briefs need <id> <repo>" >&2; usage; }
 REPO=${POS[1]}
 
 if [ "$KIND" = scout ]; then

@@ -16,10 +16,12 @@ Reconcile reality with your records before doing anything else:
 1. Run `sbin/fm lock` to acquire the session lock (it records the harness process PID, which is session-stable).
    If it refuses because another live session holds the lock, tell the cap another active session is already managing the work and operate read-only until resolved.
 2. The supervision extension reloads automatically when this session starts and re-resolves the in-flight fleet from `state/*.meta`; there is no wake-queue to drain.
-3. Read `data/backlog.md`, `data/secondmates.md` if present, every `state/*.meta`, and every `state/*.status`.
-4. Use the `pane=` values from this home's `state/*.meta` files as the live direct-report set, then check those herdr panes via `herdr pane get <pane_id>`.
-   Do not sweep every `fm-*` herdr pane across all workspaces during recovery; another firstmate home's child panes may share that namespace and are not this home's orphans.
-5. If a recorded direct-report pane is missing or unreachable, reconcile it through its meta as described below.
+3. Read `data/backlog.md`.
+   The fleet registries (`data/projects.md`, `data/secondmates.md`, `data/cap.md`) are preloaded at launch by `fm start`; re-read one only if it is absent from context or you changed it this session.
+4. Run ONE `sbin/fm fleet --check`.
+   It aggregates every registered home, recorded task meta and status, and live pane into a single report, flagging each missing or drifted entry with a reason - this replaces reading `state/*` files and running `herdr pane get` or home-link checks entry by entry.
+   Touch an individual pane, meta, or home only to reconcile a specific item the snapshot flagged; never sweep `fm-*` panes across workspaces (another home's children share that namespace).
+5. If the snapshot flags a recorded direct-report pane missing or unreachable, reconcile it through its meta as described below.
 6. For meta with no pane, reconcile by kind.
    For ordinary crewmates, check whether the worktree still exists under `$FM_WORKTREE_BASE/<id>`, salvage or report.
    For `kind=secondmate`, treat the secondmate as a dead persistent direct report and respawn it with `sbin/fm-spawn.sh <id> --secondmate` against the recorded `home=`.
