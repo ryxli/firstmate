@@ -29,7 +29,7 @@ jobs:
             "$test_script"
           done
       - name: FleetSnapshot, AXI, and controller tests
-        run: bun test tests/fm-fleet-snapshot.test.ts tests/fm-bridge.test.ts tests/fm-axi.test.mjs tests/fm-compiled-executor-controller.test.mjs
+        run: bun test tests/fm-fleet-snapshot.test.ts tests/fm-bridge.test.ts tests/fm-axi.test.mjs tests/fm-compiled-executor-controller.test.mjs tests/action-bench-milestone.test.ts
 
   invariants:
     name: Repo invariants
