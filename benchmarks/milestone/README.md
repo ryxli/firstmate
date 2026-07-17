@@ -41,8 +41,8 @@ sbin/fm-milestone.sh --compare <shaA> <shaB> [label]
 - `FM_MILESTONE_TESTS_ONLY` restricts the tests stage to file names matching a regex - useful for a
   fast smoke run; a real milestone measures the full suite.
 
-Every invocation appends one line to `benchmarks/results/milestones.jsonl` and one section to
-`benchmarks/results/milestones.md`. Re-running with identical inputs (same sha, same `--captured`,
+Every invocation appends one line to `benchmarks/action-bench/results/milestones.jsonl` and one section to
+`benchmarks/action-bench/results/milestones.md`. Re-running with identical inputs (same sha, same `--captured`,
 same repo state) reproduces an identical row **except** the `captured` field (when left to default)
 and every per-stage `secs` / top-level `elapsed_s` field - those measure real subprocess wall time
 and can never be bit-identical across two separate invocations on a real machine. Every other field
@@ -105,6 +105,6 @@ run.ts    the composition CLI: stage runners (action-bench gates/corpus, supervi
 README.md this file
 ```
 
-`benchmarks/results/` (repo-root level, sibling to `benchmarks/action-bench/results/`) holds the
+`benchmarks/action-bench/results/` (the canonical, plum-history-seeded ledger) holds the
 durable `milestones.{jsonl,md}` this tool writes - distinct from action-bench's own per-model ledger
 because this one composes multiple benchmarks, not action-bench alone.

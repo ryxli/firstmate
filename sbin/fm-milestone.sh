@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command, one reproducible longitudinal measurement row: composes the action-bench integrity
 # gates + corpus metrics, the supervision replay bench, sbin/fm-context-weight, and the tests/*.test.sh
-# behavior suite into a single row appended to benchmarks/results/milestones.{jsonl,md}.
+# behavior suite into a single row appended to benchmarks/action-bench/results/milestones.{jsonl,md}.
 #
 # All real logic lives in benchmarks/milestone/run.ts (a thin composition over existing, already-
 # proven instruments - see its header and README.md in that directory).

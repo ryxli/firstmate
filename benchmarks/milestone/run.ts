@@ -24,7 +24,7 @@ import type { RunPayload } from "../action-bench/engine.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..", "..");
-const DEFAULT_OUT = join(REPO_ROOT, "benchmarks", "results");
+const DEFAULT_OUT = join(REPO_ROOT, "benchmarks", "action-bench", "results");
 
 // The tool's own acceptance test is excluded from the measured test corpus below: fm-milestone.sh
 // runs `tests/*.test.sh` as one of its stages, and its own test file lives at that same path, so
