@@ -28,6 +28,8 @@ jobs:
           for test_script in tests/*.test.sh; do
             "$test_script"
           done
+      - name: Tooling invocation convention
+        run: ./sbin/fm tooling-lint
       - name: FleetSnapshot, AXI, and controller tests
         run: bun test tests/fm-fleet-snapshot.test.ts tests/fm-bridge.test.ts tests/fm-axi.test.mjs tests/fm-axi-update.test.mjs tests/fm-axi-home.test.mjs tests/fm-compiled-executor-controller.test.mjs tests/action-bench-milestone.test.ts
 
