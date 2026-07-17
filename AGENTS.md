@@ -211,6 +211,7 @@ To refresh symlinks in an existing home without re-seeding, run `sbin/fm-link-sh
 The link step is idempotent: a symlink that already points to the canonical entry is a no-op, a stale or wrong symlink is refreshed, and a real file the home provides itself is left untouched.
 
 Task-id and pane-naming conventions are owned by `skill://firstmate-task-lifecycle`.
+Harness-related tooling clones live under `~/code/harness/<tool>`, siblings of this repo; `herdr` is a mise-managed binary, not a clone.
 
 ## 3. Bootstrap (run at every session start)
 
@@ -289,6 +290,7 @@ Reconcile reality with your records before doing anything else:
 11. Run `sbin/fm-lavish-open.sh --recover` to relaunch a steward for every still-open Lavish session this home owns that has no live steward.
     A restart must not leave an open artifact unattended.
 
+When restarting firstmate and a crewmate together, restart firstmate first: a crewmate that dies while its supervisor is also down has no one to recover it.
 A firstmate restart must be a non-event.
 Recovery and restore fail closed.
 Failure: restore or restart was treated as proof that live state was safe.
@@ -342,9 +344,7 @@ Token discipline: the injected digest is self-contained - act on it without re-r
 Herdr's native agent status is the ground truth, so the omp<->herdr integration must be installed once per machine (`herdr integration install omp`); without it crewmate panes report `unknown` and only the status-file stream carries signals.
 
 Lean-loop discipline: keep your own loop lean for reasoning and decisions - fork self-contained side-work to a disposable `task` subagent (or route domain work to a secondmate) rather than burning your context on it; the thinking and execution discipline in section 1 governs the rest.
-**Autonomous-loop incident triage.** When notification spam, 429s, repeated blocked wakes, and cost growth cluster, inspect the scheduler for zero-delay or unconditional re-arms before patching prompts or per-channel configuration.
-Stop the live loop first, then enforce scheduler backoff that grows on idle or rate-limited turns and resets only after real work; validate the delay function and a no-zero-delay regression in a fresh session before clearing the fault.
-If notification configuration is involved, inspect every live herdr server because each holds its own in-memory configuration.
+For autonomous-loop incidents (notification spam, 429s, repeated blocked wakes, cost growth), follow `docs/runbooks/autonomous-loop-incident-triage.md`.
 
 ### Away-mode (`/afk`) (lazy)
 
@@ -393,8 +393,7 @@ Open Lavish artifacts worth a captain review via `sbin/fm-lavish-open.sh`; it op
 Whenever you reference a PR to the captain - review-ready work, a requested status answer, or a recent-work summary - give its full `https://...` URL, never a bare `#number`: the captain's terminal makes a full URL clickable.
 A shorthand `#number` is fine only as a back-reference after the full URL has already appeared in the same message.
 As a courtesy, mention cost when unusually much work is running (more than ~8 concurrent jobs); never block on it.
-**Reviewed visual artifacts.** A collapsed section must remove its hidden content from layout, and browser verification must prove zero closed height, positive open height, and no horizontal overflow.
-Motion must be pinned, respect reduced motion, and fail open so content remains visible when JavaScript or the CDN fails; verify both fallback and animation paths in a real browser before review.
+Visual-artifact review standards are owned by `skill://lavish-render-delegation`.
 
 ## 9. Self-update procedures (lazy)
 

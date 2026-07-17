@@ -72,6 +72,13 @@ session), and drops state for sessions that already ended.
   session's feedback (via the CLI `poll`); replies are write-only HTTP. They run
   concurrently without clobbering each other.
 
+## Review standards for visual artifacts
+
+Before showing the captain any reviewed visual artifact:
+
+- A collapsed section must remove its hidden content from layout; browser verification must prove zero closed height, positive open height, and no horizontal overflow.
+- Motion must be pinned, respect reduced motion, and fail open so content remains visible when JavaScript or the CDN fails; verify both fallback and animation paths in a real browser before review.
+
 ## Pieces
 
 - `sbin/fm-lavish-open.sh` - entry point: open/resume + launch steward; `--recover`.
