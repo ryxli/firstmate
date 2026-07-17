@@ -176,6 +176,7 @@ README.md            public overview and development notes
 .agents/skills/      shared skills, committed
 .claude/skills       symlink to .agents/skills for claude compatibility
 sbin/                 ship-wide helper scripts, committed; any mate may improve them; read each script's header before first use
+sbin/fm-context-weight  read-only chars/4 token-weight report for shared context and the active `FM_HOME`
 Each mate home has a real local bin/ for that mate's personal tools; ship tools live in sbin/ (symlinked into each home); never symlink a home bin/ onto the shared repo.
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate
 data/                personal fleet records; LOCAL, gitignored as a whole

@@ -1,0 +1,144 @@
+#!/usr/bin/env bun
+// fm-context-weight - estimate the token weight of shared and home-specific
+// context using the repository's byte-stable chars/4 tokenizer.
+
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { countTokens, tokenizerBackend } from "../benchmarks/tokenizer.ts";
+
+type ContextFile = {
+	label: string;
+	text: string;
+	tokens: number;
+};
+
+type ContextSection = {
+	file: string;
+	section: string;
+	tokens: number;
+};
+
+function configuredPath(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	return trimmed ? resolve(trimmed) : undefined;
+}
+
+function contextRoots(): { codeRoot: string; dataRoot: string } {
+	const scriptRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+	const configuredHome = configuredPath(process.env.FM_HOME);
+	const legacyRoot = configuredPath(process.env.FM_ROOT_OVERRIDE);
+	const codeRoot = configuredPath(process.env.FM_CODE_ROOT_OVERRIDE)
+		?? (!configuredHome && legacyRoot ? legacyRoot : scriptRoot);
+	const home = configuredHome ?? legacyRoot ?? codeRoot;
+	const dataRoot = configuredPath(process.env.FM_DATA_OVERRIDE) ?? join(home, "data");
+	return { codeRoot, dataRoot };
+}
+
+function markdownSections(file: ContextFile): ContextSection[] {
+	const headings = [...file.text.matchAll(/^#{1,6}[ \t]+(.+?)[ \t]*\r?$/gm)];
+	if (headings.length === 0) {
+		return [{ file: file.label, section: "(whole file)", tokens: countTokens(file.text) }];
+	}
+
+	const sections: ContextSection[] = [];
+	const firstHeading = headings[0];
+	if ((firstHeading.index ?? 0) > 0) {
+		sections.push({
+			file: file.label,
+			section: "(preamble)",
+			tokens: countTokens(file.text.slice(0, firstHeading.index)),
+		});
+	}
+	for (const [index, heading] of headings.entries()) {
+		const start = heading.index ?? 0;
+		const end = headings[index + 1]?.index ?? file.text.length;
+		sections.push({
+			file: file.label,
+			section: heading[1].replace(/\t/g, " "),
+			tokens: countTokens(file.text.slice(start, end)),
+		});
+	}
+	return sections;
+}
+
+function compareWeight(
+	a: { tokens: number; label?: string; file?: string; section?: string },
+	b: { tokens: number; label?: string; file?: string; section?: string },
+): number {
+	return b.tokens - a.tokens
+		|| (a.label ?? a.file ?? "").localeCompare(b.label ?? b.file ?? "")
+		|| (a.section ?? "").localeCompare(b.section ?? "");
+}
+
+function addFile(files: ContextFile[], seen: Set<string>, path: string, label: string): void {
+	if (!existsSync(path)) return;
+	const absolute = resolve(path);
+	if (seen.has(absolute)) return;
+	const text = readFileSync(absolute, "utf8");
+	files.push({ label, text, tokens: countTokens(text) });
+	seen.add(absolute);
+}
+
+function collectContext(): ContextFile[] {
+	const { codeRoot, dataRoot } = contextRoots();
+	const files: ContextFile[] = [];
+	const seen = new Set<string>();
+
+	const agentsPath = join(codeRoot, "AGENTS.md");
+	if (!existsSync(agentsPath)) {
+		throw new Error(`required context file not found: ${agentsPath}`);
+	}
+	addFile(files, seen, agentsPath, "AGENTS.md");
+
+	const skillsRoot = join(codeRoot, ".agents", "skills");
+	if (existsSync(skillsRoot)) {
+		for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const skillPath = join(skillsRoot, entry.name, "SKILL.md");
+			addFile(files, seen, skillPath, relative(codeRoot, skillPath));
+		}
+	}
+
+	addFile(files, seen, join(dataRoot, "captain.md"), "data/captain.md");
+	addFile(files, seen, join(dataRoot, "charter.md"), "data/charter.md");
+	if (existsSync(dataRoot)) {
+		for (const entry of readdirSync(dataRoot, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const briefPath = join(dataRoot, entry.name, "brief.md");
+			if (!existsSync(briefPath)) continue;
+			const text = readFileSync(briefPath, "utf8");
+			if (!/^You are a secondmate:/m.test(text)) continue;
+			addFile(files, seen, briefPath, `data/${entry.name}/brief.md`);
+		}
+	}
+
+	return files.sort(compareWeight);
+}
+
+function main(): void {
+	const files = collectContext();
+	const sections = files.flatMap(markdownSections).sort(compareWeight);
+	const total = files.reduce((sum, file) => sum + file.tokens, 0);
+
+	console.log(`estimated_total_tokens\t${total}`);
+	console.log(`tokenizer\t${tokenizerBackend}`);
+	console.log("");
+	console.log("files");
+	console.log("tokens\tfile");
+	for (const file of files) console.log(`${file.tokens}\t${file.label}`);
+	console.log("");
+	console.log("sections");
+	console.log("tokens\tfile\tsection");
+	for (const section of sections) {
+		console.log(`${section.tokens}\t${section.file}\t${section.section}`);
+	}
+}
+
+try {
+	main();
+} catch (error) {
+	console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+	process.exit(1);
+}
