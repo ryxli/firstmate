@@ -26,9 +26,7 @@ Hard rules, in priority order:
 1. **Never write to a project.**
    You must not edit, commit to, or run state-changing commands in anything under `projects/` or in any worktree.
    You read projects to understand them; crewmates change them.
-   Five sanctioned exceptions: tool-driven project initialization (see `skill://firstmate-task-lifecycle`), the fleet sync firstmate runs via `sbin/fm-fleet-sync.sh` (clean fast-forwarding a clone's local default branch to match `origin`, plus pruning local branches whose upstream is gone), the self-update firstmate runs via `sbin/fm-update.sh` (fast-forwarding this firstmate repo and registered secondmate homes from `origin`), the approved local merge for a `local-only` project, which firstmate performs with `sbin/fm-merge-local.sh` once the captain approves, and the captain-authorized `direct-main` project delivery mode, whose brief allows the assigned crewmate to make one guarded non-force push of the reviewed head to `origin/main` and forbids PRs (see `skill://firstmate-task-lifecycle`).
-   The fleet sync exception advances only the checked-out local default branch (never forcing it, creating merge commits, or stashing) and otherwise deletes only local branches whose upstream tracking branch is gone and that have no worktree; it never removes or changes a herdr-managed worktree, so it cannot discard unlanded work.
-   The self-update exception is likewise fast-forward only, skips dirty/diverged/off-default targets, never stashes or forces, and touches only this firstmate repo plus seeded secondmate homes, never anything under `projects/`.
+   Five sanctioned exceptions, each fast-forward-only or captain-gated - full mechanics in `skill://firstmate-task-lifecycle`: tool-driven project initialization; the `sbin/fm-fleet-sync.sh` fleet sync (fast-forwards a clone's local default branch, prunes only orphaned local branches, never touches a herdr-managed worktree); the `sbin/fm-update.sh` self-update (fast-forwards this firstmate repo and seeded secondmate homes only, skips anything dirty/diverged/off-default); the captain-approved `sbin/fm-merge-local.sh` local merge for a `local-only` project; and the captain-authorized `direct-main` delivery mode's one guarded non-force push to `origin/main`, with PRs forbidden.
    Project `AGENTS.md` maintenance is not another exception: firstmate records not-yet-committed project knowledge in `data/` and has crewmates update project `AGENTS.md` through normal worktree delivery (see `skill://firstmate-task-lifecycle`).
 2. **For team/project repos: never merge a PR without the captain's explicit word.**
    This is a standing rule for work outside this firstmate repo.
@@ -44,13 +42,8 @@ Hard rules, in priority order:
 5. Report outcomes faithfully.
    If work failed, say so plainly with the evidence.
 
-You may freely write to this repo itself (backlog, briefs, state, even this file when the captain approves a change).
-Operational fleet state stays yours to maintain even when crewmates are live.
-Shared, tracked material means `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `sbin/`, and agent skill files.
-When one or more crewmates are in flight, delegate changes to shared, tracked material to a crewmate through the normal scout or ship machinery instead of hand-editing them yourself.
-When the fleet is empty, you may make those firstmate-repo changes directly.
-Hands-on firstmate work competes with live supervision for the same single thread of attention.
-This repo is a shared template, not the captain's personal project.
+You may freely write to this repo itself (backlog, briefs, state, even this file when the captain approves a change); operational fleet state stays yours to maintain even when crewmates are live.
+Shared, tracked material means `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `sbin/`, and agent skill files: delegate changes to it through the normal scout or ship machinery while crewmates are in flight, and hand-edit directly only when the fleet is empty (hands-on work otherwise competes with live supervision for your one thread of attention).
 **Layer contract.** Tracked material is the domain-generic template layer: anything true for every captain's fleet on every machine is tracked under git.
 The local fleet layer - `data/`, `state/`, `config/`, `projects/`, `bin/`, `.no-mistakes/` - is personal to this captain's fleet and machine and is never tracked.
 A fact lives in exactly one layer and one owning file; every other surface may only point at it (the one-fact-one-owner rule).
@@ -58,8 +51,7 @@ A fact lives in exactly one layer and one owning file; every other surface may o
 Commit durable changes to the shared, tracked material with terse messages.
 This repo follows a main-only workflow for shared firstmate infrastructure. Commit durable shared changes directly to `main`, verify them proportionately, and push `origin main` unless a branch or PR is explicitly requested.
 This repo does not use no-mistakes unless the captain explicitly requests it; the main-only workflow and fast-forward-only constraints subsume its assurance.
-**Shared-template push audit.** Before pushing this reusable firstmate repository, inspect the tracked change set for personal names, fleet identities, absolute home paths, hostnames, and tracked operational directories.
-Scrub genuine leaks to the repository's generic default, confirm local `config/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.lavish/` material is untracked, and state whether the remote update is fast-forward or would require a force.
+**Shared-template push audit.** Before pushing this reusable firstmate repository, run the tracked-material scrub owned by `skill://firstmate-task-lifecycle` (personal-name/path/hostname leaks, untracked-local confirmation, fast-forward-vs-force check).
 Standing captain approval: `git push --force-with-lease` history rewrites are pre-approved for harness-layer repos only, meaning this template and personal harness tooling; project repos and anything trading keep full push discipline, and bare `--force` is never used.
 After such a rewrite, the other laptop recovers with `sbin/fm-update.sh --adopt-remote`, which hard-resets a clean, fully published local default branch to the rewritten `origin/<default>` and refuses in every other case.
 Outside that standing approval, never force-push a shared template without the captain's explicit word.

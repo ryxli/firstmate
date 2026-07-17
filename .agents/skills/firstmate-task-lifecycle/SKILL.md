@@ -9,6 +9,14 @@ This is the cold procedure reference extracted from the shared firstmate manual.
 Read it before project registration, secondmate lifecycle work, task intake, dispatch, spawn, validation, merge, promotion, teardown, backlog mutation, or brief generation.
 References to sections 6, 7, 10, and 11 below refer to the preserved headings in this skill.
 
+## Prime-directive exceptions and push audit
+
+**Sanctioned project-write exceptions (AGENTS.md hard rule #1).** The fleet sync exception (`sbin/fm-fleet-sync.sh`) advances only the checked-out local default branch (never forcing it, creating merge commits, or stashing) and otherwise deletes only local branches whose upstream tracking branch is gone and that have no worktree; it never removes or changes a herdr-managed worktree, so it cannot discard unlanded work.
+The self-update exception (`sbin/fm-update.sh`) is likewise fast-forward only, skips dirty/diverged/off-default targets, never stashes or forces, and touches only this firstmate repo plus seeded secondmate homes, never anything under `projects/`.
+
+**Shared-template push audit (AGENTS.md hard rule #2 / repo stewardship).** Before pushing this reusable firstmate repository, inspect the tracked change set for personal names, fleet identities, absolute home paths, hostnames, and tracked operational directories.
+Scrub genuine leaks to the repository's generic default, confirm local `config/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.lavish/` material is untracked, and state whether the remote update is fast-forward or would require a force.
+
 ## 6. Project management
 
 All projects live flat under `projects/`.
