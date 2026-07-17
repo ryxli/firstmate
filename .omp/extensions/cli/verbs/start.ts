@@ -1,11 +1,11 @@
 // fm verb: start - launch a fresh interactive firstmate session with zero typing.
 //
-// Runs omp from the repo root so project-dir discovery picks up the ship
-// extensions and .omp/config.yml (which preloads the bootstrap and recovery
-// skills into the cached prefix). With no arguments it sends the standard
-// kickoff message so AGENTS.md's session-start sequence begins immediately;
-// any arguments are passed through to omp verbatim instead (e.g. `fm start -c`
-// to continue the previous session).
+// Runs omp from the active firstmate home so home-local identity and instructions
+// load for persistent supervisors. Without FM_HOME, falls back to the repo root
+// so project-dir discovery picks up the ship extensions and .omp/config.yml.
+// With no arguments it sends the standard kickoff message so AGENTS.md's
+// session-start sequence begins immediately; any arguments are passed through
+// to omp verbatim instead (e.g. `fm start -c` to continue the previous session).
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -50,7 +50,7 @@ function run(argv: string[]): number {
 	const args = argv.slice(1);
 	const ompArgs = [`--append-system-prompt=${preloadBlock()}`, ...(args.length > 0 ? args : [KICKOFF])];
 	const result = spawnSync("omp", ompArgs, {
-		cwd: REPO_ROOT,
+		cwd: process.env.FM_HOME?.trim() || REPO_ROOT,
 		stdio: "inherit",
 		env: process.env,
 	});
