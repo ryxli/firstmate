@@ -65,7 +65,7 @@ function linkedReceipt(home, sourceRoot, revision, pane, session, probe, overrid
 }
 
 try {
-  run("git", ["init", "--bare", origin]);
+  run("git", ["init", "--bare", "--initial-branch=main", origin]);
   run("git", ["init", seed]);
   git(["config", "user.email", "fmtest@example.com"], seed);
   git(["config", "user.name", "fmtest"], seed);
