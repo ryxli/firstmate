@@ -26,6 +26,18 @@
 # Ship tasks include a project-memory section so durable project-intrinsic
 # learnings can be committed to AGENTS.md through the project's delivery path.
 # Refuses to overwrite an existing brief.
+#
+# Usage: fm-brief.sh --regen <id>
+#        fm-brief.sh --check <id>
+#   --regen and --check make data/secondmates.md the only hand-edited home for a
+#   secondmate's identity/scope: both data/<id>/brief.md and <home>/data/charter.md
+#   are generated projections of the registry line for <id> plus a tracked
+#   template. --regen writes both projections; --check regenerates in memory and
+#   exits nonzero, naming any projection whose current content differs from what
+#   generation would produce (a projection missing its mate-owned section markers
+#   also fails --check). Each projection carries exactly one delimited mate-owned
+#   free-form section, preserved verbatim across regenerations; --check ignores
+#   that section's content but still requires the markers to be present.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,6 +47,253 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+
+# --- secondmate charter regeneration -----------------------------------------
+# data/secondmates.md is the only hand-edited home for secondmate identity and
+# scope. data/<id>/brief.md and <home>/data/charter.md are both generated
+# projections of the registry line for <id> plus the template below; never
+# hand-edit them outside the one mate-owned section each carries.
+
+MATE_SECTION_BEGIN='<!-- BEGIN MATE-OWNED NOTES: preserved verbatim across regeneration; edit only inside this block -->'
+MATE_SECTION_END='<!-- END MATE-OWNED NOTES -->'
+MATE_SECTION_DEFAULT='(no mate-owned notes yet)'
+
+# find_secondmate_line <id> <registry-file>
+# Prints the raw registry line for <id>, or fails if the registry or id is absent.
+find_secondmate_line() {
+  local id=$1 reg=$2 line rid
+  [ -f "$reg" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "- "*)
+        rid=${line#- }
+        rid=${rid%% *}
+        if [ "$rid" = "$id" ]; then
+          printf '%s\n' "$line"
+          return 0
+        fi
+        ;;
+    esac
+  done < "$reg"
+  return 1
+}
+
+# secondmate_summary <line> <id>
+# Prints the charter-summary text between "<id> - " and " (home:" on a registry line.
+secondmate_summary() {
+  local line=$1 id=$2 rest
+  rest=${line#- }
+  rest=${rest#"$id"}
+  rest=${rest# - }
+  rest=${rest%% \(home:*}
+  printf '%s\n' "$rest"
+}
+
+# secondmate_parse_fields <line>
+# Sets SM_HOME, SM_WORKSPACE, SM_NAME, SM_SCOPE, SM_PROJECTS, SM_ADDED from the
+# parenthesized field block of a registry line. Fields are anchored on their
+# fixed literal "; <field>: " separators (not a naive "; " split), so a
+# semicolon inside a field's own free text (e.g. the scope prose) never
+# misparses as a field boundary.
+secondmate_parse_fields() {
+  local line=$1 inner rest
+  inner=${line#*\(}
+  inner=${inner%\)}
+  rest=$inner
+  rest=${rest#home: }
+  if [[ $rest == *"; workspace: "* ]]; then
+    SM_HOME=${rest%%"; workspace: "*}
+    rest=${rest#*"; workspace: "}
+    SM_WORKSPACE=${rest%%"; name: "*}
+    rest=${rest#*"; name: "}
+  else
+    SM_HOME=${rest%%"; name: "*}
+    SM_WORKSPACE=""
+    rest=${rest#*"; name: "}
+  fi
+  SM_NAME=${rest%%"; scope: "*}
+  rest=${rest#*"; scope: "}
+  SM_SCOPE=${rest%%"; projects: "*}
+  rest=${rest#*"; projects: "}
+  SM_PROJECTS=${rest%%"; added "*}
+  rest=${rest#*"; added "}
+  SM_ADDED=$rest
+}
+
+# resolve_escalation_name <config-dir>
+# The main firstmate's display name for prose escalation text, resolved from
+# config/identity name= at generation time. Falls back to "the main firstmate"
+# (not fm-identity-lib.sh's generic "firstmate" default) so a generated charter
+# never hard-codes a specific mate's name.
+resolve_escalation_name() {
+  fm_identity_value "$1" name 2>/dev/null || printf 'the main firstmate\n'
+}
+
+# format_project_lines <csv>
+# Renders a registry "projects:" csv field as a bulleted list, or the
+# pure-domain placeholder when empty/"(none)".
+format_project_lines() {
+  local csv=$1
+  if [ -z "$csv" ] || [ "$csv" = "(none)" ]; then
+    printf '%s\n' "(none) - pure-domain secondmate; your work surface is this firstmate home."
+    return 0
+  fi
+  printf '%s\n' "$csv" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sed 's/^/- /'
+}
+
+# extract_mate_owned <file>
+# Prints the verbatim content between the mate-owned markers in <file>, or the
+# empty scaffold placeholder when the file is missing or lacks both markers.
+extract_mate_owned() {
+  local file=$1
+  if [ -f "$file" ] && grep -qF "$MATE_SECTION_BEGIN" "$file" && grep -qF "$MATE_SECTION_END" "$file"; then
+    awk -v begin="$MATE_SECTION_BEGIN" -v end="$MATE_SECTION_END" '
+      $0 == begin { capture=1; next }
+      $0 == end { capture=0 }
+      capture { print }
+    ' "$file"
+  else
+    printf '%s\n' "$MATE_SECTION_DEFAULT"
+  fi
+}
+
+# render_secondmate_projection <id> <line> <config-dir> <mate-owned-content>
+# Renders the full generated charter/brief text for a registered secondmate.
+render_secondmate_projection() {
+  local id=$1 line=$2 config_dir=$3 prior_mate_owned=$4
+  local charter_text escalation_name escalation_slug project_lines
+  secondmate_parse_fields "$line"
+  charter_text=$(secondmate_summary "$line" "$id")
+  escalation_name=$(resolve_escalation_name "$config_dir")
+  escalation_slug=$(fm_supervisor_slug "$config_dir")
+  project_lines=$(format_project_lines "$SM_PROJECTS")
+
+  cat <<EOF
+You are a secondmate: a persistent domain supervisor managed by the main firstmate. Work on your own; do not wait for a human.
+
+<!-- fm-charter: schema-version=1; generated from data/secondmates.md via fm-brief.sh; do not hand-edit outside the mate-owned section below -->
+
+# Charter
+You are $SM_NAME, a persistent secondmate managed by the main firstmate.
+$charter_text
+
+# Routing scope
+$SM_SCOPE
+
+# Project clones
+$project_lines
+
+# Operating model
+You are in an isolated firstmate home.
+Your local \`data/\`, \`state/\`, \`config/\`, and \`projects/\` directories are yours to operate.
+The projects above are local clones for work you supervise; they are not an exclusive ownership claim.
+OMP injects the applicable \`AGENTS.md\` at session start.
+Do not tool-read it during ordinary boot or recovery.
+At startup, read only this charter, compact \`data/captain.md\`, \`data/backlog.md:1-20\`, the local \`state/\` listing plus active \`.meta\` and \`.status\` files, pending peer messages, and the current whiteboard diff.
+Use selectors and persisted artifacts instead of whole-file evidence reads or broad directory searches.
+Delegate investigation after three primary-thread tool calls unless the next call conclusively closes the decision.
+Delegate project work to your own crewmates with the normal firstmate lifecycle: brief, spawn, direct crewmate status-file reporting, \`fm-send.sh\` pane steering, teardown, and recovery.
+Do not invent a second delegation system.
+When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
+Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
+You do not generate your own work.
+Act only on tasks the main firstmate routes to you.
+Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
+Supervision is automatic and in-process; there is no watcher, wake-queue, beacon, or separate supervisor process.
+
+# Escalation to main firstmate
+Handle routine work yourself.
+Escalate only captain-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
+Use the agent tool peer_send when available, or type /peer send $escalation_slug "{state}: {one short line}" from the composer, addressed to $escalation_name; set priority only for captain-blocking decisions, failures, or work ready for review.
+States: needs-decision, blocked, done, failed.
+Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
+
+# Definition of done
+You are persistent by default. Do not exit just because your queue is empty.
+On startup and restart, run normal firstmate bootstrap and recovery for your own home, but only to RECONCILE work that is already yours: in-flight crewmates, tracked backlog items, and durable watches recorded in this home.
+When you have no assigned or in-flight work after that reconciliation, go idle and wait silently for the main firstmate to route you a task.
+An empty queue is a healthy resting state, not a cue to invent work: never spawn a survey, audit, or any self-directed "find work" task on your own initiative.
+If this charter cannot be carried out, send blocked: {why} or failed: {why} to the main firstmate through the fleet peer bus and stop.
+
+# Mate-owned notes
+$MATE_SECTION_BEGIN
+$prior_mate_owned
+$MATE_SECTION_END
+EOF
+}
+
+# check_projection <path> <expected-content>
+# Fails (prints a diagnostic to stderr) when <path> is missing, lacks either
+# mate-owned marker, or differs from <expected-content>.
+check_projection() {
+  local path=$1 expected=$2 actual
+  if [ ! -f "$path" ]; then
+    echo "check: missing projection: $path" >&2
+    return 1
+  fi
+  if ! grep -qF "$MATE_SECTION_BEGIN" "$path" || ! grep -qF "$MATE_SECTION_END" "$path"; then
+    echo "check: projection missing mate-owned section markers: $path" >&2
+    return 1
+  fi
+  actual=$(cat "$path")
+  if [ "$actual" != "$expected" ]; then
+    echo "check: projection differs from registry-generated content: $path" >&2
+    return 1
+  fi
+  return 0
+}
+
+# cmd_regen_or_check <regen|check> <id>
+# Looks <id> up in $DATA/secondmates.md, renders both projections (each
+# preserving its own current mate-owned section verbatim), then either writes
+# them (regen) or diffs them against what is on disk (check).
+cmd_regen_or_check() {
+  local mode=$1 id=$2 line brief_path charter_path
+  line=$(find_secondmate_line "$id" "$DATA/secondmates.md") || {
+    echo "error: no registered secondmate '$id' in $DATA/secondmates.md" >&2
+    return 1
+  }
+  secondmate_parse_fields "$line"
+  brief_path="$DATA/$id/brief.md"
+  charter_path="$SM_HOME/data/charter.md"
+
+  local brief_prior charter_prior brief_content charter_content
+  brief_prior=$(extract_mate_owned "$brief_path")
+  charter_prior=$(extract_mate_owned "$charter_path")
+  brief_content=$(render_secondmate_projection "$id" "$line" "$CONFIG" "$brief_prior")
+  charter_content=$(render_secondmate_projection "$id" "$line" "$CONFIG" "$charter_prior")
+
+  if [ "$mode" = regen ]; then
+    mkdir -p "$(dirname "$brief_path")"
+    printf '%s\n' "$brief_content" > "$brief_path"
+    mkdir -p "$(dirname "$charter_path")"
+    printf '%s\n' "$charter_content" > "$charter_path"
+    echo "regenerated: $brief_path"
+    echo "regenerated: $charter_path"
+    return 0
+  fi
+
+  local failed=0
+  check_projection "$brief_path" "$brief_content" || failed=1
+  check_projection "$charter_path" "$charter_content" || failed=1
+  [ "$failed" -eq 0 ] || return 1
+  echo "check: ok ($id)"
+  return 0
+}
+
+case "${1:-}" in
+  --regen)
+    [ $# -eq 2 ] || { echo "usage: fm-brief.sh --regen <id>" >&2; exit 1; }
+    cmd_regen_or_check regen "$2"
+    exit $?
+    ;;
+  --check)
+    [ $# -eq 2 ] || { echo "usage: fm-brief.sh --check <id>" >&2; exit 1; }
+    cmd_regen_or_check check "$2"
+    exit $?
+    ;;
+esac
+
 KIND=ship
 POS=()
 for a in "$@"; do

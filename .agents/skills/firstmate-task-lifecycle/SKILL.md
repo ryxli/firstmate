@@ -33,6 +33,10 @@ Every persistent secondmate has one line:
 ```
 
 The `scope:` field is used during intake; the `projects:` field is a non-exclusive clone list, not ownership.
+`data/secondmates.md` is the only hand-edited home for a secondmate's identity and scope.
+`data/<id>/brief.md` and `<home>/data/charter.md` are generated projections of this registry line plus a tracked template, not separate sources of truth.
+Regenerate both with `sbin/fm-brief.sh --regen <id>` after editing the registry, and verify them with `sbin/fm-brief.sh --check <id>`, which exits nonzero and names any projection that has drifted from what the registry would generate.
+Each projection carries exactly one mate-owned free-form section, delimited by marker comments, that a live secondmate may edit and that survives regeneration verbatim; hand-edit a charter or brief only inside that section, never elsewhere.
 Use `sbin/fm-home-seed.sh <id> <home|-> <project>...` after scaffolding the charter to provision the persistent home and registry entry; `-` creates a herdr-managed git worktree of the firstmate repo at `<parent-of-repo>/fm-sm-<id>` and records the herdr workspace ID in the registry.
 The workspace ID is the durable handle for the home: teardown calls `herdr worktree remove --workspace <id>` to release the slot cleanly; a home without a workspace ID in the registry is a plain clone and is removed with `rm -rf`.
 The home persists with no live process and is never recycled by herdr until explicitly released; that release happens only on explicit retirement or seed rollback, never on a routine restart or recovery.
@@ -325,6 +329,8 @@ The scaffold's definition of done encodes the idle-by-default contract (section 
 `sbin/fm-home-seed.sh` copies the charter into the secondmate home as `data/charter.md`; `sbin/fm-spawn.sh --secondmate` launches it through the same launch-template path.
 After seeding, hand the new secondmate's in-scope queued items off from the main backlog with `sbin/fm-backlog-handoff.sh` (section 6).
 `sbin/fm-home-seed.sh` refuses to copy a missing or placeholder charter.
+Once seeded, `data/secondmates.md` becomes the source of truth for that secondmate's identity and scope: do not hand-edit `data/<id>/brief.md` or `<home>/data/charter.md` again except inside their one mate-owned section.
+Update the registry line instead, then run `sbin/fm-brief.sh --regen <id>` to regenerate both projections and `sbin/fm-brief.sh --check <id>` to confirm they match what the registry generates.
 The status-reporting protocol is intentionally sparse: crewmates append status only for supervisor-actionable phase changes or `needs-decision`/`blocked`/`done`/`failed`, because every append wakes firstmate.
 For any generated brief that still contains `{TASK}`, replace it with a clear task description, acceptance criteria, and any constraints or context the crewmate needs before spawning or seeding.
 When the task hands the crewmate a compiled action (an exact command or procedure), always pair it with an explicit return-shape contract - what the final report/output must literally contain - or the crewmate may act and report "done" without the data (measured: data/research/fm-panes-ab).
