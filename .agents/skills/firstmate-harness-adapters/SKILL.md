@@ -88,3 +88,8 @@ pi has no permission system - crewmates are always autonomous.
 Keep the brief as ONE positional argument - multiple positional args become separate queued messages (fm-spawn's template does this correctly).
 Project trust dialog can appear on the first pi run in any not-yet-trusted directory (observed even on clean worktrees); accept with Enter - the decision persists per path in `~/.pi/agent/trust.json`, so later spawns in the same worktree slot skip it.
 Environment marker for harness detection: pi sets `PI_CODING_AGENT=true` for its children.
+
+### omp always-on skill injection
+
+omp injects the skills named in a home's `config/omp.yml` `includeSkills:` list into every session at start, resolved against the home's skill surfaces (`.agents/skills` via the home symlink, `~/.omp/agent/managed-skills`, mate-local dirs).
+That injection is always-on context cost per turn; audit it with `sbin/fm-context-weight` (per-mate section) before adding a skill to any mate's list.

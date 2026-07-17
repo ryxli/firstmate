@@ -6,6 +6,8 @@ Firstmate's shared infrastructure uses a main-only workflow.
 Maintainers commit proportionately verified shared changes directly to `main` and push `origin main`.
 External contributions are welcome through ordinary GitHub pull requests.
 
+Runtime tool versions (node, bun, and the `herdr` binary) are managed with `mise`; install it once per machine and the pinned versions follow the repo.
+
 ## Workflow
 
 1. Fork the repository, then clone your fork.
