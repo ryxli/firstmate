@@ -5,7 +5,12 @@
 #          Silent = all good.
 #          Lines: "MISSING: <tool> (install: <command>)", "NEEDS_GH_AUTH",
 #                 "CREW_HARNESS_OVERRIDE: <name>", "FLEET_SYNC: <repo>: skipped: <reason>",
-#                 "TASKS_AXI: available".
+#                 "TASKS_AXI: available",
+#                 "MISSING_EXT: <name> (provision: chezmoi apply - dotfiles repo is the canonical owner)".
+#          MISSING_EXT covers the per-machine provisioned OMP extensions expected
+#          as directories under ~/.omp/agent/extensions (override the dir with
+#          FM_OMP_EXT_OVERRIDE). They are dotfiles-owned; bootstrap only declares,
+#          never vendors or installs them.
 #          tasks-axi is an OPTIONAL backlog-management capability reported only
 #          when tasks-axi --version is 0.1.1 or newer. It is never a MISSING
 #          line and never prompts an install.
@@ -124,6 +129,19 @@ locked_dependency_sync() {
   echo "BUN_DEPENDENCY: locked install failed in $code_root"
 }
 
+# Per-machine provisioned OMP extensions, owned by the dotfiles repo (chezmoi).
+# Bootstrap declares a missing one; it never vendors or installs extensions.
+OMP_EXTENSIONS="whiteboard fleet-bus lavish textguard thinking-tag-guard agent-effectiveness capture"
+OMP_EXT_DIR="${FM_OMP_EXT_OVERRIDE:-$HOME/.omp/agent/extensions}"
+
+omp_ext_check() {
+  local ext
+  for ext in $OMP_EXTENSIONS; do
+    [ -d "$OMP_EXT_DIR/$ext" ] || \
+      echo "MISSING_EXT: $ext (provision: chezmoi apply - dotfiles repo is the canonical owner)"
+  done
+}
+
 # herdr is the terminal/agent substrate and also manages secondmate home worktrees.
 TOOLS="herdr node gh gh-axi chrome-devtools-axi lavish-axi"
 
@@ -149,6 +167,7 @@ done
 if command -v herdr >/dev/null 2>&1 && ! herdr_server_running; then
   echo "MISSING: herdr-server (start with: herdr)"
 fi
+omp_ext_check
 self_pane_sync
 herdr_omp_patch_sync
 gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"

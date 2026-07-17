@@ -55,6 +55,21 @@ SH
   printf '%s\n' "$fakebin"
 }
 
+OMP_EXTENSIONS="whiteboard fleet-bus lavish textguard thinking-tag-guard agent-effectiveness capture"
+
+make_ext_fixture() {
+  local dir=$1 ext
+  shift
+  mkdir -p "$dir"
+  for ext in "$@"; do
+    mkdir -p "$dir/$ext"
+  done
+  printf '%s\n' "$dir"
+}
+
+# shellcheck disable=SC2086
+ALL_EXT_DIR=$(make_ext_fixture "$TMP_ROOT/ext-all" $OMP_EXTENSIONS)
+
 seed_handoff() {
   local home=$1
   mkdir -p "$home/data/handoff"
@@ -63,14 +78,16 @@ seed_handoff() {
 }
 
 run_bootstrap() {
-  local home=$1 fakebin=$2
+  local home=$1 fakebin=$2 extdir=${3:-$ALL_EXT_DIR}
   seed_handoff "$home"
-  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" "$ROOT/sbin/fm-bootstrap.sh"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_OMP_EXT_OVERRIDE="$extdir" \
+    "$ROOT/sbin/fm-bootstrap.sh"
 }
 
 run_bootstrap_existing() {
-  local home=$1 fakebin=$2
-  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" "$ROOT/sbin/fm-bootstrap.sh"
+  local home=$1 fakebin=$2 extdir=${3:-$ALL_EXT_DIR}
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_OMP_EXT_OVERRIDE="$extdir" \
+    "$ROOT/sbin/fm-bootstrap.sh"
 }
 
 test_bootstrap_silent_without_no_mistakes() {
@@ -142,7 +159,33 @@ test_bootstrap_surfaces_handoff_failure() {
   pass "bootstrap surfaces handoff validation failure before normal sync"
 }
 
+test_bootstrap_silent_with_all_omp_extensions() {
+  local case_dir fakebin out
+  case_dir="$TMP_ROOT/ext-all-present"
+  mkdir -p "$case_dir/home"
+  fakebin=$(make_fake_toolchain "$case_dir")
+
+  out=$(run_bootstrap "$case_dir/home" "$fakebin" "$ALL_EXT_DIR")
+  [ -z "$out" ] || fail "bootstrap reported problems with all OMP extensions present: $out"
+  pass "bootstrap is silent when all provisioned OMP extensions are present"
+}
+
+test_bootstrap_reports_missing_omp_extension() {
+  local case_dir fakebin extdir out expected
+  case_dir="$TMP_ROOT/ext-one-missing"
+  mkdir -p "$case_dir/home"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  extdir=$(make_ext_fixture "$case_dir/ext" whiteboard fleet-bus lavish thinking-tag-guard agent-effectiveness capture)
+
+  out=$(run_bootstrap "$case_dir/home" "$fakebin" "$extdir")
+  expected='MISSING_EXT: textguard (provision: chezmoi apply - dotfiles repo is the canonical owner)'
+  [ "$out" = "$expected" ] || fail "bootstrap did not report the one missing OMP extension exactly: $out"
+  pass "bootstrap reports exactly one MISSING_EXT line for a missing OMP extension"
+}
+
 test_bootstrap_silent_without_no_mistakes
 test_bootstrap_reports_tasks_axi_when_available
 test_bootstrap_ignores_incompatible_tasks_axi
 test_bootstrap_surfaces_handoff_failure
+test_bootstrap_silent_with_all_omp_extensions
+test_bootstrap_reports_missing_omp_extension
