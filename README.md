@@ -42,28 +42,20 @@ $ claude   # launch your agent harness here; AGENTS.md takes over
 > alright merge it
 ```
 
-## Install
-
-Clone the repo and launch your agent harness in it, as shown in Quick Start above.
-`AGENTS.md` takes over from there: it runs `sbin/fm-bootstrap.sh`, which detects the toolchain (git, GitHub auth, herdr, and the rest), lists anything missing with its install command, and installs only after you approve.
-See `AGENTS.md` section 3 for the full bootstrap procedure.
-
-Each task then runs in its own herdr pane, so you can watch it in real time or type into the pane directly.
+There is nothing else to install: on first launch, `AGENTS.md` runs the bootstrap (`AGENTS.md` section 3), which detects the toolchain (git, GitHub auth, herdr, and the rest), lists anything missing with its install command, and installs only after you approve.
 
 ## How It Works
 
 firstmate reads `projects/` and turns your chat requests into tasks, dispatched to workers running in isolated herdr panes and disposable git worktrees.
 Ship tasks change a project and land as a PR or an approved local merge; scout tasks investigate, plan, or audit and end in a report, never touching the project.
-An in-process supervision extension watches herdr events and status files and wakes firstmate only when a decision is actually needed, so routine progress stays silent.
-For larger fleets, persistent domain supervisors split the work, each with its own home, state, and session lock.
-All of this state (backlog, briefs, and registries) lives on disk, so restarting firstmate is a non-event.
+All orchestration state (backlog, briefs, and registries) lives on disk, so restarting firstmate is a non-event.
 
 See `AGENTS.md` sections 2 (layout and state), 5 (recovery), 6 (task lifecycle), 7 (supervision protocol), and 9 (self-update) for the full mechanics.
 
-## The sbin/ toolbelt
+## The fm CLI
 
-firstmate drives these directly; you rarely need to, but they work by hand too.
-Run `sbin/fm-toolbelt` for the live, generated tool list, one line per script.
+firstmate drives its tooling through one typed command, `sbin/fm`; you rarely need it by hand, but every verb works standalone.
+Run `sbin/fm toolbelt` for the live, generated tool list.
 
 ## Configuration
 
