@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Harness detection (fm harness) and the per-adapter launch templates
-# (fm-spawn.sh launch_template). Pins the omp adapter and guards the omp/claude
+# (fm spawn launch_template). Pins the omp adapter and guards the omp/claude
 # ordering regression: omp sets BOTH OMPCODE=1 and CLAUDECODE=1, so detection
 # MUST check OMPCODE first or omp misdetects as claude.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FM="$ROOT/sbin/fm"
-SPAWN="$ROOT/sbin/fm-spawn.sh"
+SPAWN_TS="$ROOT/.omp/extensions/cli/verbs/spawn.ts"
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
@@ -51,21 +51,9 @@ test_pi_marker() {
 
 # --- launch templates --------------------------------------------------------
 
-# Extract just the launch_template function from fm-spawn.sh and source it so we
-# can assert the resolved command per adapter without running the full script.
-load_launch_template() {
-  local tmp
-  tmp=$(mktemp "${TMPDIR:-/tmp}/fm-launch-template.XXXXXX") || return 1
-  awk '/^launch_template\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$SPAWN" > "$tmp"
-  # shellcheck disable=SC1090
-  . "$tmp"
-  rm -f "$tmp"
-}
-
 test_omp_launch_template() {
-  load_launch_template || fail "could not load launch_template from fm-spawn.sh"
   local out
-  out=$(launch_template omp)
+  out=$(bun -e 'import { LAUNCH_TEMPLATES } from "'"$SPAWN_TS"'"; console.log(LAUNCH_TEMPLATES.omp)')
   # shellcheck disable=SC2016 # literal command-substitution text is the expected template
   [ "$out" = 'omp --auto-approve "$(cat __BRIEF__)"' ] \
     || fail "omp launch template wrong: '$out'"
@@ -73,19 +61,18 @@ test_omp_launch_template() {
 }
 
 test_known_templates_resolve() {
-  load_launch_template || fail "could not load launch_template from fm-spawn.sh"
-  local h
+  local h out
   for h in omp claude codex opencode pi; do
-    launch_template "$h" >/dev/null || fail "no launch template for known adapter '$h'"
+    out=$(bun -e 'import { LAUNCH_TEMPLATES } from "'"$SPAWN_TS"'"; console.log(LAUNCH_TEMPLATES[process.argv[1]] || "")' "$h")
+    [ -n "$out" ] || fail "no launch template for known adapter '$h'"
   done
   pass "every known adapter (omp/claude/codex/opencode/pi) has a launch template"
 }
 
 test_unknown_template_fails() {
-  load_launch_template || fail "could not load launch_template from fm-spawn.sh"
-  if launch_template definitely-not-a-harness >/dev/null 2>&1; then
-    fail "launch_template accepted an unknown adapter"
-  fi
+  local out
+  out=$(bun -e 'import { launchTemplate } from "'"$SPAWN_TS"'"; console.log(launchTemplate("definitely-not-a-harness") === null ? "null" : "value")')
+  [ "$out" = null ] || fail "launch_template accepted an unknown adapter"
   pass "launch_template rejects an unknown adapter"
 }
 

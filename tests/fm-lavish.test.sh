@@ -7,18 +7,39 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LIB="$ROOT/sbin/fm-lavish-lib.sh"
-OPEN="$ROOT/sbin/fm-lavish-open.sh"
+LAVISH_TS="$ROOT/.omp/extensions/cli/lib/lavish.ts"
+OPEN=("$ROOT/sbin/fm" lavish-open)
 REPLY=("$ROOT/sbin/fm" lavish-reply)
-STEWARD="$ROOT/sbin/fm-lavish-steward.sh"
+STEWARD=("$ROOT/sbin/fm" lavish-steward)
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-lavish.XXXXXX")
 trap 'pkill -f "$TMP_ROOT" 2>/dev/null; rm -rf "$TMP_ROOT"' EXIT
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
-# shellcheck source=sbin/fm-lavish-lib.sh
-. "$LIB"
+fm_lavish_key() {
+  bun -e 'import { lavishKey } from "'"$LAVISH_TS"'"; console.log(lavishKey(process.argv[1]))' "$1"
+}
+
+fm_lavish_base_url() {
+  bun -e 'import { lavishBaseUrl } from "'"$LAVISH_TS"'"; console.log(lavishBaseUrl())'
+}
+
+fm_lavish_canonical() {
+  bun -e 'import { lavishCanonical } from "'"$LAVISH_TS"'"; console.log(lavishCanonical(process.argv[1]))' "$1"
+}
+
+fm_lavish_state_dir() {
+  bun -e 'import { lavishStateDir } from "'"$LAVISH_TS"'"; console.log(lavishStateDir())'
+}
+
+fm_lavish_steward_alive() {
+  [ "$(bun -e 'import { lavishStewardAlive } from "'"$LAVISH_TS"'"; console.log(lavishStewardAlive(process.argv[1]) ? "yes" : "no")' "$1")" = yes ]
+}
+
+fm_lavish_kill_polls() {
+  bun -e 'import { lavishKillPolls } from "'"$LAVISH_TS"'"; lavishKillPolls(process.argv[1])' "$1"
+}
 
 test_key_is_sha256_16_and_deterministic() {
   local p k1 k2 expect
@@ -64,9 +85,10 @@ test_canonical_is_absolute() {
 }
 
 test_state_dir_honors_fm_home() {
-  local out
+  local out expect
+  expect=$(python3 -c 'import os, sys; print(os.path.normpath(os.path.join(sys.argv[1], "home", "state", "lavish")))' "$TMP_ROOT")
   out=$(FM_HOME="$TMP_ROOT/home" FM_STATE_OVERRIDE='' fm_lavish_state_dir)
-  [ "$out" = "$TMP_ROOT/home/state/lavish" ] \
+  [ "$out" = "$expect" ] \
     || fail "state dir did not honor FM_HOME: $out"
   pass "state dir honors FM_HOME"
 }
@@ -139,16 +161,16 @@ test_reply_arg_validation() {
 
 test_open_arg_validation() {
   local status
-  "$OPEN" >/dev/null 2>&1; status=$?
+  "${OPEN[@]}" >/dev/null 2>&1; status=$?
   [ "$status" -eq 2 ] || fail "open with no file should exit 2 (got $status)"
-  FM_HOME="$TMP_ROOT/openargs" "$OPEN" "$TMP_ROOT/does-not-exist.html" >/dev/null 2>&1; status=$?
+  FM_HOME="$TMP_ROOT/openargs" "${OPEN[@]}" "$TMP_ROOT/does-not-exist.html" >/dev/null 2>&1; status=$?
   [ "$status" -eq 1 ] || fail "open with a missing file should exit 1 (got $status)"
   pass "open rejects missing/absent file before any launch"
 }
 
 test_recover_empty_is_clean() {
   local out status
-  out=$(FM_HOME="$TMP_ROOT/recover-empty" FM_STATE_OVERRIDE='' "$OPEN" --recover 2>&1)
+  out=$(FM_HOME="$TMP_ROOT/recover-empty" FM_STATE_OVERRIDE='' "${OPEN[@]}" --recover 2>&1)
   status=$?
   [ "$status" -eq 0 ] || fail "recover on empty state should exit 0: $out"
   printf '%s\n' "$out" | grep -F "recovered: 0 steward(s)" >/dev/null \
@@ -168,7 +190,7 @@ test_steward_gives_up_when_server_dead() {
   printf '%s\n' '<!doctype html><title>x</title>' > "$home/art.html"
   PATH="$TMP_ROOT/deadbin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE='' \
     FM_LAVISH_FAIL_MAX=3 FM_LAVISH_BACKOFF_START=1 FM_LAVISH_BACKOFF_CAP=1 \
-    bash "$STEWARD" "$home/art.html" deadbeef00000000 - "" & sp=$!
+    "${STEWARD[@]}" "$home/art.html" deadbeef00000000 - "" & sp=$!
   waited=0
   while kill -0 "$sp" 2>/dev/null; do
     sleep 0.5; waited=$((waited + 1))

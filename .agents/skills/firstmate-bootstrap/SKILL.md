@@ -13,13 +13,13 @@ Read it at every session start, before any other decision.
 Bootstrap is detect, then consent, then install.
 Never install anything the cap has not approved in this session.
 
-Run `sbin/fm-bootstrap.sh`.
-Bootstrap also refreshes the fleet via `sbin/fm-fleet-sync.sh`: it fetches each remote-backed clone, clean-fast-forwards its local default branch when safe, and prunes local branches whose upstream is gone and that no worktree still needs, best-effort and non-fatal.
+Run `sbin/fm bootstrap`.
+Bootstrap also refreshes the fleet via `sbin/fm fleet-sync`: it fetches each remote-backed clone, clean-fast-forwards its local default branch when safe, and prunes local branches whose upstream is gone and that no worktree still needs, best-effort and non-fatal.
 Set `FM_FLEET_PRUNE=0` to temporarily disable that branch pruning.
 Silence means all good: say nothing and move on.
 Otherwise it prints one line per problem or capability fact; handle each:
 
-- `MISSING: <tool> (install: <command>)` - list the missing tools to the cap with a one-line purpose each plus the printed install commands, wait for consent (one approval may cover the list), then run `sbin/fm-bootstrap.sh install <approved tools...>`.
+- `MISSING: <tool> (install: <command>)` - list the missing tools to the cap with a one-line purpose each plus the printed install commands, wait for consent (one approval may cover the list), then run `sbin/fm bootstrap install <approved tools...>`.
 - `NEEDS_GH_AUTH` - ask the cap to run `! gh auth login` (interactive; you cannot run it for them).
 - `CREW_HARNESS_OVERRIDE: <name>` - record and use the override silently; surface a harness fact only if it actually blocks work or the cap asks.
 - `FLEET_SYNC: <repo>: skipped: <reason>` - bootstrap continued; investigate only if the dirty, diverged, or offline clone blocks work.

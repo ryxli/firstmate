@@ -27,7 +27,7 @@ Verify it against live state (tool output, remote, runtime signals) and only the
 
 ## Rewritten remote
 
-If the remote history was rewritten and a fast-forward is impossible, use `sbin/fm-update.sh --adopt-remote`.
+If the remote history was rewritten and a fast-forward is impossible, use `sbin/fm update --adopt-remote`.
 Read that script's header for its guarantees; do not hand-craft resets.
 
 ## Exit condition

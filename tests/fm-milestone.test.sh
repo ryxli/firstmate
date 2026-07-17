@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/fm-milestone.test.sh - smoke + determinism tests for sbin/fm-milestone.sh
+# tests/fm-milestone.test.sh - smoke + determinism tests for sbin/fm milestone
 # (benchmarks/milestone/run.ts), the thin longitudinal composition layer over
 # action-bench gates/corpus, the supervision replay bench, fm-context-weight,
 # and the tests/*.test.sh behavior suite.
@@ -7,7 +7,7 @@
 # Restricted to a single fast tests/*.test.sh file via FM_MILESTONE_TESTS_ONLY so
 # this stays quick; a real milestone run measures the full suite by default. The
 # tool's own test file is always excluded from that stage regardless (it would
-# otherwise invoke sbin/fm-milestone.sh from inside its own measurement).
+# otherwise invoke sbin/fm milestone from inside its own measurement).
 #
 # Requires bun (the bench/context-weight runtime), python3 (JSON diffing here),
 # and git (the --compare snapshot path). A host missing bun or python3 skips
@@ -32,7 +32,7 @@ assert_contains() {
   esac
 }
 
-RUN="$ROOT/sbin/fm-milestone.sh"
+RUN="$ROOT/sbin/fm"
 
 if ! command -v bun >/dev/null 2>&1; then
   printf 'ok - SKIP fm-milestone (bun not found; CI installs it via setup-bun)\n'
@@ -47,7 +47,7 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/fm-milestone.XXXXXX")"
 export FM_MILESTONE_TESTS_ONLY='^fm-action-bench\.test\.sh$'
 
 # --- one run produces one valid row + a matching markdown section ----------
-out="$("$RUN" smoke --out "$TMP/out1" --captured 2026-01-01T00:00:00.000000+00:00 --jobs 4 2>&1)" \
+out="$("$RUN" milestone smoke --out "$TMP/out1" --captured 2026-01-01T00:00:00.000000+00:00 --jobs 4 2>&1)" \
   || fail "fm-milestone.sh exited nonzero on a live run"$'\n'"$out"
 assert_contains "$out" "milestone 'smoke' appended" "reports the appended milestone"
 [ -f "$TMP/out1/milestones.jsonl" ] || fail "milestones.jsonl was not written"
@@ -80,7 +80,7 @@ pass "one run produces one valid superset row (schema, gates incl. repo_invarian
 # except captured (pinned identical here anyway) and per-stage wall-clock
 # "secs"/"elapsed_s" fields, which measure real subprocess wall time and can
 # never be bit-identical across two separate invocations.
-out2="$("$RUN" smoke --out "$TMP/out2" --captured 2026-01-01T00:00:00.000000+00:00 --jobs 4 2>&1)" \
+out2="$("$RUN" milestone smoke --out "$TMP/out2" --captured 2026-01-01T00:00:00.000000+00:00 --jobs 4 2>&1)" \
   || fail "fm-milestone.sh exited nonzero on the repeat run"$'\n'"$out2"
 
 A="$TMP/out1/milestones.jsonl" B="$TMP/out2/milestones.jsonl" python3 -c '
@@ -100,7 +100,7 @@ assert a == b, f"rows differ beyond timestamp/wall-clock fields:\nA={json.dumps(
 pass "re-running with identical inputs reproduces an identical row (modulo timestamp + wall-clock)"
 
 # --- FM_MILESTONE_NOTE / --note flows into the row and the markdown --------
-out3="$(FM_MILESTONE_NOTE='env note' "$RUN" noted --out "$TMP/out3" --jobs 4 2>&1)" \
+out3="$(FM_MILESTONE_NOTE='env note' "$RUN" milestone noted --out "$TMP/out3" --jobs 4 2>&1)" \
   || fail "fm-milestone.sh exited nonzero with FM_MILESTONE_NOTE set"$'\n'"$out3"
 assert_contains "$(cat "$TMP/out3/milestones.md")" "_env note_" "note renders in the markdown section"
 
@@ -109,7 +109,7 @@ assert_contains "$(cat "$TMP/out3/milestones.md")" "_env note_" "note renders in
 if command -v git >/dev/null 2>&1; then
   SHA_B="$(cd "$ROOT" && git rev-parse HEAD)"
   SHA_A="$(cd "$ROOT" && git rev-parse HEAD~1)"
-  out4="$("$RUN" --compare "$SHA_A" "$SHA_B" cmp-smoke --out "$TMP/out4" --jobs 4 2>&1)" \
+  out4="$("$RUN" milestone --compare "$SHA_A" "$SHA_B" cmp-smoke --out "$TMP/out4" --jobs 4 2>&1)" \
     || fail "fm-milestone.sh --compare exited nonzero"$'\n'"$out4"
   assert_contains "$out4" "fm-milestone --compare: baseline $SHA_A vs candidate $SHA_B" "compare announces baseline/candidate SHAs"
   assert_contains "$out4" "repo invariants |" "compare delta table includes the repo-invariants row"

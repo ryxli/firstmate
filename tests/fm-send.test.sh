@@ -72,7 +72,7 @@ test_send_submits_once() {
 
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="unknown" FM_FAKE_PANE_LINES="" \
-    "$ROOT/sbin/fm-send.sh" fm-task "atomic work" \
+    "$ROOT/sbin/fm" send fm-task "atomic work" \
     || fail "fm-send rejected a successful atomic submission"
 
   count=$(grep -cF 'herdr pane run w1:p1 atomic work' "$dir/herdr.log")
@@ -92,7 +92,7 @@ test_send_blocks_human_draft() {
   rc=0
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ cap draft │" \
-    "$ROOT/sbin/fm-send.sh" fm-task "must not land" >/dev/null 2>"$dir/err" \
+    "$ROOT/sbin/fm" send fm-task "must not land" >/dev/null 2>"$dir/err" \
     || rc=$?
 
   [ "$rc" = "75" ] || fail "expected unsent draft to exit 75, got $rc"
@@ -121,7 +121,7 @@ test_send_proceeds_on_empty_current_claude_code_composer() {
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" \
     FM_FAKE_PANE_LINES=$'                                                                              350644 tokens\n──────────────────────────────────────── some task title ──\n❯\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent' \
-    "$ROOT/sbin/fm-send.sh" fm-task "atomic work" \
+    "$ROOT/sbin/fm" send fm-task "atomic work" \
     || fail "fm-send blocked on a visibly empty current-UI composer"
 
   count=$(grep -cF 'herdr pane run w1:p1 atomic work' "$dir/herdr.log")
@@ -145,7 +145,7 @@ test_send_blocks_human_draft_in_current_claude_code_ui() {
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" \
     FM_FAKE_PANE_LINES=$'                                                                              350644 tokens\n──────────────────────────────────────── some task title ──\n❯ cap typed a draft\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent' \
-    "$ROOT/sbin/fm-send.sh" fm-task "must not land" >/dev/null 2>"$dir/err" \
+    "$ROOT/sbin/fm" send fm-task "must not land" >/dev/null 2>"$dir/err" \
     || rc=$?
 
   [ "$rc" = "75" ] || fail "expected unsent draft to exit 75, got $rc"
@@ -168,7 +168,7 @@ test_send_failure_is_not_retried() {
   rc=0
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="" FM_FAKE_RUN_RC=1 \
-    "$ROOT/sbin/fm-send.sh" fm-task "failing work" >/dev/null 2>"$dir/err" \
+    "$ROOT/sbin/fm" send fm-task "failing work" >/dev/null 2>"$dir/err" \
     || rc=$?
 
   [ "$rc" = "1" ] || fail "expected failed pane run to exit 1, got $rc"
@@ -190,7 +190,7 @@ test_sequential_sends_do_not_amplify() {
   while [ "$i" -le 20 ]; do
     PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
       FM_FAKE_AGENT_STATUS="unknown" FM_FAKE_PANE_LINES="" \
-      "$ROOT/sbin/fm-send.sh" fm-task "instruction $i" \
+      "$ROOT/sbin/fm" send fm-task "instruction $i" \
       || fail "sequential send $i failed"
     i=$((i + 1))
   done
@@ -211,11 +211,34 @@ test_key_bypasses_composer_guard() {
 
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
     FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="│ cap draft │" \
-    "$ROOT/sbin/fm-send.sh" fm-task --key Escape \
+    "$ROOT/sbin/fm" send fm-task --key Escape \
     || fail "control key unexpectedly blocked"
   grep -F 'herdr pane send-keys w1:p1 Escape' "$dir/herdr.log" >/dev/null \
     || fail "control key was not sent"
   pass "fm-send preserves explicit control-key sends"
+}
+
+test_missing_home_metadata_uses_cwd_home() {
+  local dir home fb rc
+  dir="$TMP_ROOT/missing-home-meta"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  printf '# fixture home\n' > "$home/AGENTS.md"
+  home=$(cd "$home" && pwd -P)
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  (
+    cd "$home" || exit 1
+    env -u FM_HOME PATH="$fb:$PATH" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+      "$ROOT/sbin/fm" send fm-missing "wrong home" >/dev/null 2>"$dir/err"
+  ) || rc=$?
+
+  [ "$rc" = "1" ] || fail "missing home metadata returned rc $rc"
+  grep -F "no metadata for fm-missing in $home/state" "$dir/err" >/dev/null \
+    || fail "fm-send did not explain missing home metadata from cwd home"
+  pass "fm-send reports missing metadata against the resolved home"
 }
 
 test_sendq_runtime_is_removed() {
@@ -231,4 +254,5 @@ test_send_blocks_human_draft_in_current_claude_code_ui
 test_send_failure_is_not_retried
 test_sequential_sends_do_not_amplify
 test_key_bypasses_composer_guard
+test_missing_home_metadata_uses_cwd_home
 test_sendq_runtime_is_removed

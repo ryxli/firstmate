@@ -1,10 +1,10 @@
-// fm verb: resolve-spawn - validate spawn prerequisites before fm-spawn.sh
+// fm verb: resolve-spawn - validate spawn prerequisites before fm spawn
 // creates a git worktree or herdr pane: the crew harness binary is resolvable
 // and on PATH, the project registry has a matching entry (warn-only, not
 // blocking), and the worktree base directory exists and is writable.
 // Ported behavior-preserving from the former sbin/fm resolve-spawn, with
 // the launch-command-word helper it sourced from sbin/fm-spawn-lib.sh inlined
-// below (that lib file is still sourced by sbin/fm-spawn.sh and sbin/fm-brief.sh).
+// below.
 // Usage: fm resolve-spawn <project> [harness-override]
 
 import { spawnSync } from "node:child_process";

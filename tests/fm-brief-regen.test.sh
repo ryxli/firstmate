@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies fm-brief.sh --regen/--check make data/secondmates.md the only
+# Verifies `fm brief` --regen/--check make data/secondmates.md the only
 # hand-edited home for secondmate identity/scope: data/<id>/brief.md and
 # <home>/data/charter.md are generated projections of the registry line plus
 # the tracked template, with exactly one mate-owned section preserved
@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BRIEF="$ROOT/sbin/fm-brief.sh"
+BRIEF=("$ROOT/sbin/fm" brief)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-brief-regen.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -31,7 +31,7 @@ EOF
 
 run() {
   FM_HOME="$HOME_DIR" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_STATE_OVERRIDE='' \
-    "$BRIEF" "$@"
+    "${BRIEF[@]}" "$@"
 }
 
 BRIEF_PATH="$HOME_DIR/data/plum/brief.md"
@@ -39,11 +39,11 @@ CHARTER_PATH="$MATE_HOME/data/charter.md"
 
 # (a) generation fills registry fields and resolves the escalation name from a
 # fixture config/identity.
-run --regen plum >/dev/null || fail "fm-brief.sh --regen plum failed"
+run --regen plum >/dev/null || fail "fm brief --regen plum failed"
 [ -f "$BRIEF_PATH" ] || fail "regen did not write $BRIEF_PATH"
 [ -f "$CHARTER_PATH" ] || fail "regen did not write $CHARTER_PATH"
 for f in "$BRIEF_PATH" "$CHARTER_PATH"; do
-  grep -qF 'generated from data/secondmates.md via fm-brief.sh; do not hand-edit' "$f" \
+  grep -qF 'generated from data/secondmates.md via fm brief; do not hand-edit' "$f" \
     || fail "$f is missing the generated-projection marker line"
   grep -qF 'You are Plum, a persistent secondmate' "$f" \
     || fail "$f did not fill the registry charter/name field"
@@ -75,13 +75,13 @@ open(path, "w").write(text)
 PY
 grep -qF "Plum's own note: prefers terse verdicts." "$CHARTER_PATH" \
   || fail "test setup did not write the mate-owned note"
-run --regen plum >/dev/null || fail "second fm-brief.sh --regen plum failed"
+run --regen plum >/dev/null || fail "second fm brief --regen plum failed"
 grep -qF "Plum's own note: prefers terse verdicts." "$CHARTER_PATH" \
   || fail "regeneration did not preserve the mate-owned section verbatim"
 pass "a mate-owned section survives regeneration verbatim"
 
 # (c) --check passes right after regen.
-run --check plum >/dev/null || fail "fm-brief.sh --check plum did not pass right after regen"
+run --check plum >/dev/null || fail "fm brief --check plum did not pass right after regen"
 pass "--check passes right after regen"
 
 # (d) --check fails nonzero when a projection is edited outside the owned section.
@@ -100,7 +100,7 @@ grep -qF "$CHARTER_PATH" "$TMP/check.err" \
 pass "--check fails nonzero when a projection is edited outside the owned section"
 
 # Regenerating again restores the scaffold while still preserving the note.
-run --regen plum >/dev/null || fail "restorative fm-brief.sh --regen plum failed"
+run --regen plum >/dev/null || fail "restorative fm brief --regen plum failed"
 ! grep -qF "HAND-EDITED OUTSIDE THE OWNED SECTION" "$CHARTER_PATH" \
   || fail "regen did not restore the hand-edited scaffold text"
 grep -qF "Plum's own note: prefers terse verdicts." "$CHARTER_PATH" \
@@ -113,7 +113,7 @@ cat >> "$HOME_DIR/data/secondmates.md" <<EOF
 - fresh - Fresh domain secondmate (home: $TMP/mates/fresh; name: Fresh; scope: fresh domain scope; projects: (none); added 2026-06-25)
 EOF
 mkdir -p "$TMP/mates/fresh/data"
-run --regen fresh >/dev/null || fail "fm-brief.sh --regen fresh failed"
+run --regen fresh >/dev/null || fail "fm brief --regen fresh failed"
 grep -qF '(no mate-owned notes yet)' "$HOME_DIR/data/fresh/brief.md" \
   || fail "fresh secondmate brief did not scaffold the empty mate-owned placeholder"
 grep -qF '(no mate-owned notes yet)' "$TMP/mates/fresh/data/charter.md" \
@@ -129,8 +129,9 @@ grep -qF "no registered secondmate 'nope'" "$TMP/nope.err" \
   || fail "--check did not explain the unregistered id"
 pass "--check fails nonzero for an unregistered secondmate id"
 
-# (e) shellcheck-clean scripts.
+# (e) shellcheck-clean scripts. `fm brief` and `fm home-seed` are now
+# TypeScript (bun, not bash), so no bash caller remains in the regeneration
+# path to check; this is a vacuous pass guarding against a future bash
+# regeneration script rotting back in unchecked.
 command -v shellcheck >/dev/null 2>&1 || fail "shellcheck is not on PATH"
-shellcheck -x --severity=error "$BRIEF" "$ROOT/sbin/fm-home-seed.sh" \
-  || fail "shellcheck reported an error in the regeneration scripts"
-pass "regeneration scripts are shellcheck-clean"
+pass "regeneration scripts are shellcheck-clean (no bash scripts remain in this path)"

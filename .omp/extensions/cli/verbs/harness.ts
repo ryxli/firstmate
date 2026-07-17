@@ -5,7 +5,7 @@
 // omp sets OMPCODE=1 AND CLAUDECODE=1 (Claude API compat), so it MUST be
 // checked before the CLAUDECODE branch or omp misdetects as claude.
 // Output is plain text (bare harness name), not TOON: fm resolve-spawn and
-// fm-spawn.sh capture it directly via command substitution.
+// fm spawn capture it directly via command substitution.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";

@@ -24,7 +24,7 @@ Reconcile reality with your records before doing anything else:
 5. If the snapshot flags a recorded direct-report pane missing or unreachable, reconcile it through its meta as described below.
 6. For meta with no pane, reconcile by kind.
    For ordinary crewmates, check whether the worktree still exists under `$FM_WORKTREE_BASE/<id>`, salvage or report.
-   For `kind=secondmate`, treat the secondmate as a dead persistent direct report and respawn it with `sbin/fm-spawn.sh <id> --secondmate` against the recorded `home=`.
+   For `kind=secondmate`, treat the secondmate as a dead persistent direct report and respawn it with `sbin/fm spawn <id> --secondmate` against the recorded `home=`.
    If the meta is missing but `data/secondmates.md` still registers the secondmate, respawn from the registry entry and its persistent on-disk home.
 7. Do not reconstruct a secondmate's whole tree from the main home.
    The main firstmate reconciles only direct reports.
@@ -36,5 +36,5 @@ Reconcile reality with your records before doing anything else:
    If there is nothing that needs them, say nothing and resume.
 10. The supervision extension is already running (it loaded with this session); there is nothing to arm.
     If `state/.afk` is present, follow `skill://afk` so relevant events remain batched into one digest.
-11. Run `sbin/fm-lavish-open.sh --recover` to relaunch a steward for every still-open Lavish session this home owns that has no live steward.
+11. Run `sbin/fm lavish-open --recover` to relaunch a steward for every still-open Lavish session this home owns that has no live steward.
     A restart must not leave an open artifact unattended.

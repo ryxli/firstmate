@@ -30,7 +30,7 @@ run() { # stdin text -> runs linter, echoes nothing; sets global RC/OUT
 
 test_clean_prose_passes() {
   run "Added a steward worker that owns the lavish-axi poll for an artifact.
-The firstmate repo gains sbin/fm-lavish-open.sh; worktrees are unaffected."
+The firstmate repo gains sbin/fm lavish-open; worktrees are unaffected."
   [ "$RC" -eq 0 ] || fail "clean prose should pass (rc=$RC): $OUT"
   pass "clean engineering prose passes (project nouns not flagged)"
 }

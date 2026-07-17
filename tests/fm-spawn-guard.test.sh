@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Tests for the pre-spawn duplicate-pane guard in fm-spawn.sh --secondmate.
+# Tests for the pre-spawn duplicate-pane guard in fm spawn --secondmate.
 # The guard refuses to spawn when a live herdr pane already has cwd == the
 # resolved secondmate home, preventing ghost-session duplicate mates.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPAWN="$ROOT/sbin/fm-spawn.sh"
+SPAWN="$ROOT/sbin/fm"
 TMP_ROOT=
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
 # sbin/fm runs under bun; expose ONLY the real bun binary (not the mise shim
@@ -76,7 +76,7 @@ SH
   chmod +x "$BIN_DIR/herdr"
 }
 
-# Spawn wrapper: run fm-spawn.sh <id> <home> --secondmate with test overrides.
+# Spawn wrapper: run fm spawn <id> <home> --secondmate with test overrides.
 run_spawn() {
   local id=$1 home=$2
   FM_ROOT_OVERRIDE="$ROOT" \
@@ -87,7 +87,7 @@ run_spawn() {
     FM_CONFIG_OVERRIDE="$FM_TEST_HOME/config" \
     FM_SPAWN_NO_GUARD=1 \
     PATH="$BIN_DIR:$BASE_PATH" \
-    "$SPAWN" "$id" "$home" --secondmate 2>&1
+    "$SPAWN" spawn "$id" "$home" --secondmate 2>&1
 }
 
 # --- T1: guard fires when pane cwd matches secondmate home --------------------

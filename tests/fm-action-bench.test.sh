@@ -27,7 +27,7 @@ assert_contains() {
   esac
 }
 
-RUN="$ROOT/sbin/fm-action-bench.sh"
+RUN="$ROOT/sbin/fm"
 
 if ! command -v bun >/dev/null 2>&1; then
   printf 'ok - SKIP fm-action-bench (bun not found; CI installs it via setup-bun)\n'
@@ -44,7 +44,7 @@ fi
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/fm-action-bench.XXXXXX")"
 
 # --- integrity gates pass on the real corpus --------------------------------
-out="$("$RUN" gates)" || fail "gates exited nonzero on the real corpus"
+out="$("$RUN" action-bench gates)" || fail "gates exited nonzero on the real corpus"
 assert_contains "$out" "integrity gates: ALL PASS" "real corpus passes every integrity gate"
 assert_contains "$out" "x 6 gates" "reports the 6-gate suite"
 n=$(printf '%s\n' "$out" | sed -n 's/.*(\([0-9]\{1,\}\) scenarios x 6 gates).*/\1/p')
@@ -55,13 +55,13 @@ pass "integrity gates ALL PASS on the real corpus ($n scenarios)"
 # ref-easy-uppercase declares leakMarker "HELLO WORLD"; an arm carrying it must
 # trip no-leak + scaffold-agnostic, so the run aborts. Proves the gate can fail.
 printf 'HELLO WORLD\n' > "$TMP/leak-arm.txt"
-if "$RUN" gates --arm-file "$TMP/leak-arm.txt" >/dev/null 2>&1; then
+if "$RUN" action-bench gates --arm-file "$TMP/leak-arm.txt" >/dev/null 2>&1; then
   fail "gates must FAIL when a solution marker leaks into an arm"
 fi
 pass "gates catch a leaked solution marker in the harness arm"
 
 # --- corpus metrics + sanitize verdict (deterministic, pure) ----------------
-cout="$("$RUN" corpus)" || fail "corpus exited nonzero on the real (clean) corpus"
+cout="$("$RUN" action-bench corpus)" || fail "corpus exited nonzero on the real (clean) corpus"
 CORPUS="$cout" bun -e '
 const j = JSON.parse(process.env.CORPUS);
 const chk = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); } };
@@ -84,10 +84,10 @@ pass "corpus metrics correct (counts, per-source-class coverage, clean sanitize 
 # absolute home path / secret-like value; the sanitize gate MUST catch it and abort.
 # Proves the gate fails on unsafe content, not only that a clean corpus passes.
 for kind in abspath secret; do
-  if FM_ACTION_BENCH_POISON="$kind" "$RUN" gates >/dev/null 2>&1; then
+  if FM_ACTION_BENCH_POISON="$kind" "$RUN" action-bench gates >/dev/null 2>&1; then
     fail "sanitize gate must FAIL on a poisoned real-history scenario ($kind)"
   fi
-  pout="$(FM_ACTION_BENCH_POISON="$kind" "$RUN" gates 2>&1 || true)"
+  pout="$(FM_ACTION_BENCH_POISON="$kind" "$RUN" action-bench gates 2>&1 || true)"
   assert_contains "$pout" "FAIL" "poison ($kind) reports a gate failure"
   assert_contains "$pout" "real-history-safe" "poison ($kind) trips real-history-safe"
   pass "sanitize gate catches a poisoned real-history $kind"
@@ -106,7 +106,7 @@ cat > "$TMP/agg.runs.json" <<'JSON'
   ]
 }
 JSON
-"$RUN" replay "$TMP/agg.runs.json" > "$TMP/agg.out.json" || fail "replay exited nonzero"
+"$RUN" action-bench replay "$TMP/agg.runs.json" > "$TMP/agg.out.json" || fail "replay exited nonzero"
 AGG="$TMP/agg.out.json" bun -e '
 const j = JSON.parse(require("fs").readFileSync(process.env.AGG, "utf8"));
 const chk = (c, m) => { if (!c) { console.error("FAIL: " + m); process.exit(1); } };
@@ -126,7 +126,7 @@ chk(j.arms.control.capabilityFrontier === "easy", "control frontier=" + j.arms.c
 pass "replay aggregation math correct (rates, corrupt-success guard, cost-of-pass, frontier)"
 
 # --- the live path refuses without --live -----------------------------------
-"$RUN" run >/dev/null 2>&1 && fail "run must refuse the live path without --live"
+"$RUN" action-bench run >/dev/null 2>&1 && fail "run must refuse the live path without --live"
 pass "run refuses to spend tokens without --live"
 
 rm -rf "$TMP"

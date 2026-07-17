@@ -1,8 +1,7 @@
 // fm verb: link-ship-ext - install or refresh ship omp extension symlinks in a
 // secondmate home, resolved by id or explicit home path.
 // Ported behavior-preserving from the former sbin/fm link-ship-ext, with the
-// symlink logic it sourced from sbin/fm-ship-ext-lib.sh inlined below (that lib
-// is still sourced by sbin/fm-home-seed.sh for the transactional seed path).
+// symlink logic it sourced from sbin/fm-ship-ext-lib.sh inlined below.
 //
 // Each entry under .omp/extensions/ in this repo (canonical) is symlinked into
 // <home>/.omp/extensions/<name>. An existing correct symlink is a no-op; a

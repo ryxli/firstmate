@@ -3,9 +3,9 @@
 //
 // Promotes a scout task to a ship task in place: the crewmate keeps its
 // window, worktree, and loaded context; only the contract changes. Flips
-// kind= to ship in state/<task-id>.meta so fm-teardown.sh applies the full
+// kind= to ship in state/<task-id>.meta so fm teardown applies the full
 // unpushed-work protection again. After promoting, send the crewmate its
-// ship instructions via fm-send.sh (inventory scratch state, reset to a
+// ship instructions via fm send (inventory scratch state, reset to a
 // clean default-branch base, carry over only intended fix changes, create
 // branch fm/<task-id>, implement, then report done according to the
 // project's delivery mode).
@@ -55,7 +55,7 @@ async function run(argv: string[]): Promise<number> {
 
 	process.stdout.write(`promoted ${id} to ship (teardown protection restored)\n`);
 	process.stdout.write(
-		`next: sbin/fm-send.sh fm-${id} '<ship instructions: review scratch state with git status and git log; reset to a clean default-branch base; carry over only intended fix changes; create branch fm/${id}; implement; report done>'\n`,
+		`next: sbin/fm send fm-${id} '<ship instructions: review scratch state with git status and git log; reset to a clean default-branch base; carry over only intended fix changes; create branch fm/${id}; implement; report done>'\n`,
 	);
 	return 0;
 }

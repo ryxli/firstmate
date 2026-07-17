@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Verify both visual wrappers reject flag values and honor explicit homes.
+# Verify fleet-view rejects flag values, honors explicit homes, and preserves
+# live status when rendering an input snapshot.
 set -eu
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,7 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 make_home() {
   local home=$1
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/sbin"
-  : > "$home/sbin/fm-spawn.sh"
+  : > "$home/sbin/fm" spawn
   printf '%s\n' '## In flight' '- **active** - running (repo: app)' '## Queued' '## Done' > "$home/data/backlog.md"
   printf '%s\n' 'fixture manifest' > "$home/AGENTS.md"
 }
@@ -31,26 +32,13 @@ elif [ "$?" -ne 2 ]; then
   exit 1
 fi
 
-if FM_HOME="$A" FM_FLEET_PANES_FILE="$TMP/panes.json" \
-  FM_FLEET_STATS_FILE="$TMP/stats.json" \
-  bun "$ROOT/sbin/fm" kpi-view --home --no-open >/dev/null 2>&1; then
-  echo "KPI view accepted a following flag as --home value" >&2
-  exit 1
-elif [ "$?" -ne 2 ]; then
-  echo "KPI view returned the wrong missing-value status" >&2
-  exit 1
-fi
-
 FM_HOME="$A" FM_FLEET_PANES_FILE="$TMP/panes.json" \
   bun "$ROOT/sbin/fm" fleet-view --home "$B" --no-open --output "$TMP/fleet.html" >/dev/null
-FM_HOME="$A" FM_FLEET_PANES_FILE="$TMP/panes.json" FM_FLEET_STATS_FILE="$TMP/stats.json" \
-  bun "$ROOT/sbin/fm" kpi-view --home "$B" --no-open --output "$TMP/kpi.html" >/dev/null
 
-python3 - "$B" "${B//\//-}" "$TMP/fleet.html" "$TMP/kpi.html" <<'PY'
+python3 - "$B" "$TMP/fleet.html" <<'PY'
 import sys
-home, folder, fleet, kpi = sys.argv[1:]
+home, fleet = sys.argv[1:]
 assert home in open(fleet).read(), home
-assert folder in open(kpi).read(), folder
 PY
 
 printf '%s\n' '{"schema":"fleet-snapshot/1","home":"/tmp/home-a","homePaths":["/tmp/home-a","/tmp/plum","/tmp/gauge"],"health":{"state":"degraded","homes":3,"missingHomes":0,"livePanes":0,"herdr":"ok"},"agents":[],"tasks":[],"attention":[],"pending":[],"mates":[],"otherLivePanes":[],"notes":[]}' > "$TMP/count-input.json"
@@ -90,4 +78,4 @@ if (byLabel.get("done-working") !== "working") throw new Error(`done file plus l
 if (byLabel.get("done-missing") !== "done") throw new Error("missing pane did not fall back to persisted status");
 JS
 printf '%s\n' 'ok - fleet view prefers reachable live status over persisted done status'
-printf '%s\n' 'ok - visual wrappers reject flag values and honor explicit homes'
+printf '%s\n' 'ok - fleet view rejects flag values and honors explicit homes'

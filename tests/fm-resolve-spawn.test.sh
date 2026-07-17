@@ -4,13 +4,13 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RESOLVE="$ROOT/sbin/fm"
-SPAWN="$ROOT/sbin/fm-spawn.sh"
+SPAWN="$ROOT/sbin/fm"
 # Resolve bun once, before any test restricts PATH: the cases below narrow
 # PATH to exercise the *crew harness* PATH lookup, not bun's own #!/usr/bin/env
 # shebang resolution for the fm dispatcher itself.
 BUN="$(command -v bun)" || { printf 'not ok - bun not found on PATH\n' >&2; exit 1; }
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-resolve-spawn.XXXXXX")
-# A bun-only dir for cases that restrict PATH but exec fm-spawn.sh, which
+# A bun-only dir for cases that restrict PATH but exec fm spawn, which
 # shells back into sbin/fm: only the real bun binary is exposed (not the mise
 # shim dir, which would leak every other shimmed tool into the sandbox).
 BUNBIN="$TMP_ROOT/bunbin"
@@ -112,14 +112,14 @@ test_spawn_aborts_before_worktree_or_pane() {
     git commit -qm init
   )
   printf 'brief\n' > "$home/data/preflight-z9/brief.md"
-  out=$(PATH="/usr/bin:/bin:$BUNBIN" FM_ROOT_OVERRIDE='' FM_HOME="$home" FM_SPAWN_NO_GUARD=1 "$SPAWN" preflight-z9 projects/alpha codex 2>&1)
+  out=$(PATH="/usr/bin:/bin:$BUNBIN" FM_ROOT_OVERRIDE='' FM_HOME="$home" FM_SPAWN_NO_GUARD=1 "$SPAWN" spawn preflight-z9 projects/alpha codex 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn with missing harness should fail"
   printf '%s\n' "$out" | grep -F "spawn harness binary 'codex' was not found on PATH" >/dev/null \
     || fail "spawn did not surface resolver error: $out"
   [ ! -e "$home/worktrees/preflight-z9" ] \
     || fail "spawn created a worktree after resolver failure"
-  pass "fm-spawn aborts before creating a worktree or pane"
+  pass "fm spawn aborts before creating a worktree or pane"
 }
 
 test_missing_harness_binary_blocks

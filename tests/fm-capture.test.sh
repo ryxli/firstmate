@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for `fm capture` (fleet plane event append) and the fm-send.sh
+# Tests for `fm capture` (fleet plane event append) and the fm send
 # --steer hook that calls it.
 set -u
 

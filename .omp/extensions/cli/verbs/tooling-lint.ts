@@ -4,7 +4,7 @@
 // Migrated verbatim (behavior-preserving) out of the former sbin/fm tooling-lint.
 //
 // This workstation runs bun (see the "House tooling conventions" block that
-// sbin/fm-brief.sh bakes into every crewmate brief and secondmate charter). A
+// sbin/fm brief bakes into every crewmate brief and secondmate charter). A
 // tool firstmate ships must be invoked via `bunx <tool>` or a bun-linked bare
 // command - never the generic ecosystem runner, and never by running built
 // output or a raw script file directly in docs, help text, or any user-facing
@@ -20,7 +20,7 @@
 //   fm tooling-lint <root>     # scan an alternate root (used by the test)
 //
 // Two files are deliberately NOT scanned: the former guard script's basename
-// and sbin/fm-brief.sh. Both exist to STATE the convention, so they
+// and sbin/fm brief. Both exist to STATE the convention, so they
 // legitimately name the forbidden forms as prohibition text; scanning them
 // would flag the very rule they define. For any other one-off counterexample
 // a line may carry the marker `fm-tooling-lint: allow` and it is skipped.

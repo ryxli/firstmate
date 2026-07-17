@@ -3,7 +3,7 @@
 //
 // The dispatch freeze blocks fm-send from delivering new work to any mate.
 // A focus lock blocks fm-send from delivering new work to a specific mate.
-// Both are bypassed by --steer or FM_DISPATCH_OVERRIDE=1 in fm-send.sh.
+// Both are bypassed by --steer or FM_DISPATCH_OVERRIDE=1 in fm send.
 
 import { rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

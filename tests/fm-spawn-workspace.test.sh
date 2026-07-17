@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Behavior tests for ship/scout workspace routing in fm-spawn.sh.
+# Behavior tests for ship/scout workspace routing in fm spawn.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPAWN="$ROOT/sbin/fm-spawn.sh"
+SPAWN="$ROOT/sbin/fm"
 TMP_ROOT=
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
 # sbin/fm runs under bun; expose ONLY the real bun binary (not the mise shim
@@ -106,7 +106,7 @@ run_spawn_harness() {
     FM_FAKE_HERDR_OWN_WORKSPACE="$own_workspace" \
     FM_SPAWN_WORKSPACE="$env_workspace" \
     PATH="$BIN_DIR:$BASE_PATH" \
-    "$SPAWN" "$id" projects/app "$harness" "$@" 2>&1
+    "$SPAWN" spawn "$id" projects/app "$harness" "$@" 2>&1
 }
 
 run_spawn() {
@@ -131,7 +131,7 @@ run_batch_spawn() {
     FM_FAKE_HERDR_OWN_WORKSPACE="$own_workspace" \
     FM_SPAWN_WORKSPACE="$env_workspace" \
     PATH="$BIN_DIR:$BASE_PATH" \
-    "$SPAWN" "$@" 2>&1
+    "$SPAWN" spawn "$@" 2>&1
 }
 
 last_tab_create() {

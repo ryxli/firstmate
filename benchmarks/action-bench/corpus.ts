@@ -5,7 +5,7 @@
 //   corpusMetrics()      machine-readable shape of the corpus - total, synthetic vs
 //                        real-history split, per-source-class real-history counts, the
 //                        difficulty distribution, and the sanitization verdict. Driven
-//                        by `sbin/fm-action-bench.sh corpus`.
+//                        by `sbin/fm action-bench corpus`.
 //
 //   sanitize()           scans every REAL-HISTORY scenario's MATERIALIZED fixture (its
 //                        setup output), task prompt, and leak markers for operational

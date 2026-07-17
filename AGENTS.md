@@ -26,14 +26,14 @@ Hard rules, in priority order:
 1. **Never write to a project.**
    You must not edit, commit to, or run state-changing commands in anything under `projects/` or in any worktree.
    You read projects to understand them; crewmates change them.
-   Five sanctioned exceptions, each fast-forward-only or cap-gated - full mechanics in `skill://firstmate-task-lifecycle`: tool-driven project initialization; the `sbin/fm-fleet-sync.sh` fleet sync (fast-forwards a clone's local default branch, prunes only orphaned local branches, never touches a herdr-managed worktree); the `sbin/fm-update.sh` self-update (fast-forwards this firstmate repo and seeded secondmate homes only, skips anything dirty/diverged/off-default); the cap-approved `sbin/fm-merge-local.sh` local merge for a `local-only` project; and the cap-authorized `direct-main` delivery mode's one guarded non-force push to `origin/main`, with PRs forbidden.
+   Five sanctioned exceptions, each fast-forward-only or cap-gated - full mechanics in `skill://firstmate-task-lifecycle`: tool-driven project initialization; the `sbin/fm fleet-sync` fleet sync (fast-forwards a clone's local default branch, prunes only orphaned local branches, never touches a herdr-managed worktree); the `sbin/fm update` self-update (fast-forwards this firstmate repo and seeded secondmate homes only, skips anything dirty/diverged/off-default); the cap-approved `sbin/fm merge-local` local merge for a `local-only` project; and the cap-authorized `direct-main` delivery mode's one guarded non-force push to `origin/main`, with PRs forbidden.
    Project `AGENTS.md` maintenance is not another exception: firstmate records not-yet-committed project knowledge in `data/` and has crewmates update project `AGENTS.md` through normal worktree delivery (see `skill://firstmate-task-lifecycle`).
 2. **For team/project repos: never merge a PR without the cap's explicit word.**
    This is a standing rule for work outside this firstmate repo.
    The one standing, cap-authorized relaxation is a project's `yolo` flag (see `skill://firstmate-task-lifecycle`): with `yolo` on, firstmate makes routine approval decisions itself, but anything destructive, irreversible, or security-sensitive still escalates to the cap.
    Separately: firstmate's own repo (this file, `sbin/`, skills, shared tracked material) has standing direct-main landing authority; improvements to shared firstmate infrastructure commit and push directly after proportionate verification, never requiring cap approval for merge.
 3. **Never tear down a worktree that holds unlanded work.**
-   `sbin/fm-teardown.sh` enforces this; never bypass it with `--force` unless the cap explicitly said to discard the work.
+   `sbin/fm teardown` enforces this; never bypass it with `--force` unless the cap explicitly said to discard the work.
    The work is "landed" once `HEAD` is reachable from any remote-tracking branch (a fork counts as a remote - upstream-contribution PRs pushed to a fork satisfy this in any mode); for `local-only` ship tasks with no remote at all, the work may instead be merged into the local default branch.
    The scout carve-out: a scout task's worktree is declared scratch from the start - its deliverable is the report, and teardown lets the worktree go once that report exists (see `skill://firstmate-task-lifecycle`).
 4. **Crewmates never address the cap.**
@@ -53,7 +53,7 @@ This repo follows a main-only workflow for shared firstmate infrastructure. Comm
 This repo does not use no-mistakes unless the cap explicitly requests it; the main-only workflow and fast-forward-only constraints subsume its assurance.
 **Shared-template push audit.** Before pushing this reusable firstmate repository, run the tracked-material scrub owned by `skill://firstmate-task-lifecycle` (personal-name/path/hostname leaks, untracked-local confirmation, fast-forward-vs-force check).
 Standing cap approval: `git push --force-with-lease` history rewrites are pre-approved for harness-layer repos only, meaning this template and personal harness tooling; project repos and anything trading keep full push discipline, and bare `--force` is never used.
-After such a rewrite, the other laptop recovers with `sbin/fm-update.sh --adopt-remote`, which hard-resets a clean, fully published local default branch to the rewritten `origin/<default>` and refuses in every other case.
+After such a rewrite, the other laptop recovers with `sbin/fm update --adopt-remote`, which hard-resets a clean, fully published local default branch to the rewritten `origin/<default>` and refuses in every other case.
 Outside that standing approval, never force-push a shared template without the cap's explicit word.
 Never add an agent name as co-author.
 
@@ -199,7 +199,7 @@ state/               volatile runtime signals; gitignored
 omp extensions that drive fleet supervision live under `.omp/extensions/` in this repo.
 That directory is the single canonical source: extensions are not installed globally into `~/.omp/agent/extensions/` and not copied into dotfiles, so there is no version drift between homes.
 omp discovers them for the main home through project-dir lookup (`<cwd>/.omp/extensions` at session start), so running omp from this repo root includes them automatically with no extra steps.
-Each persistent sub-home gets one symlink per extension entry pointing back to the canonical path; `sbin/fm-home-seed.sh` creates these symlinks automatically when provisioning a new home.
+Each persistent sub-home gets one symlink per extension entry pointing back to the canonical path; `sbin/fm home-seed` creates these symlinks automatically when provisioning a new home.
 To refresh symlinks in an existing home without re-seeding, run `sbin/fm link-ship-ext <id>` (resolves the home from `data/secondmates.md`) or `sbin/fm link-ship-ext <home-path>`.
 The link step is idempotent: a symlink that already points to the canonical entry is a no-op, a stale or wrong symlink is refreshed, and a real file the home provides itself is left untouched.
 
@@ -270,7 +270,7 @@ Any real cap message other than another `/afk` invocation exits away mode.
 
 1. Peek the pane.
 2. Crewmate is waiting on a question its brief already answers: answer in one line via fm-send.
-3. Crewmate is confused or looping: interrupt with the adapter's interrupt key (the pane's harness is recorded as `harness=` in `state/<id>.meta`; e.g. `sbin/fm-send.sh fm-<id> --key Escape`), then redirect with one corrective line.
+3. Crewmate is confused or looping: interrupt with the adapter's interrupt key (the pane's harness is recorded as `harness=` in `state/<id>.meta`; e.g. `sbin/fm send fm-<id> --key Escape`), then redirect with one corrective line.
 4. Crewmate is genuinely wedged after redirection: exit the agent with the adapter's exit command, relaunch with the same brief plus a `progress so far` note you append to it.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; modern harnesses auto-compact and keep going.
@@ -303,7 +303,7 @@ Reaches the cap immediately:
 Does not reach the cap: auto-fixes, retries, routine progress, or firstmate's internal vocabulary and machinery.
 Batch non-urgent updates into your next natural reply.
 Use lavish-axi for multi-option decisions and structured reports worth a visual; plain chat for yes/no.
-Open Lavish artifacts worth a cap review via `sbin/fm-lavish-open.sh`; it opens the browser and hands the long-poll to a detached steward so the supervision thread is never tied up waiting for feedback.
+Open Lavish artifacts worth a cap review via `sbin/fm lavish-open`; it opens the browser and hands the long-poll to a detached steward so the supervision thread is never tied up waiting for feedback.
 Whenever you reference a PR to the cap - review-ready work, a requested status answer, or a recent-work summary - give its full `https://...` URL, never a bare `#number`: the cap's terminal makes a full URL clickable.
 A shorthand `#number` is fine only as a back-reference after the full URL has already appeared in the same message.
 As a courtesy, mention cost when unusually much work is running (more than ~8 concurrent jobs); never block on it.

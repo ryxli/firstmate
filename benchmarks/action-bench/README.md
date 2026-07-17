@@ -63,10 +63,10 @@ first-mate failure mode across restarts), where errors compound.
 ## Usage
 
 ```
-sbin/fm-action-bench.sh gates                        # integrity gates only (pure, no tokens) - what CI runs
-sbin/fm-action-bench.sh corpus                       # corpus metrics + sanitize verdict (pure, no tokens)
-sbin/fm-action-bench.sh replay results/<r>.runs.json # re-aggregate a recorded run (pure)
-sbin/fm-action-bench.sh run --live --trials 3 --model gpt-5.4-mini --thinking low   # LIVE A/B (costs tokens)
+sbin/fm action-bench gates                        # integrity gates only (pure, no tokens) - what CI runs
+sbin/fm action-bench corpus                       # corpus metrics + sanitize verdict (pure, no tokens)
+sbin/fm action-bench replay results/<r>.runs.json # re-aggregate a recorded run (pure)
+sbin/fm action-bench run --live --trials 3 --model gpt-5.4-mini --thinking low   # LIVE A/B (costs tokens)
 
 bun benchmarks/action-bench/compare.ts   results/<a>.runs.json ...   # cross-model narrative markdown
 bun benchmarks/action-bench/charts.ts    results/<a>.runs.json ...   # tidy chart-consumable JSON (offload viz)

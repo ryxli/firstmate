@@ -51,7 +51,7 @@ test_generic_skill_source() {
   source=$(<"$SKILL")
   before_targets=${source%%'## Personal infrastructure update set'*}
 
-  assert_contains "$before_targets" 'sbin/fm-update.sh' \
+  assert_contains "$before_targets" 'sbin/fm update' \
     "generic fleet update precedes optional local targets"
   # shellcheck disable=SC2016
   assert_contains "$source" 'read the optional `## Personal infrastructure update set` section in local `data/cap.md`' \

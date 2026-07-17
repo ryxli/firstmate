@@ -2,7 +2,7 @@
 
 One command, one reproducible row, quantifying the harness at a point in time.
 
-`sbin/fm-milestone.sh <label> [sha]` composes instruments that already exist and are already
+`sbin/fm milestone <label> [sha]` composes instruments that already exist and are already
 proven - it invents no new measurement, only folds their outputs into a single durable ledger:
 
 - `benchmarks/action-bench/bench.ts gates` - the 6 deterministic integrity gates over the pinned
@@ -30,8 +30,8 @@ instrument, times each stage, and appends one row.
 ## Usage
 
 ```
-sbin/fm-milestone.sh <label> [sha] [runs.json ...] [--note text] [--out dir] [--captured iso8601] [--jobs n]
-sbin/fm-milestone.sh --compare <shaA> <shaB> [label]
+sbin/fm milestone <label> [sha] [runs.json ...] [--note text] [--out dir] [--captured iso8601] [--jobs n]
+sbin/fm milestone --compare <shaA> <shaB> [label]
 ```
 
 - `sha` defaults to `git rev-parse HEAD`. Pass it explicitly when determinism matters (e.g. a CI
@@ -95,7 +95,7 @@ new sections simply absent - historical seeding stays compatible in both directi
 <sha> | tar -x` into an ephemeral temp dir - no `.git`, no worktree registration, self-cleaning) and
 appends both rows to the ledger under `<label>-baseline` / `<label>-candidate`, then prints a delta
 table. This is the intended shape for auto-A/B on any harness change: land the change, run
-`sbin/fm-milestone.sh --compare <base-sha> <candidate-sha>`, and read the delta on the same gates
+`sbin/fm milestone --compare <base-sha> <candidate-sha>`, and read the delta on the same gates
 every milestone already tracks - no bespoke comparison logic per change. Pass `--out dir` to redirect
 both rows away from the durable ledger (used by the test suite); omit it for a real comparison.
 
@@ -126,4 +126,4 @@ same day as this tool and duplicated its A/B mission. It has been retired: `--co
 one canonical SHA-vs-SHA surface, its `repo_invariants` gate was absorbed above, and its
 `sbin/fm-eval-run.sh` wrapper and test are deleted. `benchmarks/eval-runner/crew-metrics.py` (a
 distinct, unrelated passive-metrics tool) and its shared `fm_paths.py` helper remain in that
-directory under `sbin/fm-crew-metrics.sh`.
+directory under `sbin/fm crew-metrics`.

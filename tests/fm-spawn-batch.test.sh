@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Behavior tests for fm-spawn.sh batch dispatch (`id=repo` pairs).
+# Behavior tests for fm spawn batch dispatch (`id=repo` pairs).
 # These exercise argument routing only: each spawn attempt fails fast at the missing-brief
 # check, which is reached before any tmux/treehouse side effect, so the tests create no
 # windows or worktrees. FM_SPAWN_NO_GUARD=1 keeps them off the live watcher guard / state.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPAWN="$ROOT/sbin/fm-spawn.sh"
+SPAWN="$ROOT/sbin/fm"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-spawn-batch.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -29,7 +29,7 @@ run_spawn() {
     FM_PROJECTS_OVERRIDE='' \
     FM_CONFIG_OVERRIDE='' \
     FM_SPAWN_NO_GUARD=1 \
-    "$SPAWN" "$@" 2>&1
+    "$SPAWN" spawn "$@" 2>&1
 }
 
 test_batch_dispatches_each_pair() {
@@ -93,7 +93,7 @@ test_fm_home_scopes_projects_path() {
   home="$TMP_ROOT/home path"
   mkdir -p "$home/data" "$home/projects/alpha"
   out=$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' \
-    FM_HOME="$home" FM_SPAWN_NO_GUARD=1 "$SPAWN" nope-home-z7 projects/alpha codex 2>&1)
+    FM_HOME="$home" FM_SPAWN_NO_GUARD=1 "$SPAWN" spawn nope-home-z7 projects/alpha codex 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn with missing brief should fail"
   expected="error: no brief at $home/data/nope-home-z7/brief.md"
@@ -111,7 +111,7 @@ test_fm_projects_override_scopes_projects_path() {
   projects="$TMP_ROOT/override projects"
   mkdir -p "$home/data" "$projects/alpha"
   out=$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_CONFIG_OVERRIDE='' \
-    FM_HOME="$home" FM_PROJECTS_OVERRIDE="$projects" FM_SPAWN_NO_GUARD=1 "$SPAWN" nope-override-z8 projects/alpha codex 2>&1)
+    FM_HOME="$home" FM_PROJECTS_OVERRIDE="$projects" FM_SPAWN_NO_GUARD=1 "$SPAWN" spawn nope-override-z8 projects/alpha codex 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn with missing brief should fail"
   expected="error: no brief at $home/data/nope-override-z8/brief.md"

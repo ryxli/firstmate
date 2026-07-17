@@ -5,10 +5,9 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOME_LINK="$ROOT/sbin/fm"
-SPAWN="$ROOT/sbin/fm-spawn.sh"
-UPDATE="$ROOT/sbin/fm-update.sh"
+UPDATE="$ROOT/sbin/fm"
 TMP_ROOT=
-# fm-spawn.sh's link-repair path now shells out to the bun-based `fm` CLI, so the
+# fm spawn's link-repair path now shells out to the bun-based `fm` CLI, so the
 # sanitized spawn-lifecycle PATH below must still resolve bun even though it
 # otherwise excludes the host PATH.
 BUN_DIR=""
@@ -51,6 +50,10 @@ canonical() {
 
 require_slice_scripts() {
   [ -x "$HOME_LINK" ] || fail "missing executable $HOME_LINK"
+}
+
+spawn() {
+  "$ROOT/sbin/fm" spawn "$@"
 }
 
 make_code_root() {
@@ -482,7 +485,7 @@ test_symlink_home_spawn_lifecycle() {
     FM_CODE_ROOT_OVERRIDE="$ROOT" \
     FM_ROOT_OVERRIDE="$ROOT" \
     FM_FAKE_HERDR_LOG="$log" \
-    "$SPAWN" design "$mate_home" omp --secondmate 2>&1) || fail "secondmate spawn failed after broken link: $out"
+    spawn design "$mate_home" omp --secondmate 2>&1) || fail "secondmate spawn failed after broken link: $out"
   assert_link_points "$mate_home/sbin" "$ROOT/sbin" "spawn-repaired sbin link"
   assert_contains "$(cat "$log")" "--cwd> <$mate_home" "spawn did not launch in the mate home"
   assert_contains "$(cat "$log")" "FM_HOME" "spawn did not pass mate-home environment to herdr"
@@ -515,7 +518,7 @@ test_update_repairs_non_git_symlink_home() {
     printf 'harness=omp\n'
   } > "$main_home/state/repairsm.meta"
 
-  out=$(FM_HOME="$main_home" FM_ROOT_OVERRIDE="$code" FM_CODE_ROOT_OVERRIDE="$code" "$UPDATE" --repair-links 2>&1) \
+  out=$(FM_HOME="$main_home" FM_ROOT_OVERRIDE="$code" FM_CODE_ROOT_OVERRIDE="$code" "$UPDATE" update --repair-links 2>&1) \
     || fail "fm-update --repair-links failed: $out"
   assert_contains "$out" "secondmate repairsm: symlink home verified" "update did not report symlink home verification"
   assert_link_points "$mate_home/sbin" "$code/sbin" "update-repaired sbin link"

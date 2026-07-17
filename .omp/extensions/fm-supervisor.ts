@@ -971,10 +971,10 @@ async function herdrStatus(sup: Supervisor, pane: string): Promise<HerdrStatus> 
 // herdr status gap. Missing/unreadable screens return no override, preserving
 // herdr's state rather than inventing idle.
 async function reconciledPaneStatus(sup: Supervisor, pane: string): Promise<HerdrStatus | undefined> {
-	const script = join(sup.ctx.cwd, "sbin", "fm-reconcile-status.sh");
+	const script = join(sup.ctx.cwd, "sbin", "fm");
 	if (!existsSync(script)) return undefined;
 	try {
-		const res = await sup.pi.exec("bash", [script, pane], {
+		const res = await sup.pi.exec(script, ["reconcile-status", pane], {
 			timeout: sup.tunables.busyReadTimeoutMs,
 			signal: sup.abort.signal,
 			cwd: sup.ctx.cwd,

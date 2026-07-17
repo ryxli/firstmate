@@ -78,10 +78,10 @@ assert_filled() {
 scaffold_and_fill() {
   local id=$1 kind=$2 task=$3 brief
   if [ "$kind" = scout ]; then
-    FM_HOME="$HOME_DIR" "$ROOT/sbin/fm-brief.sh" "$id" app --scout >/dev/null \
+    FM_HOME="$HOME_DIR" "$ROOT/sbin/fm" brief "$id" app --scout >/dev/null \
       || fail "scout scaffold failed for $id"
   else
-    FM_HOME="$HOME_DIR" "$ROOT/sbin/fm-brief.sh" "$id" app >/dev/null \
+    FM_HOME="$HOME_DIR" "$ROOT/sbin/fm" brief "$id" app >/dev/null \
       || fail "ship scaffold failed for $id"
   fi
   brief="$HOME_DIR/data/$id/brief.md"
@@ -107,7 +107,7 @@ spawn_one() {
     FM_SPAWN_WORKSPACE=w-test \
     FM_FAKE_HERDR_LOG="$HERDR_LOG" \
     PATH="$BIN_DIR:$(dirname "$(command -v bun)"):/usr/bin:/bin" \
-    "$ROOT/sbin/fm-spawn.sh" "${args[@]}" 2>&1
+    "$ROOT/sbin/fm" spawn "${args[@]}" 2>&1
 }
 
 ship_output=$(spawn_one ship-e1 ship) || fail "filled ship brief did not reach spawn"

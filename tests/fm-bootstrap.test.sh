@@ -93,13 +93,13 @@ run_bootstrap() {
   local home=$1 fakebin=$2 extdir=${3:-$ALL_EXT_DIR}
   seed_handoff "$home"
   PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_OMP_EXT_OVERRIDE="$extdir" \
-    "$ROOT/sbin/fm-bootstrap.sh"
+    "$ROOT/sbin/fm" bootstrap
 }
 
 run_bootstrap_existing() {
   local home=$1 fakebin=$2 extdir=${3:-$ALL_EXT_DIR}
   PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_OMP_EXT_OVERRIDE="$extdir" \
-    "$ROOT/sbin/fm-bootstrap.sh"
+    "$ROOT/sbin/fm" bootstrap
 }
 
 test_bootstrap_silent_without_no_mistakes() {
@@ -109,11 +109,11 @@ test_bootstrap_silent_without_no_mistakes() {
   fakebin=$(make_fake_toolchain "$case_dir")
 
   out=$(run_bootstrap "$case_dir/home" "$fakebin")
-  [ -z "$out" ] || fail "bootstrap reported problems with all tools present: $out"
-  pass "bootstrap is silent without no-mistakes installed"
+  [ "$out" = 'TASKS: native' ] || fail "bootstrap reported problems with all tools present: $out"
+  pass "bootstrap is silent (but for the unconditional native-tasks line) without no-mistakes installed"
 }
 
-test_bootstrap_reports_tasks_axi_when_available() {
+test_bootstrap_reports_native_tasks_regardless_of_tasks_axi() {
   local case_dir fakebin out
   case_dir="$TMP_ROOT/tasks-axi-available"
   mkdir -p "$case_dir/home"
@@ -128,8 +128,8 @@ SH
   chmod +x "$fakebin/tasks-axi"
 
   out=$(run_bootstrap "$case_dir/home" "$fakebin")
-  [ "$out" = 'TASKS_AXI: available' ] || fail "bootstrap did not report tasks-axi availability: $out"
-  pass "bootstrap reports compatible optional tasks-axi availability"
+  [ "$out" = 'TASKS: native' ] || fail "bootstrap did not report native task support: $out"
+  pass "bootstrap reports native task support unconditionally, even with a compatible tasks-axi present"
 }
 
 test_bootstrap_ignores_incompatible_tasks_axi() {
@@ -147,8 +147,11 @@ SH
   chmod +x "$fakebin/tasks-axi"
 
   out=$(run_bootstrap "$case_dir/home" "$fakebin")
-  [ -z "$out" ] || fail "bootstrap reported incompatible tasks-axi as available: $out"
-  pass "bootstrap ignores incompatible optional tasks-axi"
+  case "$out" in
+    *'TASKS_AXI'*) fail "bootstrap still reports the retired TASKS_AXI probe: $out" ;;
+  esac
+  [ "$out" = 'TASKS: native' ] || fail "bootstrap reported incompatible tasks-axi as available: $out"
+  pass "bootstrap ignores incompatible optional tasks-axi entirely, reporting only native task support"
 }
 
 test_bootstrap_surfaces_handoff_failure() {
@@ -178,8 +181,8 @@ test_bootstrap_silent_with_all_omp_extensions() {
   fakebin=$(make_fake_toolchain "$case_dir")
 
   out=$(run_bootstrap "$case_dir/home" "$fakebin" "$ALL_EXT_DIR")
-  [ -z "$out" ] || fail "bootstrap reported problems with all OMP extensions present: $out"
-  pass "bootstrap is silent when all provisioned OMP extensions are present"
+  [ "$out" = 'TASKS: native' ] || fail "bootstrap reported problems with all OMP extensions present: $out"
+  pass "bootstrap is silent (but for the unconditional native-tasks line) when all provisioned OMP extensions are present"
 }
 
 test_bootstrap_reports_missing_omp_extension() {
@@ -190,13 +193,14 @@ test_bootstrap_reports_missing_omp_extension() {
   extdir=$(make_ext_fixture "$case_dir/ext" whiteboard fleet-bus lavish thinking-tag-guard agent-effectiveness capture)
 
   out=$(run_bootstrap "$case_dir/home" "$fakebin" "$extdir")
-  expected='MISSING_EXT: textguard (provision: chezmoi apply - dotfiles repo is the canonical owner)'
+  expected='MISSING_EXT: textguard (provision: chezmoi apply - dotfiles repo is the canonical owner)
+TASKS: native'
   [ "$out" = "$expected" ] || fail "bootstrap did not report the one missing OMP extension exactly: $out"
   pass "bootstrap reports exactly one MISSING_EXT line for a missing OMP extension"
 }
 
 test_bootstrap_silent_without_no_mistakes
-test_bootstrap_reports_tasks_axi_when_available
+test_bootstrap_reports_native_tasks_regardless_of_tasks_axi
 test_bootstrap_ignores_incompatible_tasks_axi
 test_bootstrap_surfaces_handoff_failure
 test_bootstrap_silent_with_all_omp_extensions

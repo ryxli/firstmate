@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for sbin/fm-teardown.sh's unpushed-work safety check.
+# Tests for the fm teardown verb's unpushed-work safety check.
 #
 # Covers the local-only fork-remote fix: a local-only-registered project whose
 # task pushes its work to a fork (upstream-contribution PRs) must be teardown-
@@ -16,7 +16,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEARDOWN="$ROOT/sbin/fm-teardown.sh"
+FM="$ROOT/sbin/fm"
 TMP_ROOT=
 
 fail() {
@@ -78,18 +78,6 @@ SH
   printf '%s\n' "$case_dir"
 }
 
-add_compatible_tasks_axi() {
-  local case_dir=$1
-  cat > "$case_dir/fakebin/tasks-axi" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = --version ]; then
-  printf '%s\n' '0.1.1'
-fi
-exit 0
-SH
-  chmod +x "$case_dir/fakebin/tasks-axi"
-}
-
 # Write a meta file for the task. Args: case_dir mode kind
 write_meta() {
   local case_dir=$1 mode=$2 kind=$3
@@ -128,7 +116,7 @@ run_teardown() {
   FM_ROOT_OVERRIDE="$ROOT" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   PATH="$case_dir/fakebin:$PATH" \
-    "$TEARDOWN" task-x1 "$@"
+    "$FM" teardown task-x1 "$@"
 }
 
 # Exit code expectation. Args: expected actual label
@@ -154,23 +142,22 @@ test_local_only_fork_remote_allows() {
   pass "local-only worktree with HEAD on a fork remote is torn down (fix holds)"
 }
 
-test_teardown_prompts_tasks_axi_done_when_compatible() {
+test_teardown_prompts_fm_task_done_with_pr() {
   local case_dir out
-  case_dir=$(make_case tasks-axi-reminder)
+  case_dir=$(make_case fm-task-reminder)
   write_meta "$case_dir" no-mistakes ship
   printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$case_dir/state/task-x1.meta"
-  add_compatible_tasks_axi "$case_dir"
 
-  out=$(run_teardown "$case_dir") || fail "teardown failed with compatible tasks-axi"
-  printf '%s\n' "$out" | grep -F 'tasks-axi done task-x1 --pr https://github.com/example/repo/pull/7' >/dev/null \
-    || fail "teardown did not prompt tasks-axi done: $out"
-  printf '%s\n' "$out" | grep -F 'tasks-axi ready' >/dev/null \
-    || fail "teardown did not prompt tasks-axi ready: $out"
+  out=$(run_teardown "$case_dir") || fail "teardown failed"
+  printf '%s\n' "$out" | grep -F 'fm task done task-x1 --pr https://github.com/example/repo/pull/7' >/dev/null \
+    || fail "teardown did not prompt fm task done: $out"
+  printf '%s\n' "$out" | grep -F 'fm task ready' >/dev/null \
+    || fail "teardown did not prompt fm task ready: $out"
   printf '%s\n' "$out" | grep -F 'check date gates' >/dev/null \
     || fail "teardown did not preserve date-gate check: $out"
   printf '%s\n' "$out" | grep -F 'keep Done to the 10 most recent' >/dev/null \
-    && fail "teardown kept manual Done pruning in compatible tasks-axi prompt: $out"
-  pass "teardown prompts tasks-axi backlog refresh when compatible"
+    && fail "teardown printed the retired manual Done-pruning prompt: $out"
+  pass "teardown prompts native fm task backlog refresh with the PR"
 }
 
 test_local_only_truly_unpushed_refuses() {
@@ -266,7 +253,7 @@ test_local_only_force_overrides_unpushed() {
 }
 
 test_local_only_fork_remote_allows
-test_teardown_prompts_tasks_axi_done_when_compatible
+test_teardown_prompts_fm_task_done_with_pr
 test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows

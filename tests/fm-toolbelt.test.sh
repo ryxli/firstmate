@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Verifies `fm toolbelt` lists every executable sbin/ script with a name and a
-# description, and specifically that fm-spawn.sh appears with a non-empty one.
+# Verifies `fm toolbelt` lists discovered fm verbs with names and descriptions,
+# and specifically that fm spawn appears with a non-empty one.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,10 +13,10 @@ pass() { printf 'ok - %s\n' "$1"; }
 
 out="$("$TOOLBELT" toolbelt)"
 
-line=$(printf '%s\n' "$out" | awk -F'\t' '$1 == "fm-spawn.sh"')
-[ -n "$line" ] || fail "fm-toolbelt output must include fm-spawn.sh"
+line=$(printf '%s\n' "$out" | awk -F'\t' '$1 == "spawn"')
+[ -n "$line" ] || fail "fm-toolbelt output must include fm spawn"
 
 desc=$(printf '%s' "$line" | cut -f2-)
-[ -n "$desc" ] || fail "fm-spawn.sh description must be non-empty"
+[ -n "$desc" ] || fail "fm spawn description must be non-empty"
 
-pass "fm-toolbelt lists fm-spawn.sh with a non-empty description: $desc"
+pass "fm-toolbelt lists fm spawn with a non-empty description: $desc"

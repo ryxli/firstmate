@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for sbin/fm-update.sh --adopt-remote: the cap-approved recovery
+# Tests for sbin/fm update --adopt-remote: the cap-approved recovery
 # verb the OTHER machine runs after a sanctioned force-with-lease history
 # rewrite of a harness-layer repo.
 #
@@ -17,7 +17,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UPDATE="$ROOT/sbin/fm-update.sh"
+UPDATE="$ROOT/sbin/fm"
 TMP_ROOT=
 
 # Deterministic, isolated git identity and config for fixture commits.
@@ -129,12 +129,12 @@ rewrite_origin() {
 
 run_update() {
   local w=$1
-  FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" 2>/dev/null
+  FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" update 2>/dev/null
 }
 
 run_adopt() {
   local w=$1
-  FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" --adopt-remote 2>/dev/null
+  FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" update --adopt-remote 2>/dev/null
 }
 
 # --- T1: rewritten origin, clean fully-pushed local -> adopted --------------

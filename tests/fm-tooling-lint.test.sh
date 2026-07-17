@@ -7,7 +7,7 @@
 #   - a clean surface using bunx passes (exit 0);
 #   - `npx` (whole word), `node <path-with-dist>`, and a raw `./sbin/*.js`
 #     command each fail (exit 1) and are named with their file;
-#   - the two convention-definers (fm tooling-lint, fm-brief.sh) are exempt
+#   - the two convention-definers (fm tooling-lint, fm brief) are exempt
 #     even when they contain the forbidden forms as prohibition text;
 #   - a line carrying `fm-tooling-lint: allow` is exempt;
 #   - the real repo passes (regression guard against the convention rotting in);
@@ -92,7 +92,7 @@ test_definers_exempt() {
   # Both convention-definers name the forbidden forms as prohibition text and
   # must not be flagged, even though they contain the literal tokens.
   local d; d=$(fixture definers)
-  printf '#!/usr/bin/env bash\n# never npx, never node dist/x, never ./sbin/x.js\n' > "$d/sbin/fm-brief.sh"
+  printf '#!/usr/bin/env bash\n# never npx, never node dist/x, never ./sbin/x.js\n' > "$d/sbin/fm" brief
   printf '#!/usr/bin/env bash\n# scans for npx and node dist and ./sbin/x.js\n' > "$d/sbin/fm" tooling-lint
   OUT=$(GUARD "$d" 2>&1); RC=$?
   [ "$RC" -eq 0 ] || fail "convention-definers should be exempt (rc=$RC): $OUT"

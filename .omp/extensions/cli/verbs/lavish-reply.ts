@@ -17,8 +17,7 @@
 //
 // Migrated verbatim (behavior-preserving) out of sbin/fm lavish-reply; the
 // shared fm-lavish-lib.sh primitives this used (canonical/key/base-url) are
-// inlined below rather than sourced, since that lib is still shared by other
-// still-bash Lavish scripts.
+// inlined below rather than sourced.
 
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";

@@ -104,8 +104,12 @@ function parseJson(text: string): unknown {
 	}
 }
 
-function isMainHome(dir: string): boolean {
-	return existsSync(join(dir, "sbin", "fm-spawn.sh")) && !existsSync(join(dir, ".fm-secondmate-home"));
+function isMainHomeMarker(dir: string): boolean {
+	return (existsSync(join(dir, "sbin", "fm")) || existsSync(join(dir, "sbin", "fm-spawn.sh"))) && !existsSync(join(dir, ".fm-secondmate-home"));
+}
+
+function isExplicitMainHome(dir: string): boolean {
+	return existsSync(join(dir, "AGENTS.md")) && !existsSync(join(dir, ".fm-secondmate-home"));
 }
 
 /** Resolve the main home from explicit cwd, env, process cwd, then known clones. */
@@ -113,7 +117,7 @@ export function resolveMainHome(cwd?: string): string | null {
 	const findHome = (start: string): string | null => {
 		let dir = start;
 		for (let i = 0; i < 64; i++) {
-			if (isMainHome(dir)) return dir;
+			if (isMainHomeMarker(dir)) return dir;
 			const parent = dirname(dir);
 			if (parent === dir) break;
 			dir = parent;
@@ -121,19 +125,24 @@ export function resolveMainHome(cwd?: string): string | null {
 		return null;
 	};
 	if (cwd && cwd.length > 0) {
-		const explicit = findHome(cwd);
+		const explicitPath = cwd.replace(/\/+$/, "");
+		if (isExplicitMainHome(explicitPath)) return explicitPath;
+		const explicit = findHome(explicitPath);
 		if (explicit) return explicit;
 	}
 	const envCandidates = [process.env.FM_HOME, process.env.FIRSTMATE_HOME, process.env.FM_ROOT_OVERRIDE]
 		.map(value => value?.trim())
 		.filter((value): value is string => Boolean(value));
 	for (const env of envCandidates) {
-		if (isMainHome(env)) return env;
+		const envPath = env.replace(/\/+$/, "");
+		if (isExplicitMainHome(envPath)) return envPath;
+		const envHome = findHome(envPath);
+		if (envHome) return envHome;
 	}
 	const current = findHome(process.cwd());
 	if (current) return current;
 	for (const candidate of [join(homedir(), "code", "harness", "firstmate"), join(homedir(), "code", "firstmate")]) {
-		if (isMainHome(candidate)) return candidate;
+		if (isMainHomeMarker(candidate)) return candidate;
 	}
 	return null;
 }

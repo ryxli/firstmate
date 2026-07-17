@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Tests for sbin/fm-update.sh: fast-forward-only self-update of a running
+# Tests for sbin/fm update: fast-forward-only self-update of a running
 # firstmate repo and every registered secondmate home.
 #
-# The guarantees under test mirror fm-fleet-sync.sh and prime directive #3:
+# The guarantees under test mirror fm fleet-sync and prime directive #3:
 #   - The running firstmate repo (on its default branch) fast-forwards from
 #     origin; a leased secondmate home (detached HEAD on the default branch)
 #     fast-forwards the same way.
@@ -20,7 +20,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UPDATE="$ROOT/sbin/fm-update.sh"
+UPDATE="$ROOT/sbin/fm"
 TMP_ROOT=
 
 # Deterministic, isolated git identity and config for fixture commits.
@@ -118,7 +118,7 @@ bump_origin() {
 
 run_update() {
   local w=$1
-  FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" 2>/dev/null
+  FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" update 2>/dev/null
 }
 
 # --- T1: main + secondmate behind, instruction change ----------------------

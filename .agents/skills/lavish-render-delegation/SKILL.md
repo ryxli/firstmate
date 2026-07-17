@@ -23,7 +23,7 @@ immediately. This is the standard way to open any Lavish artifact here.
 
 2. **Open it through the steward**, NOT through `lavish-axi` directly:
    ```sh
-   sbin/fm-lavish-open.sh <file.html>
+   sbin/fm lavish-open <file.html>
    ```
    This opens (or resumes) the session in the browser AND launches a detached
    steward that owns the long-poll. The relay target defaults to your current
@@ -55,7 +55,7 @@ immediately. This is the standard way to open any Lavish artifact here.
 At session start / recovery, relaunch a steward for any still-open session this
 home owns that lost its worker (e.g. a firstmate restart):
 ```sh
-sbin/fm-lavish-open.sh --recover
+sbin/fm lavish-open --recover
 ```
 It relaunches a steward only for sessions still open server-side, reaps any
 orphaned poll a hard-crashed steward left behind (so exactly one poll ever owns a
@@ -81,8 +81,8 @@ Before showing the cap any reviewed visual artifact:
 
 ## Pieces
 
-- `sbin/fm-lavish-open.sh` - entry point: open/resume + launch steward; `--recover`.
-- `sbin/fm-lavish-steward.sh` - the worker loop (launched detached; not run by hand).
+- `sbin/fm lavish-open` - entry point: open/resume + launch steward; `--recover`.
+- `sbin/fm lavish-steward` - the worker loop (launched detached; not run by hand).
 - `sbin/fm lavish-reply` - write-only, non-blocking agent reply.
 - `sbin/fm-lavish-lib.sh` - shared session-key / URL / state primitives.
 - State lives under `state/lavish/` (gitignored): `<key>.steward` (worker meta),

@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BRIEF="$ROOT/sbin/fm-brief.sh"
+BRIEF=("$ROOT/sbin/fm" brief)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-brief.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -24,7 +24,7 @@ EOF
 scaffold() {
   local id=$1 repo=$2
   FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' FM_STATE_OVERRIDE='' \
-    "$BRIEF" "$id" "$repo" >/dev/null 2>&1 || fail "fm-brief.sh failed for $id/$repo"
+    "${BRIEF[@]}" "$id" "$repo" >/dev/null 2>&1 || fail "fm brief failed for $id/$repo"
   printf '%s\n' "$TMP/home/data/$id/brief.md"
 }
 
@@ -151,8 +151,8 @@ pass "local-only ship brief has the evidence-first assignment contract and statu
 
 scout="$TMP/home/data/scout-d4/brief.md"
 FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' FM_STATE_OVERRIDE='' \
-  "$BRIEF" scout-d4 app --scout >/dev/null 2>&1 \
-  || fail "fm-brief.sh failed for scout-d4/app"
+  "${BRIEF[@]}" scout-d4 app --scout >/dev/null 2>&1 \
+  || fail "fm brief failed for scout-d4/app"
 check_assignment_contract "$scout"
 check_assignment_completion "$scout" "done: report $TMP/home/data/scout-d4/report.md"
 ! grep -qF 'use `peer_send` to send' "$scout" \
@@ -162,14 +162,14 @@ pass "scout brief has the evidence-first assignment contract and status completi
 
 secondmate="$TMP/home/data/secondmate-c3/brief.md"
 FM_HOME="$TMP/home" FM_SECONDMATE_CHARTER='operations supervision' \
-  "$BRIEF" secondmate-c3 --secondmate app >/dev/null 2>&1 \
+  "${BRIEF[@]}" secondmate-c3 --secondmate app >/dev/null 2>&1 \
   || fail "secondmate charter scaffold failed"
 grep -qF 'Supervision is automatic and in-process; there is no watcher, wake-queue, beacon' "$secondmate" \
   || fail "secondmate charter did not describe automatic in-process supervision"
 grep -qF 'direct crewmate status-file reporting' "$secondmate" \
   || fail "secondmate charter dropped direct status-file reporting"
-grep -qF 'fm-send.sh' "$secondmate" \
-  || fail "secondmate charter dropped fm-send.sh pane steering"
+grep -qF 'fm send' "$secondmate" \
+  || fail "secondmate charter dropped fm send pane steering"
 grep -qF 'Escalate only cap-actionable transition states' "$secondmate" \
   || fail "secondmate charter did not restrict escalation states"
 grep -qF 'through the fleet peer bus' "$secondmate" \

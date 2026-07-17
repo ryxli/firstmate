@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Focused launch-command placement tests for fm-spawn.sh.
+# Focused launch-command placement tests for fm spawn.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPAWN="$ROOT/sbin/fm-spawn.sh"
+SPAWN="$ROOT/sbin/fm"
+SPAWN_LIB_TS="$ROOT/.omp/extensions/cli/lib/spawn.ts"
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-spawn-placement.XXXXXX")
-# shellcheck source=sbin/fm-spawn-lib.sh
-. "$ROOT/sbin/fm-spawn-lib.sh"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 fail() {
@@ -16,6 +15,10 @@ fail() {
 
 pass() {
   printf 'ok - %s\n' "$1"
+}
+
+fm_shell_quote() {
+  bun -e 'import { shellQuote } from "'"$SPAWN_LIB_TS"'"; console.log(shellQuote(process.argv[1]))' "$1"
 }
 
 assert_equal() {
@@ -107,7 +110,7 @@ run_spawn() {
     FM_FAKE_HERDR_LOG="$home/herdr.log" \
     FM_FAKE_COMMAND_LOG="$home/command.log" \
     FM_HUSK_REAP_SETTLE=0 \
-    "$SPAWN" "$@" >/dev/null
+    "$SPAWN" spawn "$@" >/dev/null
 }
 
 captured_command() {

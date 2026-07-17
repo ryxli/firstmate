@@ -190,7 +190,7 @@ test_check_match_and_drift() {
 }
 
 test_bootstrap_unresolved_warning() {
-  local case_dir fakebin home out bad_json ext_dir ext
+  local case_dir fakebin home out bad_json ext_dir ext expected
   case_dir="$TMP_ROOT/bootstrap-warning"
   home="$case_dir/home"
   mkdir -p "$home"
@@ -202,8 +202,10 @@ test_bootstrap_unresolved_warning() {
   done
 
   out=$(PATH="$fakebin:$BASE_PATH" HOME="$case_dir/user-home" FM_HOME="$home" FM_OMP_EXT_OVERRIDE="$ext_dir" FM_HERDR_CURRENT_JSON="$bad_json" \
-    "$ROOT/sbin/fm-bootstrap.sh") || fail "bootstrap failed on unresolved self-pane"
-  [ "$out" = 'SELF_PANE: error: herdr pane current did not resolve pane_id/workspace_id/tab_id/agent_status' ] \
+    "$ROOT/sbin/fm" bootstrap) || fail "bootstrap failed on unresolved self-pane"
+  expected='SELF_PANE: error: herdr pane current did not resolve pane_id/workspace_id/tab_id/agent_status
+TASKS: native'
+  [ "$out" = "$expected" ] \
     || fail "unexpected bootstrap unresolved warning: $out"
   pass "bootstrap reports one self-pane warning and continues"
 }

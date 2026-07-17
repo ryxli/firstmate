@@ -26,7 +26,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..", "..");
 const DEFAULT_OUT = join(REPO_ROOT, "benchmarks", "action-bench", "results");
 
-// The tool's own acceptance test is excluded from the measured test corpus below: fm-milestone.sh
+// The tool's own acceptance test is excluded from the measured test corpus below: fm milestone
 // runs `tests/*.test.sh` as one of its stages, and its own test file lives at that same path, so
 // including it would make the tool invoke itself from inside its own measurement (unbounded
 // recursion). Any file matching this pattern is treated as harness-of-the-harness, not a target.
@@ -269,16 +269,21 @@ function readlinkOrNull(p: string): string | null {
 // the filesystem so they work unmodified in both cases (git archive preserves symlinks as symlink
 // tar entries). The tracked-private-path check cannot: a headless snapshot has no index to query,
 // so it reads the committed tree for `sha` from REPO_ROOT (`git ls-tree`) instead of the working
-// tree (`git ls-files`) whenever `root` itself isn't a git repo - both answer the same question
-// ("is data/state/config/projects tracked at this point in history") from whichever source exists.
+// tree (`git ls-files`) whenever `root` itself isn't a git repo. For the current HEAD candidate in
+// a dirty staged migration, the index is the source of truth because the landing commit has not
+// been created yet; use `git ls-files` for that candidate so staged data/ deletions satisfy the
+// invariant before commit.
 async function stageRepoInvariants(root: string, sha: string): Promise<GateInvariants> {
 	const t0 = Date.now();
 	const claudeMd = readlinkOrNull(join(root, "CLAUDE.md"));
 	const claudeSkills = readlinkOrNull(join(root, ".claude", "skills"));
 	const hasGit = existsSync(join(root, ".git"));
+	const headSha = gitRevParse("HEAD", REPO_ROOT);
 	const r = hasGit
 		? await runCmd(["git", "ls-files", "--", "data", "state", "config", "projects"], root, 30_000)
-		: await runCmd(["git", "-C", REPO_ROOT, "ls-tree", "-r", "--name-only", sha, "--", "data", "state", "config", "projects"], REPO_ROOT, 30_000);
+		: sha === headSha
+			? await runCmd(["git", "ls-files", "--", "data", "state", "config", "projects"], REPO_ROOT, 30_000)
+			: await runCmd(["git", "-C", REPO_ROOT, "ls-tree", "-r", "--name-only", sha, "--", "data", "state", "config", "projects"], REPO_ROOT, 30_000);
 	const tracked = r.stdout.trim();
 	const ok = claudeMd === "AGENTS.md" && claudeSkills === "../.agents/skills" && tracked === "";
 	return {
@@ -466,7 +471,7 @@ async function cmdRun(argv: string[]): Promise<void> {
 	}
 	const [label, ...rest] = positionals;
 	if (!label) {
-		console.error("usage: fm-milestone.sh <label> [sha] [runs.json ...] [--note text] [--out dir] [--captured iso8601] [--jobs n]");
+		console.error("usage: fm milestone <label> [sha] [runs.json ...] [--note text] [--out dir] [--captured iso8601] [--jobs n]");
 		process.exit(1);
 	}
 	const maybeSha = rest[0] && !existsSync(rest[0]) ? rest[0] : undefined;
@@ -505,7 +510,7 @@ async function main(): Promise<void> {
 		}
 		const [shaA, shaB, label] = positionals;
 		if (!shaA || !shaB) {
-			console.error("usage: fm-milestone.sh --compare <shaA> <shaB> [label] [--out dir] [--jobs n]");
+			console.error("usage: fm milestone --compare <shaA> <shaB> [label] [--out dir] [--jobs n]");
 			process.exit(1);
 		}
 		const outDir = flags.out ?? DEFAULT_OUT;

@@ -7,12 +7,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-const FM_SEND_SH = fileURLToPath(new URL("../../../../sbin/fm-send.sh", import.meta.url));
+// The steer-capture hook lives in the send verb's source: send.ts invokes
+// `fm capture steer ...` on every --steer. Probe that file for the call.
+const FM_SEND_SRC = fileURLToPath(new URL("./send.ts", import.meta.url));
 
 function fleetHookState(): "present" | "missing" {
 	try {
-		const contents = readFileSync(FM_SEND_SH, "utf8");
-		return contents.includes('/fm" capture') ? "present" : "missing";
+		const contents = readFileSync(FM_SEND_SRC, "utf8");
+		return contents.includes('"capture", "steer"') ? "present" : "missing";
 	} catch {
 		return "missing";
 	}

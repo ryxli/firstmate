@@ -46,7 +46,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 0
 fi
 
-RUN="$ROOT/sbin/fm-crew-metrics.sh"
+RUN=("$ROOT/sbin/fm" crew-metrics)
 EVAL_DIR="$ROOT/benchmarks/eval-runner"
 
 TMP=
@@ -62,14 +62,14 @@ DECOY_HOME="$(mktemp -d "${TMPDIR:-/tmp}/fm-crew-metrics-decoy-home.XXXXXX")"
 # --- wrapper --help, from a neutral cwd, must exit 0 and never touch a
 #     cap-specific absolute path ------------------------------------------
 before="$(find "$DECOY_HOME" | sort)"
-out="$(cd "$TMP" && HOME="$DECOY_HOME" "$RUN" --help 2>&1)"
+out="$(cd "$TMP" && HOME="$DECOY_HOME" "${RUN[@]}" --help 2>&1)"
 rc=$?
-[ "$rc" -eq 0 ] || fail "fm-crew-metrics.sh --help exited $rc"
+[ "$rc" -eq 0 ] || fail "fm crew-metrics --help exited $rc"
 after="$(find "$DECOY_HOME" | sort)"
-[ "$before" = "$after" ] || fail "fm-crew-metrics.sh --help wrote into \$HOME"
+[ "$before" = "$after" ] || fail "fm crew-metrics --help wrote into \$HOME"
 assert_contains "$out" "--home" "help text documents --home"
 assert_not_contains "$out" "/Users/" "help text must not leak any cap absolute path"
-pass "fm-crew-metrics.sh --help is a clean no-op from a neutral cwd/HOME"
+pass "fm crew-metrics --help is a clean no-op from a neutral cwd/HOME"
 
 # --- crew-metrics.py wires --home's default to fm_paths.fm_home(), which
 #     honors FM_HOME, instead of a hardcoded cap absolute -----------------

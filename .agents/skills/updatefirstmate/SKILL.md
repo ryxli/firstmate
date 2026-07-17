@@ -15,7 +15,7 @@ Never batch independent repositories into one opaque command.
 Always run the generic firstmate fleet update before reading optional local targets:
 
 ```sh
-sbin/fm-update.sh
+sbin/fm update
 ```
 
 This fast-forwards firstmate and registered secondmate homes only.
@@ -41,7 +41,7 @@ Never touch anything under `firstmate/projects/`.
 
 ## Mechanical state machine
 
-`sbin/fm-update.sh` implements this machine natively for the firstmate repo and secondmate homes; run it rather than hand-executing the steps there.
+`sbin/fm update` implements this machine natively for the firstmate repo and secondmate homes; run it rather than hand-executing the steps there.
 Apply the steps manually only to configured local infrastructure the script does not cover.
 For every such repository, complete and observe each state before taking the next action:
 
@@ -73,7 +73,7 @@ A diverged or ambiguous fork is a report, not an automatic repair.
 Feature branches, scratch checkouts, local-only scaffolds, and dirty worktrees are not synchronized unless the cap names them and approves the branch-specific action.
 ## Reporting contract
 
-Relay `fm-update.sh`'s native one-line-per-repository output (`<label>: updated <a>..<b>` / `already current` / `skipped: <exact reason>`), and keep manually synced targets in the same format.
+Relay `fm update`'s native one-line-per-repository output (`<label>: updated <a>..<b>` / `already current` / `skipped: <exact reason>`), and keep manually synced targets in the same format.
 Separate synchronized, already current, safely skipped, and requires-a-cap-decision.
 Never report "already current" until after the remote fetch and post-fetch observation.
 

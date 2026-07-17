@@ -15,7 +15,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PATCHER="$ROOT/sbin/fm-patch-herdr-omp.sh"
+PATCHER=("$ROOT/sbin/fm" patch-herdr-omp)
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-patch-herdr-omp.XXXXXX")
 export HOME="$TMP_ROOT/home"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -168,7 +168,7 @@ TS
 test_pristine_check_reports_unpatched() {
   local f="$TMP_ROOT/pristine.ts"
   write_pristine_fixture "$f"
-  "$PATCHER" --check --file "$f"
+  "${PATCHER[@]}" --check --file "$f"
   local rc=$?
   [ "$rc" -eq 1 ] || fail "--check on a pristine file must exit 1, got $rc"
   pass "--check exits 1 on a pristine (never-patched) file"
@@ -177,8 +177,8 @@ test_pristine_check_reports_unpatched() {
 test_apply_enforces_invariant() {
   local f="$TMP_ROOT/apply.ts"
   write_pristine_fixture "$f"
-  "$PATCHER" --file "$f" || fail "apply on a pristine file must exit 0"
-  "$PATCHER" --check --file "$f" || fail "--check must report patched after a successful apply"
+  "${PATCHER[@]}" --file "$f" || fail "apply on a pristine file must exit 0"
+  "${PATCHER[@]}" --check --file "$f" || fail "--check must report patched after a successful apply"
 
   python3 - "$f" <<'PY' || fail "restoreAgentActiveFromCtx() must be scoped inside the rootSession recovery branch, closed before publishState(true)"
 import sys
@@ -198,11 +198,11 @@ PY
 test_apply_is_idempotent() {
   local f="$TMP_ROOT/idempotent.ts"
   write_pristine_fixture "$f"
-  "$PATCHER" --file "$f" >/dev/null || fail "first apply failed"
+  "${PATCHER[@]}" --file "$f" >/dev/null || fail "first apply failed"
   local before
   before=$(cat "$f")
   local out
-  out=$("$PATCHER" --file "$f" 2>&1)
+  out=$("${PATCHER[@]}" --file "$f" 2>&1)
   local rc=$?
   [ "$rc" -eq 0 ] || fail "second apply must exit 0, got $rc"
   printf '%s' "$out" | grep -q "already patched" || fail "second apply must report already patched, got: $out"
@@ -212,7 +212,7 @@ test_apply_is_idempotent() {
 test_patch_check_requires_publish_guard_at_publish_state() {
   local fixture="$TMP_ROOT/missing-publish-guard.ts"
   write_pristine_fixture "$fixture"
-  "$PATCHER" --file "$fixture" >/dev/null || fail "initial apply failed"
+  "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "initial apply failed"
 
   python3 - "$fixture" <<'PY' || fail "could not remove the real publishState guard"
 import io, re, sys
@@ -230,11 +230,11 @@ if count != 1:
 io.open(path, "w", encoding="utf-8").write(src)
 PY
 
-  "$PATCHER" --check --file "$fixture" \
+  "${PATCHER[@]}" --check --file "$fixture" \
     && fail "--check accepted a partially patched file with its publishState guard removed"
-  "$PATCHER" --file "$fixture" >/dev/null \
+  "${PATCHER[@]}" --file "$fixture" >/dev/null \
     || fail "apply did not restore a missing publishState guard"
-  "$PATCHER" --check --file "$fixture" \
+  "${PATCHER[@]}" --check --file "$fixture" \
     || fail "--check rejected the repaired publishState guard"
 
   python3 - "$fixture" <<'PY' || fail "publishState guard was not restored at its actual location"
@@ -259,12 +259,12 @@ test_upgrade_from_prior_buggy_heartbeat_converges() {
   local buggy="$TMP_ROOT/buggy.ts"
   write_pristine_fixture "$fresh"
   write_pristine_fixture "$buggy"
-  "$PATCHER" --file "$fresh" >/dev/null || fail "fresh apply failed"
+  "${PATCHER[@]}" --file "$fresh" >/dev/null || fail "fresh apply failed"
 
   # Rewrite $buggy into the shape the prior (buggy) patcher version produced:
   # every hook migration identical, but the heartbeat block unconditionally
   # re-samples ctx.isIdle() via restoreAgentActiveFromCtx() every tick.
-  "$PATCHER" --file "$buggy" >/dev/null || fail "buggy-precursor apply failed"
+  "${PATCHER[@]}" --file "$buggy" >/dev/null || fail "buggy-precursor apply failed"
   python3 - "$buggy" <<'PY'
 import io, re, sys
 path = sys.argv[1]
@@ -310,12 +310,12 @@ src = new_block_re.sub(old_block, src, count=1)
 io.open(path, "w", encoding="utf-8").write(src)
 PY
 
-  "$PATCHER" --check --file "$buggy"
+  "${PATCHER[@]}" --check --file "$buggy"
   local rc=$?
   [ "$rc" -eq 1 ] || fail "--check on the prior buggy heartbeat shape must exit 1 (needs re-patch), got $rc"
 
-  "$PATCHER" --file "$buggy" || fail "upgrade apply over the prior buggy heartbeat must succeed"
-  "$PATCHER" --check --file "$buggy" || fail "--check must report patched after the upgrade apply"
+  "${PATCHER[@]}" --file "$buggy" || fail "upgrade apply over the prior buggy heartbeat must succeed"
+  "${PATCHER[@]}" --check --file "$buggy" || fail "--check must report patched after the upgrade apply"
 
   diff -u "$fresh" "$buggy" \
     || fail "upgrading a prior-buggy-patched file must converge to the same content as a fresh apply"
@@ -328,8 +328,8 @@ test_upgrade_from_v3_resume_gate_converges() {
   local prior="$TMP_ROOT/v3-resume-gate.ts"
   write_pristine_fixture "$fresh"
   write_pristine_fixture "$prior"
-  "$PATCHER" --file "$fresh" >/dev/null || fail "fresh v4 apply failed"
-  "$PATCHER" --file "$prior" >/dev/null || fail "prior v3 precursor apply failed"
+  "${PATCHER[@]}" --file "$fresh" >/dev/null || fail "fresh v4 apply failed"
+  "${PATCHER[@]}" --file "$prior" >/dev/null || fail "prior v3 precursor apply failed"
   python3 - "$prior" <<'PY'
 import io, sys
 path = sys.argv[1]
@@ -366,10 +366,10 @@ src = src.replace("// fm-exact-root-session-claim-v5:", "// fm-exact-root-sessio
 src = src.replace("      lacksFreshResumeProof ||\n      isStaleSameSessionReload", "      isSameSessionReload", 1)
 io.open(path, "w", encoding="utf-8").write(src)
 PY
-  "$PATCHER" --check --file "$prior"
+  "${PATCHER[@]}" --check --file "$prior"
   local rc=$?
   [ "$rc" -eq 1 ] || fail "--check accepted the prior v3 resume gate"
-  "$PATCHER" --file "$prior" >/dev/null || fail "upgrade from prior v3 resume gate failed"
+  "${PATCHER[@]}" --file "$prior" >/dev/null || fail "upgrade from prior v3 resume gate failed"
   diff -u "$fresh" "$prior" \
     || fail "upgrading the prior v3 resume gate must converge to a fresh v4 apply"
   pass "a prior v3 resume gate is re-patched to the constrained fresh-process shape"
@@ -382,7 +382,7 @@ test_upgrade_from_actual_parent_7a20f3d() {
   local fixture="$TMP_ROOT/parent-7a20f3d.ts"
   local harness="$TMP_ROOT/parent-7a20f3d-harness.mjs"
   write_pristine_fixture "$fixture"
-  "$PATCHER" --file "$fixture" >/dev/null || fail "current patch apply failed"
+  "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "current patch apply failed"
 
   # Replace the current helper with the exact helper emitted by parent
   # commit 7a20f3d. This is the reviewed parent output, not a hand-trimmed
@@ -470,11 +470,11 @@ if count != 1:
 io.open(path, "w", encoding="utf-8").write(src)
 PY
 
-  "$PATCHER" --check --file "$fixture" \
+  "${PATCHER[@]}" --check --file "$fixture" \
     && fail "--check accepted actual parent 7a20f3d output as current"
-  "$PATCHER" --file "$fixture" >/dev/null \
+  "${PATCHER[@]}" --file "$fixture" >/dev/null \
     || fail "upgrade from actual parent 7a20f3d output failed"
-  "$PATCHER" --check --file "$fixture" \
+  "${PATCHER[@]}" --check --file "$fixture" \
     || fail "--check rejected the upgraded parent output"
 
   grep -q "fm-exact-root-session-claim-v5" "$fixture" \
@@ -570,7 +570,7 @@ MJS
 test_missing_target_skips_cleanly() {
   local f="$TMP_ROOT/does-not-exist.ts"
   local out
-  out=$("$PATCHER" --file "$f" 2>&1)
+  out=$("${PATCHER[@]}" --file "$f" 2>&1)
   local rc=$?
   [ "$rc" -eq 0 ] || fail "a missing integration file must not be an error (bootstrap-safe), got $rc"
   printf '%s' "$out" | grep -q "SKIP" || fail "a missing integration file must report SKIP, got: $out"
@@ -592,7 +592,7 @@ test_active_turn_survives_background_job_wait_across_heartbeat() {
   local fixture="$TMP_ROOT/heartbeat-runtime.ts"
   local harness="$TMP_ROOT/heartbeat-harness.mjs"
   write_pristine_fixture "$fixture"
-  "$PATCHER" --file "$fixture" || fail "apply for the runtime regression fixture failed"
+  "${PATCHER[@]}" --file "$fixture" || fail "apply for the runtime regression fixture failed"
 
   cat >"$harness" <<'MJS'
 const fixturePath = process.argv[2];
@@ -680,7 +680,7 @@ test_exact_session_root_claim_lifecycle() {
   local fixture="$TMP_ROOT/root-claim-runtime.ts"
   local harness="$TMP_ROOT/root-claim-harness.mjs"
   write_pristine_fixture "$fixture"
-  "$PATCHER" --file "$fixture" || fail "apply for the exact-session root-claim fixture failed"
+  "${PATCHER[@]}" --file "$fixture" || fail "apply for the exact-session root-claim fixture failed"
 
   cat >"$TMP_ROOT/root-claim-headless-only.mjs" <<'MJS'
 const fixturePath = process.argv[2];
@@ -978,7 +978,7 @@ test_root_move_and_id_only_claims() {
   local fixture="$TMP_ROOT/root-identity-runtime.ts"
   local harness="$TMP_ROOT/root-identity-harness.mjs"
   write_pristine_fixture "$fixture"
-  "$PATCHER" --file "$fixture" || fail "apply for root identity regression fixture failed"
+  "${PATCHER[@]}" --file "$fixture" || fail "apply for root identity regression fixture failed"
 
   cat >"$harness" <<'MJS'
 const fixturePath = process.argv[2];
@@ -1127,7 +1127,7 @@ test_live_resumed_root_heartbeat_proof() {
   local fixture="$TMP_ROOT/live-root-runtime.ts"
   local harness="$TMP_ROOT/live-root-harness.mjs"
   write_pristine_fixture "$fixture"
-  "$PATCHER" --file "$fixture" || fail "apply for the live resumed-root proof failed"
+  "${PATCHER[@]}" --file "$fixture" || fail "apply for the live resumed-root proof failed"
 
   cat >"$harness" <<'MJS'
 const fixturePath = process.argv[2];
@@ -1246,7 +1246,7 @@ test_eventless_reload_recovers_via_expired_lease() {
   local fixture="$TMP_ROOT/lease-runtime.ts"
   local harness="$TMP_ROOT/lease-harness.mjs"
   write_pristine_fixture "$fixture"
-  "$PATCHER" --file "$fixture" || fail "apply for the eventless-reload lease fixture failed"
+  "${PATCHER[@]}" --file "$fixture" || fail "apply for the eventless-reload lease fixture failed"
 
   cat >"$harness" <<'MJS'
 const fixturePath = process.argv[2];

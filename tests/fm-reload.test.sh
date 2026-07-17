@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior tests for sbin/fm-reload.sh.
+# Behavior tests for sbin/fm reload.
 #
 # Covers:
 #   (a) explicit pane + session-id captured pre-quit  -> omp --resume <id> + proof passes
@@ -29,7 +29,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RELOAD="$ROOT/sbin/fm-reload.sh"
+RELOAD="$ROOT/sbin/fm"
 TMP_ROOT=
 
 fail() {
@@ -100,6 +100,7 @@ make_fake_herdr() {
   log="$dir/herdr.log"
   mkdir -p "$fakebin"
   cat > "$fakebin/herdr" <<'SH'
+#!/bin/sh
 STATE_DIR="${FM_FAKE_HERDR_STATE_DIR:-/tmp}"
 RESUMED_FILE="$STATE_DIR/resumed"
 GET_COUNT_FILE="$STATE_DIR/get-count"
@@ -257,10 +258,10 @@ SH
   printf '%s\n' "$fakebin"
 }
 
-# Run fm-reload.sh with PATH mocked to fake herdr; guard skipped via env
+# Run fm reload with PATH mocked to fake herdr; guard skipped via env
 # by default (set FM_RELOAD_NO_GUARD= empty to exercise the self-reload guard).
 # Caller sets FM_FAKE_HERDR_* vars before calling.
-# Args: case_dir [fm-reload.sh args...]
+# Args: case_dir [fm reload args...]
 run_reload() {
   local dir=$1; shift
   local fakebin="$dir/fakebin"
@@ -277,7 +278,7 @@ run_reload() {
   FM_RELOAD_PROOF_TIMEOUT="${FM_RELOAD_PROOF_TIMEOUT:-1}" \
   FM_RELOAD_SELF_TIMEOUT="${FM_RELOAD_SELF_TIMEOUT:-1}" \
     PATH="$fakebin:$PATH" \
-    "$RELOAD" "$@"
+    "$RELOAD" reload "$@"
 }
 
 # Wait for the detached self-reload worker's final log line (succeeded/FAILED).
@@ -311,7 +312,7 @@ test_resume_path() {
   local sid="abcd1234-0000-0000-0000-000000000001"
   FM_FAKE_HERDR_AGENT="" \
   FM_FAKE_HERDR_SESSION="$sid" \
-    run_reload "$CASE" w1:p1 >/dev/null || fail "(a) fm-reload.sh exited non-zero"
+    run_reload "$CASE" w1:p1 >/dev/null || fail "(a) fm reload exited non-zero"
 
   herdr_log "$CASE" | grep -q "pane run w1:p1 omp --resume $sid" \
     || fail "(a) expected 'pane run w1:p1 omp --resume $sid' in herdr log"
@@ -351,7 +352,7 @@ test_auto_pane_current() {
   FM_FAKE_HERDR_CURRENT="w3:p1" \
   FM_FAKE_HERDR_AGENT="" \
   FM_FAKE_HERDR_SESSION="$sid" \
-    run_reload "$CASE" >/dev/null || fail "(c) fm-reload.sh exited non-zero"
+    run_reload "$CASE" >/dev/null || fail "(c) fm reload exited non-zero"
 
   herdr_log "$CASE" | grep -q "pane current" \
     || fail "(c) expected pane current call in herdr log"
@@ -373,7 +374,7 @@ test_cmd_template_substitution() {
   FM_FAKE_HERDR_AGENT="" \
   FM_FAKE_HERDR_SESSION="$sid" \
     run_reload "$CASE" w4:p1 --cmd "myomp --resume {id} --extra-flag" >/dev/null \
-    || fail "(d) fm-reload.sh exited non-zero"
+    || fail "(d) fm reload exited non-zero"
 
   herdr_log "$CASE" | grep -q "pane run w4:p1 myomp --resume $sid --extra-flag" \
     || fail "(d) expected substituted cmd in herdr log"
@@ -392,7 +393,7 @@ test_cmd_literal() {
   FM_FAKE_HERDR_AGENT="" \
   FM_FAKE_HERDR_SESSION="" \
     run_reload "$CASE" w5:p1 --cmd "omp --fresh-start" >/dev/null \
-    || fail "(e) fm-reload.sh exited non-zero"
+    || fail "(e) fm reload exited non-zero"
 
   herdr_log "$CASE" | grep -q "pane run w5:p1 omp --fresh-start" \
     || fail "(e) expected literal cmd in herdr log"
@@ -472,7 +473,7 @@ test_fm_name_target() {
   FM_FAKE_HERDR_SESSION="$sid" \
   FM_STATE_OVERRIDE="$CASE/state" \
     run_reload "$CASE" fm-testmate >/dev/null \
-    || fail "(i) fm-reload.sh exited non-zero for fm-<name> target"
+    || fail "(i) fm reload exited non-zero for fm-<name> target"
 
   herdr_log "$CASE" | grep -q "pane run w9:p1 omp --resume $sid" \
     || fail "(i) expected resume on pane w9:p1 resolved from fm-testmate"
@@ -554,7 +555,7 @@ test_deterministic_session_lookup() {
   FM_FAKE_HERDR_SESSION="" \
   FM_FAKE_HERDR_POST_SESSION="$sid" \
     run_reload "$CASE" wl:p1 2>/dev/null \
-    || fail "(l) fm-reload.sh exited non-zero when deterministic lookup available"
+    || fail "(l) fm reload exited non-zero when deterministic lookup available"
 
   herdr_log "$CASE" | grep -q "pane run wl:p1 omp --resume $sid" \
     || fail "(l) expected 'pane run wl:p1 omp --resume $sid' in herdr log"
@@ -752,7 +753,7 @@ test_durable_target_meta_untouched_when_pane_survives() {
   FM_FAKE_HERDR_SESSION="$sid" \
   FM_STATE_OVERRIDE="$CASE/state" \
     run_reload "$CASE" fm-steady-mate >/dev/null \
-    || fail "(s) fm-reload.sh exited non-zero for surviving durable target"
+    || fail "(s) fm reload exited non-zero for surviving durable target"
 
   herdr_log "$CASE" | grep -q "pane run ws:p1 omp --resume $sid" \
     || fail "(s) expected resume in the original pane ws:p1"
