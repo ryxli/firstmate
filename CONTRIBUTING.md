@@ -34,4 +34,4 @@ Runtime tool versions (node, bun, and the `herdr` binary) are managed with `mise
 
 ## Questions
 
-Open an issue, or talk to me on [Discord](https://discord.gg/Wsy2NpnZDu).
+Open an issue.

@@ -1,28 +1,6 @@
 <h1 align="center">firstmate</h1>
-<p align="center">
-  <a
-    href="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue?style=flat-square"
-    ><img
-      alt="Platform"
-      src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue?style=flat-square"
-  /></a>
-  <a href="https://x.com/kunchenguid"
-    ><img
-      alt="X"
-      src="https://img.shields.io/badge/X-@kunchenguid-black?style=flat-square"
-  /></a>
-  <a href="https://discord.gg/Wsy2NpnZDu"
-    ><img
-      alt="Discord"
-      src="https://img.shields.io/discord/1439901831038763092?style=flat-square&label=discord"
-  /></a>
-</p>
 
 <h3 align="center">Talk to one agent. Ship with a crew.</h3>
-
-<p align="center">
-  <img alt="firstmate - talk to one agent, ship with a crew" src="assets/banner.jpg" width="100%" />
-</p>
 
 You can run one coding agent easily.
 But the moment you want three project tasks done in parallel - fixes, investigations, plans, audits - you become a tab-juggler: babysitting sessions, copy-pasting context between repos, forgetting which terminal had the failing test.
@@ -48,7 +26,7 @@ This is.. a directory that turns any agent into your firstmate, and you the capt
 ## Quick Start
 
 ```sh
-$ git clone https://github.com/kunchenguid/firstmate && cd firstmate
+$ git clone https://github.com/ryxli/firstmate && cd firstmate
 $ claude   # launch your agent harness here; AGENTS.md takes over
 
 > ahoy! look at my github project xyz, then fix the flaky login test and add dark mode
@@ -101,12 +79,6 @@ Tracked changes to firstmate itself ship directly to `main`; see `AGENTS.md` sec
 bash -n sbin/*.sh                          # syntax-check the toolbelt
 shellcheck sbin/*.sh tests/*.sh            # lint the toolbelt and behavior tests; CI enforces this
 for test_script in tests/*.test.sh; do "$test_script"; done   # behavior tests, matching CI
-tests/fm-bootstrap.test.sh                # bootstrap dependency and optional-capability behavior
-tests/fm-update.test.sh                   # fast-forward-only self-update, reread, nudge, dedup, and skip safety
-tests/fm-secondmate.test.sh               # persistent secondmate routing, seeding, idle charter, backlog handoff, spawn, recovery, teardown, and FM_HOME
-tests/fm-teardown.test.sh                 # teardown safety and reminder checks
-tests/fm-tooling-lint.test.sh             # shipped tool-invocation convention checks
 [ "$(readlink CLAUDE.md)" = "AGENTS.md" ]
 [ "$(readlink .claude/skills)" = "../.agents/skills" ]
-
 ```
