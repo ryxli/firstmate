@@ -100,6 +100,14 @@ For `local-only`, create the local repo under `projects/<name>` and skip GitHub 
 
 There is no separate validation pipeline to install or run: a change reaches `main` through focused review and tests plus the captain's merge.
 
+### Promotion path (mate knowledge to canonical home)
+
+A mate flags promotion-worthy knowledge by dropping the file (or a pointer note) into its home's `data/promote/` directory; that directory is the single promotion inbox, and a `promote:` status line only announces that something landed there.
+Firstmate reviews each flagged item and classifies it with the disposition vocabulary owned by AGENTS.md section 1 (keep/merge/relocate/compile/quarantine/drop).
+A promoted fact lands in exactly one canonical home per the layer contract: tracked template surface (sbin/, skills, benchmarks, AGENTS.md) for domain-generic material, the owning mate's home for domain knowledge, local data/ for fleet records.
+After landing, regenerate any projections (`sbin/fm-brief.sh --regen <id>`) and record the disposition in the mate's promote inbox (move the flagged file to `data/promote/done/` with a one-line verdict header) so the mate sees the outcome.
+Tracked landings ride the normal main-only commit flow and reach the other laptop on sync; nothing is promoted by copying a file to a second home without a recorded disposition.
+
 ## 7. Task lifecycle
 
 ### Intake
