@@ -97,6 +97,23 @@ fm_lavish_steward_alive() {
   kill -0 "$pid" 2>/dev/null
 }
 
+# fm_lavish_last_exit_reason <key>: print the reason recorded in the most
+# recent line of the steward's persistent exit-forensics file
+# (<key>.laststate), or "unknown" if the file is absent/empty. That file is
+# appended by the steward on every exit and, unlike its <key>.steward meta, is
+# never deleted - so the reason survives even a crash that skipped the meta
+# cleanup, and survives the give-up case where the meta is deliberately kept
+# alive for --recover/--check to find. "unknown" is itself informative: it
+# means the steward had no chance to record anything (e.g. kill -9).
+fm_lavish_last_exit_reason() {
+  local key=$1 dir line reason
+  dir=$(fm_lavish_state_dir)
+  line=$(tail -1 "$dir/$key.laststate" 2>/dev/null || true)
+  [ -n "$line" ] || { printf 'unknown\n'; return 0; }
+  reason=$(printf '%s\n' "$line" | sed -n 's/.*reason=\([^ ]*\).*/\1/p')
+  [ -n "$reason" ] && printf '%s\n' "$reason" || printf 'unknown\n'
+}
+
 # fm_lavish_kill_polls <canonical-file>: terminate any `lavish-axi poll <file>`
 # process for this session. Reaps an orphaned poll left behind by a hard-crashed
 # steward (one that could not run its TERM trap) before a fresh steward starts,

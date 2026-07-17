@@ -12,6 +12,15 @@
 # process from the agent that opened the artifact, the agent's own thread is
 # NEVER tied up polling Lavish - it just gets woken when there is feedback.
 #
+# Detection/diagnosability: every exit (graceful or not) appends a reason to
+# state/lavish/<key>.laststate, which is never deleted. Its own meta file
+# (<key>.steward) is only self-removed on a reason that means nothing is left
+# to watch (session-ended, signaled); a give-up after the server stayed
+# unreachable leaves the meta behind (dead pid) on purpose so
+# fm-lavish-open.sh --recover / --check can find it and revive the session or
+# confirm it truly ended, instead of the steward silently erasing its own
+# evidence.
+#
 # Usage (normally launched detached by sbin/fm-lavish-open.sh, not by hand):
 #   fm-lavish-steward.sh <canonical-file> <session-key> <relay-pane> [<session-url>]
 #     <canonical-file> realpath of the artifact (the lavish session key source)
@@ -54,17 +63,45 @@ log() { printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" >> "$LOG"; }
 } > "$META"
 
 POLL_OUT="$STATE_DIR/$KEY.poll.out"
+LASTSTATE="$STATE_DIR/$KEY.laststate"
 POLL_PID=""
+# EXIT_REASON names why the loop below stops; cleanup() uses it to decide
+# whether META may be removed. Set it right before every break/exit path.
+EXIT_REASON="unknown"
+
+# record_laststate: append a durable forensic line that outlives META itself.
+# This is the diagnosable trace a health check (fm-lavish-open.sh --check)
+# reads to explain why a steward is no longer running - the fix for the
+# silent-drop bug was precisely that this information used to vanish with
+# META on every exit, crash or not.
+record_laststate() {
+  printf 'exited=%s pid=%s reason=%s file=%s\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S')" "$$" "$EXIT_REASON" "$FILE" >> "$LASTSTATE"
+}
+
 cleanup() {
   [ -n "$POLL_PID" ] && kill "$POLL_PID" 2>/dev/null
-  log "steward stopping (pid $$)"
-  rm -f "$META" "$POLL_OUT"
+  log "steward stopping (pid $$, reason=$EXIT_REASON)"
+  record_laststate
+  rm -f "$POLL_OUT"
+  # Only remove META on a reason that means nothing is left to watch: the
+  # captain closed the session (session-ended) or we were deliberately told to
+  # stop (signaled, e.g. by teardown). Any other reason - above all giving up
+  # after the server stayed unreachable - MUST leave META behind (its pid now
+  # dead) so --recover / the per-session health check can find it and either
+  # revive the steward or confirm the session truly ended. Unconditionally
+  # deleting META here was the silent-drop bug: a permanently-down server used
+  # to erase its own evidence, so nothing downstream ever knew to look again.
+  case "$EXIT_REASON" in
+    session-ended|signaled) rm -f "$META" ;;
+  esac
 }
 running=1
 # On TERM/INT, stop looping AND kill the in-flight poll child so it cannot
 # consume (and then drop) a feedback event after we have decided to exit.
 on_signal() {
   running=0
+  EXIT_REASON="signaled"
   [ -n "$POLL_PID" ] && kill "$POLL_PID" 2>/dev/null
 }
 trap cleanup EXIT
@@ -121,11 +158,13 @@ while [ "$running" -eq 1 ]; do
     case "$revive" in
       *"status: ended"*)
         log "revive reports session ended; steward exiting"
+        EXIT_REASON="session-ended"
         break
         ;;
     esac
     if [ "$fails" -ge "$FAIL_MAX" ]; then
       log "poll failed $fails times consecutively (server unreachable); steward giving up"
+      EXIT_REASON="server-unreachable-giveup"
       break
     fi
     log "poll rc=$rc empty=$([ -z "$out" ] && echo yes || echo no); revive+backoff ${backoff}s (fail $fails/$FAIL_MAX)"
@@ -139,6 +178,7 @@ while [ "$running" -eq 1 ]; do
   case "$out" in
     *"status: ended"*)
       log "session ended; steward exiting"
+      EXIT_REASON="session-ended"
       break
       ;;
     *"status: feedback"*)

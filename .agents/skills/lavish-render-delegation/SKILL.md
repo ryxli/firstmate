@@ -61,6 +61,32 @@ It relaunches a steward only for sessions still open server-side, reaps any
 orphaned poll a hard-crashed steward left behind (so exactly one poll ever owns a
 session), and drops state for sessions that already ended.
 
+## Mid-session self-healing (no restart needed)
+
+A steward can also die *between* restarts (a crash, or giving up after the
+Lavish server stayed unreachable past its bounded backoff). That must never
+drop captain feedback silently until someone happens to restart firstmate.
+Every `fm-lavish-open.sh` launch arms a companion
+`state/lavish-<key>.check.sh` (plus a gate-only `state/lavish-<key>.meta`, no
+`pane=`, so it never joins the crew fleet) that the existing in-process
+supervisor's `*.check.sh` timer already polls every `FM_CHECK_INTERVAL`
+(default 300s) - no new daemon, this rides the existing check machinery. On
+each tick it runs `sbin/fm-lavish-open.sh --check <key>`, which:
+- stays silent if the steward is alive (the normal case);
+- revives a dead steward whose session is still open, and reports it plus the
+  steward's last recorded exit reason;
+- reports (rather than silently retiring) a steward found dead after its
+  session had already ended, since feedback sent during the dead window may
+  have been missed;
+- if the Lavish server itself is unreachable, relaunches anyway and surfaces
+  the outage by name instead of failing silently.
+
+A steward's exit reason is always recorded to `state/lavish/<key>.laststate`
+(never deleted, even across a give-up), so a dead steward is always
+diagnosable. Non-empty check output is a captain-relevant wake by the
+supervisor's own contract, so any of the above reaches the captain without
+waiting for a restart.
+
 ## Why this matters
 
 - **The first mate never polls Lavish on its own thread.** Its supervision loop
@@ -81,9 +107,16 @@ Before showing the captain any reviewed visual artifact:
 
 ## Pieces
 
-- `sbin/fm-lavish-open.sh` - entry point: open/resume + launch steward; `--recover`.
+- `sbin/fm-lavish-open.sh` - entry point: open/resume + launch steward;
+  `--recover` (bulk); `--check <key>` (single-session health, wired to the
+  supervisor's check timer).
 - `sbin/fm-lavish-steward.sh` - the worker loop (launched detached; not run by hand).
 - `sbin/fm-lavish-reply.sh` - write-only, non-blocking agent reply.
 - `sbin/fm-lavish-lib.sh` - shared session-key / URL / state primitives.
-- State lives under `state/lavish/` (gitignored): `<key>.steward` (worker meta),
-  `<key>.feedback.md` (relayed feedback), `<key>.steward.log` (diagnostics).
+- State lives under `state/lavish/` (gitignored): `<key>.steward` (worker meta,
+  kept on give-up so recovery can find it), `<key>.feedback.md` (relayed
+  feedback), `<key>.steward.log` (live log), `<key>.laststate` (durable exit
+  reason, never deleted).
+- Top-level `state/lavish-<key>.check.sh` + `state/lavish-<key>.meta` (gate-only,
+  no `pane=`) wire the per-session health check into the existing supervisor
+  check timer.
