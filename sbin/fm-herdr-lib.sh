@@ -236,44 +236,65 @@ fm_herdr_reap_husk_slot() {
   esac
 }
 
-# fm_pane_input_pending: 0 (pending) if the pane's visible last line looks
-# like real unsubmitted text a human typed. An idle composer, a bare prompt
-# glyph, or a busy footer is NOT pending. With herdr we read the raw visible
-# text; no ANSI SGR stripping needed because herdr pane read returns plain
-# text by default.
+# fm_pane_input_pending: 0 (pending) if the pane's visible content shows real
+# unsubmitted text a human typed into the composer. An idle composer, a bare
+# prompt glyph, or a busy footer is NOT pending. With herdr we read the raw
+# visible text; no ANSI SGR stripping needed because herdr pane read returns
+# plain text by default. Note: --lines is not honored by --source visible
+# (herdr always returns the full visible viewport for that source), so this
+# scans the whole visible tail rather than relying on a short window.
 fm_pane_input_pending() {
-  local pane=$1 line stripped
+  local pane=$1 raw line stripped result found=1
   # If the agent is mid-turn, the visible last line is agent output, never
   # unsubmitted human text. Defer to the busy check so a working pane is
   # never misread as holding pending input.
   fm_pane_is_busy "$pane" && return 1
-  line=$(herdr pane read "$pane" --lines 3 --source visible 2>/dev/null \
-    | grep -v '^[[:space:]]*$' | tail -1 || true)
-  [ -n "$line" ] || return 1
-  # Strip composer box-drawing chrome. Real composers are full boxes whose
-  # last visible line is the bottom border (e.g. omp/opus draw "╰── … ──╯"),
-  # so stripping only the light/heavy verticals leaves a border-only line that
-  # reads as pending input. Strip the verticals, horizontals, and corners so a
-  # border-only line collapses to whitespace and is treated as an empty composer.
-  stripped=${line//│/}; stripped=${stripped//┃/}; stripped=${stripped//|/}
-  stripped=${stripped//─/}; stripped=${stripped//━/}
-  stripped=${stripped//╭/}; stripped=${stripped//╮/}
-  stripped=${stripped//╰/}; stripped=${stripped//╯/}
-  stripped=${stripped//┌/}; stripped=${stripped//┐/}
-  stripped=${stripped//└/}; stripped=${stripped//┘/}
-  stripped="${stripped#"${stripped%%[![:space:]]*}"}"
-  stripped="${stripped%"${stripped##*[![:space:]]}"}"
-  [ -n "$stripped" ] || return 1
+  raw=$(herdr pane read "$pane" --lines 3 --source visible 2>/dev/null \
+    | grep -v '^[[:space:]]*$') || true
+  [ -n "$raw" ] || return 1
+  # Scan the visible tail top-to-bottom, keeping only the LAST line that is
+  # neither known trailing chrome nor a border-only row; that survivor is the
+  # composer's real content line. Current Claude Code layouts render, below
+  # the composer's bottom border, a persistent mode-indicator footer (e.g.
+  # "bypass permissions on (shift+tab to cycle)") and sometimes a shortcuts
+  # hint - neither reflects composer content, so both are skipped instead of
+  # being misread as an unsent draft (this was the false-positive bug: that
+  # footer line was previously the last non-blank line, so it alone decided
+  # pending/not-pending). A border-only row (e.g. omp/opus's "╰── … ──╯", or
+  # Claude Code's plain rule lines) collapses to whitespace once box-drawing
+  # chrome is stripped and is skipped the same way, since it carries no
+  # signal either way. Nothing real follows the composer's actual content
+  # line in these layouts, so the last surviving candidate is always that
+  # content line. "result" (not "stripped") carries the winning candidate
+  # across iterations, since a later skipped border/chrome row must not
+  # clobber it.
+  while IFS= read -r line; do
+    case "$line" in
+      *'shift+tab to cycle'*|*'for shortcuts'*) continue ;;
+    esac
+    stripped=${line//│/}; stripped=${stripped//┃/}; stripped=${stripped//|/}
+    stripped=${stripped//─/}; stripped=${stripped//━/}
+    stripped=${stripped//╭/}; stripped=${stripped//╮/}
+    stripped=${stripped//╰/}; stripped=${stripped//╯/}
+    stripped=${stripped//┌/}; stripped=${stripped//┐/}
+    stripped=${stripped//└/}; stripped=${stripped//┘/}
+    stripped="${stripped#"${stripped%%[![:space:]]*}"}"
+    stripped="${stripped%"${stripped##*[![:space:]]}"}"
+    [ -n "$stripped" ] || continue
+    found=0
+    result=$stripped
+  done <<<"$raw"
+  [ "$found" = 0 ] || return 1
   # Bare prompt glyph = empty composer.
-  case "$stripped" in '>'|'❯'|'$'|'%'|'#') return 1 ;; esac
+  case "$result" in '>'|'❯'|'$'|'%'|'#') return 1 ;; esac
   # Custom idle-compositor override (after border stripping), e.g. for custom prompt patterns.
   if [ -n "${FM_COMPOSER_IDLE_RE:-}" ]; then
-    if printf '%s' "$stripped" | grep -qE "$FM_COMPOSER_IDLE_RE"; then
+    if printf '%s' "$result" | grep -qE "$FM_COMPOSER_IDLE_RE"; then
       return 1
     fi
   fi
   # A busy footer on the cursor line is not pending input.
-  if printf '%s' "$stripped" | grep -qiE "${FM_BUSY_REGEX:-esc (to )?interrupt|Working\.\.\.}"; then
+  if printf '%s' "$result" | grep -qiE "${FM_BUSY_REGEX:-esc (to )?interrupt|Working\.\.\.}"; then
     return 1
   fi
   return 0

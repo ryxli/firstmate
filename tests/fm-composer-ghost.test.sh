@@ -152,6 +152,38 @@ test_rounded_bottom_border_is_not_pending() {
   pass "fm_pane_input_pending: rounded bottom border is NOT pending"
 }
 
+test_current_claude_code_empty_composer_is_not_pending() {
+  local dir fb
+  dir="$TMP_ROOT/current-ui-empty"; mkdir -p "$dir"
+  fb=$(make_fake_herdr "$dir")
+  # Current Claude Code layout: a right-aligned token counter above the
+  # composer box, a bare "❯" content line between the two horizontal
+  # rules, and a persistent mode-indicator footer below the bottom rule.
+  # The footer used to be the last non-blank line read, so it alone (not
+  # the actual "❯" content line) decided pending/not-pending and falsely
+  # tripped the draft guard on a visibly empty composer.
+  export FM_FAKE_PANE_LINES=$'                                                                              350644 tokens\n──────────────────────────────────────── some task title ──\n❯\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent'
+  export FM_FAKE_AGENT_STATUS="idle"
+  if PATH="$fb:$PATH" fm_pane_input_pending "w1:p1"; then
+    fail "current Claude Code empty composer falsely read as pending"
+  fi
+  pass "fm_pane_input_pending: current Claude Code empty composer is NOT pending"
+}
+
+test_current_claude_code_real_draft_is_pending() {
+  local dir fb
+  dir="$TMP_ROOT/current-ui-draft"; mkdir -p "$dir"
+  fb=$(make_fake_herdr "$dir")
+  # Same current-UI chrome (token line, rules, mode footer) as above, but
+  # with real human-typed text on the composer's content line. The footer
+  # and border noise must not mask a genuine unsent draft.
+  export FM_FAKE_PANE_LINES=$'                                                                              350644 tokens\n──────────────────────────────────────── some task title ──\n❯ captain typed a draft\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent'
+  export FM_FAKE_AGENT_STATUS="idle"
+  PATH="$fb:$PATH" fm_pane_input_pending "w1:p1" \
+    || fail "real typed text in current Claude Code UI not detected as pending"
+  pass "fm_pane_input_pending: current Claude Code real draft is pending"
+}
+
 test_working_status_is_busy
 test_idle_status_is_not_busy
 test_bordered_empty_composer_is_not_pending
@@ -160,3 +192,5 @@ test_empty_pane_is_not_pending
 test_prompt_glyph_only_is_not_pending
 test_working_status_not_pending
 test_rounded_bottom_border_is_not_pending
+test_current_claude_code_empty_composer_is_not_pending
+test_current_claude_code_real_draft_is_pending

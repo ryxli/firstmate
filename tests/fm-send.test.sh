@@ -104,6 +104,59 @@ test_send_blocks_human_draft() {
   pass "fm-send blocks on a human draft without queueing"
 }
 
+test_send_proceeds_on_empty_current_claude_code_composer() {
+  local dir home fb count
+  dir="$TMP_ROOT/empty-current-ui"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  # Reproduces the current Claude Code composer layout: a right-aligned
+  # token counter above the box, a bare "❯" content line between the two
+  # horizontal rules, and a persistent mode-indicator footer below the
+  # bottom rule. The footer used to be the last non-blank line read, so it
+  # alone decided pending/not-pending and falsely tripped the draft guard
+  # on a visibly empty composer.
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" \
+    FM_FAKE_PANE_LINES=$'                                                                              350644 tokens\n──────────────────────────────────────── some task title ──\n❯\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent' \
+    "$ROOT/sbin/fm-send.sh" fm-task "atomic work" \
+    || fail "fm-send blocked on a visibly empty current-UI composer"
+
+  count=$(grep -cF 'herdr pane run w1:p1 atomic work' "$dir/herdr.log")
+  [ "$count" = "1" ] || fail "expected one pane run, got $count"
+  assert_no_sendq "$home"
+  pass "fm-send proceeds on an empty current Claude Code composer"
+}
+
+test_send_blocks_human_draft_in_current_claude_code_ui() {
+  local dir home fb rc count
+  dir="$TMP_ROOT/draft-current-ui"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  # Same current-UI chrome as above (token line, rules, mode footer), but
+  # with real human-typed text on the composer's content line. The footer
+  # and border noise must not mask a genuine unsent draft.
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" \
+    FM_FAKE_PANE_LINES=$'                                                                              350644 tokens\n──────────────────────────────────────── some task title ──\n❯ captain typed a draft\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent' \
+    "$ROOT/sbin/fm-send.sh" fm-task "must not land" >/dev/null 2>"$dir/err" \
+    || rc=$?
+
+  [ "$rc" = "75" ] || fail "expected unsent draft to exit 75, got $rc"
+  count=$(grep -cF 'herdr pane run ' "$dir/herdr.log" || true)
+  [ "$count" = "0" ] || fail "fm-send wrote into a human draft"
+  grep -F 'text was not sent' "$dir/err" >/dev/null \
+    || fail "fm-send did not report fail-closed draft handling"
+  assert_no_sendq "$home"
+  pass "fm-send still blocks a human draft in the current Claude Code UI"
+}
+
 test_send_failure_is_not_retried() {
   local dir home fb rc count
   dir="$TMP_ROOT/failure"
@@ -173,6 +226,8 @@ test_sendq_runtime_is_removed() {
 
 test_send_submits_once
 test_send_blocks_human_draft
+test_send_proceeds_on_empty_current_claude_code_composer
+test_send_blocks_human_draft_in_current_claude_code_ui
 test_send_failure_is_not_retried
 test_sequential_sends_do_not_amplify
 test_key_bypasses_composer_guard
