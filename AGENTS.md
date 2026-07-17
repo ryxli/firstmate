@@ -181,8 +181,8 @@ config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "de
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
   captain.md         captain's curated personal preferences and working style - approval posture, communication style, release habits; LOCAL, gitignored; compact rewrite-and-prune counterpart to shared AGENTS.md; canonical harness-portable home, even if harness memory mirrors it as a recall cache
-  projects.md        thin fleet navigation registry: one line per project under projects/ with name, delivery mode (`direct-PR` default, captain-authorized `direct-main`, or `local-only`), optional "+yolo", and a one-line description. It is firstmate-private, not a project knowledge dump; fm-project-mode.sh parses it (see `skill://firstmate-task-lifecycle`)
-  secondmates.md      secondmate routing table: one line per persistent domain supervisor, with a natural-language scope, non-exclusive project clone list, and home path; fm-home-seed.sh maintains it and validates unique ids, unique homes, and non-overlapping home paths. It is the only hand-edited home for a secondmate's identity and scope. `data/<id>/brief.md` and `<home>/data/charter.md` are generated projections of this registry, regenerated with `sbin/fm-brief.sh --regen <id>` (see `skill://firstmate-task-lifecycle`)
+  projects.md        thin fleet navigation registry: one line per project with name, delivery mode, optional "+yolo", and a one-line description; firstmate-private, not a project knowledge dump (full format in `skill://firstmate-task-lifecycle`)
+  secondmates.md      secondmate routing table: one line per persistent domain supervisor (scope, project clone list, home path); the only hand-edited home for a secondmate's identity and scope - validation and projection mechanics in `skill://firstmate-task-lifecycle`
   <id>/brief.md      per-task crewmate brief, or per-secondmate charter brief when kind=secondmate
   <id>/report.md     scout task deliverable, written by the crewmate; survives teardown
 projects/            cloned repos; gitignored; READ-ONLY for you
