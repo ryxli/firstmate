@@ -190,14 +190,18 @@ test_check_match_and_drift() {
 }
 
 test_bootstrap_unresolved_warning() {
-  local case_dir fakebin home out bad_json
+  local case_dir fakebin home out bad_json ext_dir ext
   case_dir="$TMP_ROOT/bootstrap-warning"
   home="$case_dir/home"
   mkdir -p "$home"
   fakebin=$(make_bootstrap_toolchain "$case_dir")
   bad_json='{"result":{"pane":{"workspace_id":"w9","tab_id":"w9:t9","agent_status":"idle"}}}'
+  ext_dir="$case_dir/ext-all"
+  for ext in whiteboard fleet-bus lavish textguard thinking-tag-guard agent-effectiveness capture; do
+    mkdir -p "$ext_dir/$ext"
+  done
 
-  out=$(PATH="$fakebin:$BASE_PATH" HOME="$case_dir/user-home" FM_HOME="$home" FM_HERDR_CURRENT_JSON="$bad_json" \
+  out=$(PATH="$fakebin:$BASE_PATH" HOME="$case_dir/user-home" FM_HOME="$home" FM_OMP_EXT_OVERRIDE="$ext_dir" FM_HERDR_CURRENT_JSON="$bad_json" \
     "$ROOT/sbin/fm-bootstrap.sh") || fail "bootstrap failed on unresolved self-pane"
   [ "$out" = 'SELF_PANE: error: herdr pane current did not resolve pane_id/workspace_id/tab_id/agent_status' ] \
     || fail "unexpected bootstrap unresolved warning: $out"
