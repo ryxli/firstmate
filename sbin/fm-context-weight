@@ -20,6 +20,18 @@ type ContextSection = {
 	tokens: number;
 };
 
+type Mate = {
+	id: string;
+	home: string;
+};
+
+type MateRow = {
+	mate: string;
+	skill: string;
+	tokens: number;
+	source: string;
+};
+
 function configuredPath(value: string | undefined): string | undefined {
 	const trimmed = value?.trim();
 	return trimmed ? resolve(trimmed) : undefined;
@@ -72,6 +84,157 @@ function compareWeight(
 		|| (a.section ?? "").localeCompare(b.section ?? "");
 }
 
+function cacheRoots(): { ompCache: string; claudeCache: string } {
+	const home = process.env.HOME ?? "";
+	const ompCache = configuredPath(process.env.FM_SKILL_CACHE_OMP_OVERRIDE)
+		?? join(home, ".omp", "agent", "managed-skills");
+	const claudeCache = configuredPath(process.env.FM_SKILL_CACHE_CLAUDE_OVERRIDE)
+		?? join(home, ".claude", "skills");
+	return { ompCache, claudeCache };
+}
+
+// Parse "- <id> - ... (home: <path>; ...)" registry lines from
+// data/secondmates.md - the same shape fm-identity-migrate.sh and friends
+// parse in shell. Malformed or unreadable input degrades to no mates found.
+function parseSecondmates(dataRoot: string): Mate[] {
+	const path = join(dataRoot, "secondmates.md");
+	if (!existsSync(path)) return [];
+	let text: string;
+	try {
+		text = readFileSync(path, "utf8");
+	} catch {
+		return [];
+	}
+	const mates: Mate[] = [];
+	for (const match of text.matchAll(/^- (\S+) - [^(]*\(home: ([^;)]+)[;)]/gm)) {
+		mates.push({ id: match[1], home: resolve(match[2].trim()) });
+	}
+	return mates;
+}
+
+// Extract the skills.includeSkills list from a mate's config/omp.yml. This is
+// a narrow, indentation-based reader for this file's fixed shape - not a
+// general YAML parser - matching the one concrete shape seeded homes use:
+//   skills:
+//     includeSkills:
+//       - name-one
+//       - name-two
+function extractIncludeSkills(yamlText: string): string[] {
+	const lines = yamlText.split(/\r?\n/);
+	const names: string[] = [];
+	let inSkills = false;
+	let skillsIndent = 0;
+	let inInclude = false;
+	let includeIndent = 0;
+
+	for (const raw of lines) {
+		if (raw.trim() === "") continue;
+		const indent = raw.length - raw.trimStart().length;
+		const trimmed = raw.trim();
+
+		if (!inSkills) {
+			if (indent === 0 && /^skills:\s*$/.test(trimmed)) {
+				inSkills = true;
+				skillsIndent = indent;
+			}
+			continue;
+		}
+		if (indent <= skillsIndent) break;
+
+		if (!inInclude) {
+			if (/^includeSkills:\s*$/.test(trimmed)) {
+				inInclude = true;
+				includeIndent = indent;
+			}
+			continue;
+		}
+		if (indent <= includeIndent) break;
+
+		const item = trimmed.match(/^-\s*(.+)$/);
+		if (!item) continue;
+		const name = item[1].trim().replace(/^["'](.*)["']$/, "$1");
+		if (name) names.push(name);
+	}
+	return names;
+}
+
+// Resolve one included skill's SKILL.md against a mate's home, in the same
+// order omp itself would find it: the home's own .agents (template skills
+// arrive here via the home's .agents symlink), the home's .claude, then the
+// machine-wide managed-skills and claude-skills caches.
+function resolveSkillFile(
+	home: string,
+	name: string,
+	caches: { ompCache: string; claudeCache: string },
+): { path: string; source: string } | undefined {
+	const candidates: Array<{ path: string; source: string }> = [
+		{ path: join(home, ".agents", "skills", name, "SKILL.md"), source: "home/.agents" },
+		{ path: join(home, ".claude", "skills", name, "SKILL.md"), source: "home/.claude" },
+		{ path: join(caches.ompCache, name, "SKILL.md"), source: "cache:omp-managed-skills" },
+		{ path: join(caches.claudeCache, name, "SKILL.md"), source: "cache:claude-skills" },
+	];
+	for (const candidate of candidates) {
+		if (existsSync(candidate.path)) return candidate;
+	}
+	return undefined;
+}
+
+function compareMateRow(a: MateRow, b: MateRow): number {
+	return b.tokens - a.tokens || a.skill.localeCompare(b.skill);
+}
+
+// Per-mate always-on weight: for each home registered in data/secondmates.md,
+// the token weight of every skill its config/omp.yml includeSkills names,
+// plus a per-mate total. Missing config, an empty include list, or an
+// unresolvable skill name all degrade to a labeled zero-token row rather than
+// throwing - this reporter never fails a run over one mate's incomplete setup.
+function collectMateWeights(dataRoot: string): MateRow[] {
+	const mates = parseSecondmates(dataRoot);
+	const caches = cacheRoots();
+	const rows: MateRow[] = [];
+
+	for (const mate of mates) {
+		const configPath = join(mate.home, "config", "omp.yml");
+		if (!existsSync(configPath)) {
+			rows.push({ mate: mate.id, skill: "(no config/omp.yml)", tokens: 0, source: "-" });
+			continue;
+		}
+
+		let includeSkills: string[];
+		try {
+			includeSkills = extractIncludeSkills(readFileSync(configPath, "utf8"));
+		} catch {
+			rows.push({ mate: mate.id, skill: "(unreadable config/omp.yml)", tokens: 0, source: "-" });
+			continue;
+		}
+		if (includeSkills.length === 0) {
+			rows.push({ mate: mate.id, skill: "(no includeSkills configured)", tokens: 0, source: "-" });
+			continue;
+		}
+
+		const skillRows: MateRow[] = [];
+		let total = 0;
+		for (const name of includeSkills) {
+			const resolved = resolveSkillFile(mate.home, name, caches);
+			if (!resolved) {
+				skillRows.push({ mate: mate.id, skill: name, tokens: 0, source: "unresolved" });
+				continue;
+			}
+			try {
+				const tokens = countTokens(readFileSync(resolved.path, "utf8"));
+				total += tokens;
+				skillRows.push({ mate: mate.id, skill: name, tokens, source: resolved.source });
+			} catch {
+				skillRows.push({ mate: mate.id, skill: name, tokens: 0, source: "unreadable" });
+			}
+		}
+		skillRows.sort(compareMateRow);
+		rows.push(...skillRows);
+		rows.push({ mate: mate.id, skill: "TOTAL", tokens: total, source: "-" });
+	}
+	return rows;
+}
+
 function addFile(files: ContextFile[], seen: Set<string>, path: string, label: string): void {
 	if (!existsSync(path)) return;
 	const absolute = resolve(path);
@@ -118,9 +281,11 @@ function collectContext(): ContextFile[] {
 }
 
 function main(): void {
+	const { dataRoot } = contextRoots();
 	const files = collectContext();
 	const sections = files.flatMap(markdownSections).sort(compareWeight);
 	const total = files.reduce((sum, file) => sum + file.tokens, 0);
+	const mateRows = collectMateWeights(dataRoot);
 
 	console.log(`estimated_total_tokens\t${total}`);
 	console.log(`tokenizer\t${tokenizerBackend}`);
@@ -133,6 +298,12 @@ function main(): void {
 	console.log("tokens\tfile\tsection");
 	for (const section of sections) {
 		console.log(`${section.tokens}\t${section.file}\t${section.section}`);
+	}
+	console.log("");
+	console.log("per-mate");
+	console.log("mate\tskill\ttokens\tsource");
+	for (const row of mateRows) {
+		console.log(`${row.mate}\t${row.skill}\t${row.tokens}\t${row.source}`);
 	}
 }
 

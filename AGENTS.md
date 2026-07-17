@@ -184,14 +184,15 @@ README.md            public overview and development notes
 .agents/skills/      shared skills, committed
 .claude/skills       symlink to .agents/skills for claude compatibility
 sbin/                 ship-wide helper scripts, committed; any mate may improve them; read each script's header before first use
-sbin/fm-context-weight  read-only chars/4 token-weight report for shared context and the active `FM_HOME`
+sbin/fm-context-weight  read-only chars/4 token-weight report for shared context and the active `FM_HOME`, plus a per-mate section weighing each registered secondmate's `config/omp.yml` includeSkills list
+sbin/fm-skill-census.sh  read-only census of skill instances across the template, every registered mate home, and machine-wide skill caches, flagging exact duplicates, drift, cache-only copies, and staleness
 Each mate home has a real local bin/ for that mate's personal tools; ship tools live in sbin/ (symlinked into each home); never symlink a home bin/ onto the shared repo.
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
   captain.md         captain's curated personal preferences and working style - approval posture, communication style, release habits; LOCAL, gitignored; compact rewrite-and-prune counterpart to shared AGENTS.md; canonical harness-portable home, even if harness memory mirrors it as a recall cache
   projects.md        thin fleet navigation registry: one line per project under projects/ with name, delivery mode (`direct-PR` default, captain-authorized `direct-main`, or `local-only`), optional "+yolo", and a one-line description. It is firstmate-private, not a project knowledge dump; fm-project-mode.sh parses it (see `skill://firstmate-task-lifecycle`)
-  secondmates.md      secondmate routing table: one line per persistent domain supervisor, with a natural-language scope, non-exclusive project clone list, and home path; fm-home-seed.sh maintains it and validates unique ids, unique homes, and non-overlapping home paths (see `skill://firstmate-task-lifecycle`)
+  secondmates.md      secondmate routing table: one line per persistent domain supervisor, with a natural-language scope, non-exclusive project clone list, and home path; fm-home-seed.sh maintains it and validates unique ids, unique homes, and non-overlapping home paths. It is the only hand-edited home for a secondmate's identity and scope. `data/<id>/brief.md` and `<home>/data/charter.md` are generated projections of this registry, regenerated with `sbin/fm-brief.sh --regen <id>` (see `skill://firstmate-task-lifecycle`)
   <id>/brief.md      per-task crewmate brief, or per-secondmate charter brief when kind=secondmate
   <id>/report.md     scout task deliverable, written by the crewmate; survives teardown
 projects/            cloned repos; gitignored; READ-ONLY for you
