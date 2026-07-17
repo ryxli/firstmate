@@ -58,6 +58,31 @@ MATE_SECTION_BEGIN='<!-- BEGIN MATE-OWNED NOTES: preserved verbatim across regen
 MATE_SECTION_END='<!-- END MATE-OWNED NOTES -->'
 MATE_SECTION_DEFAULT='(no mate-owned notes yet)'
 
+# House convention blocks baked into every generated brief/charter. Static and
+# terse on purpose: they ride into every spawn, so every token is paid per
+# crewmate/secondmate. Defined once here (ahead of the --regen/--check
+# dispatch below) so both the one-shot ship/scout/secondmate scaffolds and the
+# registry-driven secondmate projection use the identical wording.
+lean_loop_block() {
+  cat <<'EOF'
+# Lean-loop discipline
+Work in conclusive slices that each narrow toward done; do not restate the task or announce a pause before acting.
+Every reasoning step must add a new decision, fact, or tool call - if it would repeat a prior conclusion, act instead.
+Delegate any self-contained side-work a subagent can do rather than spending your own turn on it.
+EOF
+}
+
+house_tooling_block() {
+  cat <<'EOF'
+# House tooling conventions
+Use bun/bunx (or a bun-linked bare command) for JS/TS tooling - never npm, npx, yarn, or pnpm.
+Use the axi-family CLIs - gh-axi, chrome-devtools-axi, lavish-axi - for GitHub, browser, and review surfaces.
+EOF
+}
+
+LEAN_LOOP_BLOCK=$(lean_loop_block)
+HOUSE_TOOLING_BLOCK=$(house_tooling_block)
+
 # find_secondmate_line <id> <registry-file>
 # Prints the raw registry line for <id>, or fails if the registry or id is absent.
 find_secondmate_line() {
@@ -200,6 +225,10 @@ You do not generate your own work.
 Act only on tasks the main firstmate routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
 Supervision is automatic and in-process; there is no watcher, wake-queue, beacon, or separate supervisor process.
+
+$LEAN_LOOP_BLOCK
+
+$HOUSE_TOOLING_BLOCK
 
 # Escalation to main firstmate
 Handle routine work yourself.
@@ -378,6 +407,11 @@ You do not generate your own work.
 Act only on tasks the main firstmate routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
 Supervision is automatic and in-process; there is no watcher, wake-queue, beacon, or separate supervisor process.
+
+$LEAN_LOOP_BLOCK
+
+$HOUSE_TOOLING_BLOCK
+
 # Escalation to main firstmate
 Handle routine work yourself.
 Escalate only captain-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
@@ -434,6 +468,11 @@ The report is the only thing that survives, so anything worth keeping must be in
 6. If you hit the same obstacle twice, report blocked: {why} and stop; firstmate will help.
 7. Derive decisions from evidence before escalating: for a config, parameter, or design choice, first consult relevant papers/sources, project docs (\`AGENTS.md\`), and prior fleet research (other worktrees, reports, decision journals). If the evidence points to a clearly better option, take it and justify it in your report - do not punt a solvable decision upward.
 8. Escalate a decision to a human ONLY for (a) a genuine toss-up between two equally good options after weighing the evidence, or (b) a destructive, irreversible, or live-capital-risk action. Then report needs-decision: {summary of options + the evidence you weighed} and stop. Firstmate will reply with the decision.
+
+$LEAN_LOOP_BLOCK
+
+$HOUSE_TOOLING_BLOCK
+
 # Definition of done
 Write your findings to $DATA/$ID/report.md.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
@@ -546,6 +585,10 @@ $RULE1
 If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/sbin/fm-ensure-agents-md.sh .\` in the worktree.
 If this task produced durable project-intrinsic knowledge, record it in \`AGENTS.md\` as part of your change.
 Keep it proportionate: skip \`AGENTS.md\` edits for trivial tasks that produced no durable project knowledge.
+
+$LEAN_LOOP_BLOCK
+
+$HOUSE_TOOLING_BLOCK
 
 $DOD
 EOF

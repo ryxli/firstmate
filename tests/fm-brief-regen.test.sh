@@ -56,6 +56,12 @@ for f in "$BRIEF_PATH" "$CHARTER_PATH"; do
   grep -qF '/peer send riggs ' "$f" \
     || fail "$f did not resolve the escalation routing slug from the fixture config/identity"
   ! grep -qF 'Keel' "$f" || fail "$f still hard-codes the Keel escalation name"
+  grep -qF '# Lean-loop discipline' "$f" \
+    || fail "$f is missing the generated Lean-loop discipline block"
+  grep -qF '# House tooling conventions' "$f" \
+    || fail "$f is missing the generated House tooling conventions block"
+  grep -qF 'Use bun/bunx' "$f" \
+    || fail "$f House tooling conventions block did not name bun/bunx"
 done
 pass "regen fills registry fields and resolves the escalation name from config/identity"
 

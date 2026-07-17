@@ -73,12 +73,25 @@ check_assignment_completion() {
     || fail "$brief does not use the assignment completion return"
 }
 
+check_house_blocks() {
+  local brief=$1
+  grep -qF '# Lean-loop discipline' "$brief" \
+    || fail "$brief is missing the Lean-loop discipline block"
+  grep -qF '# House tooling conventions' "$brief" \
+    || fail "$brief is missing the House tooling conventions block"
+  grep -qF 'Use bun/bunx' "$brief" \
+    || fail "$brief House tooling conventions block did not name bun/bunx"
+  grep -qF 'gh-axi, chrome-devtools-axi, lavish-axi' "$brief" \
+    || fail "$brief House tooling conventions block did not name the axi-family CLIs"
+}
+
 brief=$(scaffold task-a1 app)
 check_assignment_contract "$brief"
 check_assignment_completion "$brief" 'done: PR {url}'
 ! grep -qF 'use `peer_send` to send' "$brief" \
   || fail "ordinary ship brief required unavailable peer bus"
 check_ship_setup "$brief" task-a1
+check_house_blocks "$brief"
 pass "direct-PR ship brief has the evidence-first assignment contract and status completion"
 
 brief=$(scaffold task-b2 legacy)
@@ -104,6 +117,7 @@ check_assignment_contract "$scout"
 check_assignment_completion "$scout" "done: report $TMP/home/data/scout-d4/report.md"
 ! grep -qF 'use `peer_send` to send' "$scout" \
   || fail "scout brief required unavailable peer bus"
+check_house_blocks "$scout"
 pass "scout brief has the evidence-first assignment contract and status completion"
 
 secondmate="$TMP/home/data/secondmate-c3/brief.md"
@@ -122,4 +136,5 @@ grep -qF 'through the fleet peer bus' "$secondmate" \
   || fail "secondmate charter dropped peer-bus escalation"
 grep -qF 'type /peer send fm "{state}: {one short line}"' "$secondmate" \
   || fail "secondmate charter did not use canonical lowercase routing id"
+check_house_blocks "$secondmate"
 pass "secondmate charter uses automatic supervision and canonical peer-bus escalation"
