@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 bun
 // fm - canonical TOON-native agent CLI entry point.
 //
 // Dispatches to verb modules auto-discovered from .omp/extensions/cli/verbs/*.ts.
