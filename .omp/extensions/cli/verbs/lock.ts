@@ -5,6 +5,8 @@
 // which lives as long as the firstmate session - unlike the transient PID of
 // any one tool-call process, which is dead moments after it is written.
 // Usage: fm lock           acquire; exit 1 if another live session holds it
+//        FM_SUPERVISED_SUCCESSOR=1 fm lock
+//                          acknowledge a live holder without taking authority
 //        fm lock status    print holder and liveness; always exits 0
 
 import { spawnSync } from "node:child_process";
@@ -19,6 +21,7 @@ const DEFAULT_FM_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).
 // Known harness command names and script paths; extend when a new adapter is verified.
 const HARNESS_NAME_RE = /^(claude|codex|opencode|pi|omp)$/;
 const HARNESS_ARGS_RE = /(^|[\s/])(claude|codex|opencode|pi|omp)(\.ts)?(\s|$)/;
+const SUPERVISED_SUCCESSOR_ENV = "FM_SUPERVISED_SUCCESSOR";
 
 function envOrUndefined(name: string): string | undefined {
 	const value = process.env[name];
@@ -74,6 +77,11 @@ function holderAlive(pid: number): boolean {
 	return looksLikeHarness(comm, args);
 }
 
+function supervisedSuccessorMode(): boolean {
+	const marker = envOrUndefined(SUPERVISED_SUCCESSOR_ENV)?.toLowerCase();
+	return marker === "1" || marker === "true";
+}
+
 async function run(argv: string[]): Promise<number> {
 	const args = argv.slice(1);
 	const state = resolveState();
@@ -102,6 +110,10 @@ async function run(argv: string[]): Promise<number> {
 	if (existsSync(lockFile)) {
 		const old = readFileSync(lockFile, "utf8").trim();
 		if (old !== String(me) && holderAlive(Number(old))) {
+			if (supervisedSuccessorMode()) {
+				process.stdout.write(`lock unchanged: authority remains with live holder pid ${old}; supervised successor is read-only until handoff\n`);
+				return 0;
+			}
 			process.stderr.write(`error: another live firstmate session holds the lock (pid ${old}); operate read-only until resolved\n`);
 			return 1;
 		}
