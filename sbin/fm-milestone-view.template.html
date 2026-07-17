@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Firstmate milestone view</title>
+<style>
+  /* Self-contained: no external stylesheets, fonts, or scripts. Roles are CSS
+     custom properties per the dataviz reference palette (palette.md); light is
+     the default scope, dark is selected both by OS preference and by a viewer
+     theme toggle stamping data-theme on the root, matching artifact conventions. */
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-page:   #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid-line:      #e1e0d9;
+    --axis-line:      #c3c2b7;
+    --border-hair:    rgba(11,11,11,0.10);
+    --series-1: #2a78d6; /* blue */
+    --series-2: #008300; /* green */
+    --series-3: #e87ba4; /* magenta */
+    --series-4: #eda100; /* yellow */
+    --series-5: #1baf7a; /* aqua */
+    --series-6: #eb6834; /* orange */
+    --series-7: #4a3aa7; /* violet */
+    --series-8: #e34948; /* red */
+    --status-good:     #0ca30c;
+    --status-warning:  #fab219;
+    --status-serious:  #ec835a;
+    --status-critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-page:   #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid-line:      #2c2c2a;
+      --axis-line:      #383835;
+      --border-hair:    rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #008300;
+      --series-3: #d55181;
+      --series-4: #c98500;
+      --series-5: #199e70;
+      --series-6: #d95926;
+      --series-7: #9085e9;
+      --series-8: #e66767;
+      --status-good:     #0ca30c;
+      --status-warning:  #fab219;
+      --status-serious:  #ec835a;
+      --status-critical: #d03b3b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-page:   #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid-line:      #2c2c2a;
+    --axis-line:      #383835;
+    --border-hair:    rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #008300;
+    --series-3: #d55181;
+    --series-4: #c98500;
+    --series-5: #199e70;
+    --series-6: #d95926;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+  }
+
+  * , *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--surface-page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.45;
+  }
+  main { max-width: 74rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  .mv-space > * + * { margin-top: 1.25rem; }
+  .mv-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border-hair);
+    border-radius: 0.75rem;
+    padding: 1.1rem 1.25rem;
+  }
+  .mv-grid { display: grid; gap: 0.9rem; }
+  .mv-grid-2 { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+  .mv-grid-stats { grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+  h1 { font-size: 1.7rem; font-weight: 600; margin: 0 0 0.15rem; }
+  h2 { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-muted); margin: 0; }
+  h3 { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.5rem; }
+  p { margin: 0; }
+  .mv-eyebrow { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.18em; color: var(--text-muted); }
+  .mv-mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  .mv-muted { color: var(--text-muted); }
+  .mv-secondary { color: var(--text-secondary); }
+  .mv-truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mv-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .mv-stat-value { font-size: 1.7rem; font-weight: 600; line-height: 1; }
+  .mv-stat-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.3rem; }
+  .mv-stat-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.3rem; }
+  .mv-badge {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-size: 0.72rem; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 9999px;
+    border: 1px solid var(--border-hair); color: var(--text-secondary);
+  }
+  .mv-dot { width: 0.55rem; height: 0.55rem; border-radius: 9999px; flex: 0 0 auto; }
+  .mv-legend { display: flex; flex-wrap: wrap; gap: 0.7rem; font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.5rem; }
+  .mv-legend-item { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .mv-legend-swatch { width: 1.1rem; height: 0.18rem; border-radius: 2px; }
+  .mv-alert {
+    border-radius: 0.75rem; border: 1px solid var(--border-hair); padding: 0.9rem 1.1rem;
+    background: color-mix(in srgb, var(--status-warning) 10%, var(--surface-1));
+  }
+  .mv-alert ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+  .mv-alert li { margin: 0.15rem 0; font-size: 0.85rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+  th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--grid-line); white-space: nowrap; }
+  th { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.06em; }
+  td.mv-num, th.mv-num { text-align: right; font-variant-numeric: tabular-nums; }
+  .mv-table-wrap { overflow-x: auto; }
+  details > summary { cursor: pointer; color: var(--text-secondary); font-size: 0.82rem; user-select: none; }
+  details[open] > summary { margin-bottom: 0.6rem; }
+  .mv-empty { color: var(--text-muted); font-style: italic; font-size: 0.85rem; padding: 1rem 0; text-align: center; }
+  .mv-chart-wrap { position: relative; }
+  .mv-tooltip {
+    position: absolute; pointer-events: none; z-index: 5; display: none;
+    background: var(--surface-1); border: 1px solid var(--border-hair); border-radius: 0.5rem;
+    padding: 0.45rem 0.6rem; font-size: 0.72rem; box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    white-space: nowrap;
+  }
+  .mv-tooltip .mv-tt-x { color: var(--text-muted); margin-bottom: 0.25rem; }
+  .mv-tooltip .mv-tt-row { display: flex; align-items: center; gap: 0.4rem; }
+  .mv-tooltip .mv-tt-key { display: inline-block; width: 0.8rem; height: 0.14rem; border-radius: 2px; }
+  .mv-tooltip .mv-tt-val { font-weight: 700; margin-left: auto; padding-left: 0.6rem; }
+  svg text { fill: var(--text-muted); font-size: 10px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .mv-gate-strip { display: flex; flex-direction: column; gap: 0.4rem; }
+  .mv-gate-row { display: grid; grid-template-columns: 9rem 1fr; align-items: center; gap: 0.6rem; }
+  .mv-gate-name { font-size: 0.78rem; color: var(--text-secondary); }
+  .mv-gate-cells { display: flex; gap: 0.35rem; align-items: center; }
+  .mv-gate-cell { width: 0.85rem; height: 0.85rem; border-radius: 9999px; flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<main class="mv-space" id="mv-app"></main>
+<noscript>
+  <main><p>This dashboard renders client side. Enable JavaScript to see the trend charts.</p></main>
+</noscript>
+
+<script type="application/json" id="mv-payload">__MILESTONE_PAYLOAD__</script>
+<script>
+(function () {
+  "use strict";
+
+  // ---- generic DOM + formatting helpers (same convention as fleet-view/kpi-view) --------
+
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (!Object.prototype.hasOwnProperty.call(attrs, k)) continue;
+        var v = attrs[k];
+        if (v == null || v === false) continue;
+        if (k === "class") el.className = v;
+        else if (k === "text") el.textContent = v;
+        else el.setAttribute(k, v);
+      }
+    }
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c == null || c === false) continue;
+      if (Array.isArray(c)) { for (var j = 0; j < c.length; j++) appendChild(el, c[j]); }
+      else appendChild(el, c);
+    }
+    return el;
+  }
+  function appendChild(el, c) {
+    if (c == null || c === false) return;
+    el.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  function svg(tag, attrs) {
+    var el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    if (attrs) for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) el.setAttribute(k, attrs[k]);
+    for (var i = 2; i < arguments.length; i++) { var c = arguments[i]; if (c != null && c !== false) el.appendChild(c); }
+    return el;
+  }
+
+  function isNum(x) { return typeof x === "number" && isFinite(x); }
+  function present(v) { return v == null ? "" : String(v).trim(); }
+  function commas(n) {
+    var s = String(Math.round(n));
+    var neg = s.charAt(0) === "-";
+    if (neg) s = s.slice(1);
+    var out = "";
+    while (s.length > 3) { out = "," + s.slice(-3) + out; s = s.slice(0, -3); }
+    return (neg ? "-" : "") + s + out;
+  }
+  function pct(x, digits) {
+    if (!isNum(x)) return "n/a";
+    return (x * 100).toFixed(digits == null ? 1 : digits) + "%";
+  }
+  function signedPct(x, digits) {
+    if (!isNum(x)) return "n/a";
+    return (x >= 0 ? "+" : "") + (x * 100).toFixed(digits == null ? 1 : digits) + "%";
+  }
+  function fmtNum(x) { return isNum(x) ? commas(x) : "n/a"; }
+  function fmtDate(iso) {
+    var s = present(iso);
+    if (!s) return "";
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s.slice(0, 10);
+    return d.toISOString().slice(0, 10);
+  }
+  function shortSha(s) { s = present(s); return s ? s.slice(0, 10) : ""; }
+
+  var SERIES_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
+  function seriesColor(slot) {
+    var v = SERIES_VARS[(slot - 1) % SERIES_VARS.length];
+    return getComputedStyle(document.documentElement).getPropertyValue(v).trim() || "#888";
+  }
+  function statusColor(ok) {
+    var v = ok ? "--status-good" : "--status-critical";
+    return getComputedStyle(document.documentElement).getPropertyValue(v).trim() || "#888";
+  }
+
+  // stable per-key categorical slot assignment: first-seen order, never re-cycled
+  // once assigned, so a filtered/changed series count never repaints survivors.
+  function slotAssigner() {
+    var order = [];
+    return function (key) {
+      var idx = order.indexOf(key);
+      if (idx === -1) { order.push(key); idx = order.length - 1; }
+      return idx + 1;
+    };
+  }
+
+  // ---- layout helpers ------------------------------------------------------
+
+  function sectionTitle(text, note) {
+    return h("div", { style: "display:flex;align-items:baseline;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.6rem" },
+      h("h2", { text: text }),
+      note ? h("span", { class: "mv-muted", style: "font-size:0.75rem" }, note) : null);
+  }
+  function card(children) { return h("div", { class: "mv-card" }, children); }
+  function statTile(label, value, sub) {
+    return h("div", { class: "mv-card" },
+      h("div", { class: "mv-stat-label", text: label }),
+      h("div", { class: "mv-stat-value", text: value }),
+      sub ? h("div", { class: "mv-stat-sub", text: sub }) : null);
+  }
+
+  // ---- SVG time-series line chart ------------------------------------------
+  //
+  // series: [{ key, label, color, points: [{ x:number(ms), y:number|null }] }]
+  // Handles 0/1/2+ points per series without crashing: an empty chart shows a
+  // placeholder; a single point renders as a centered marker with its value
+  // directly labeled (a line needs two ends); 2+ points draw the real line.
+
+  var CHART_W = 640, CHART_H = 220, PAD_L = 46, PAD_R = 16, PAD_T = 14, PAD_B = 28;
+
+  function niceTicks(min, max, count) {
+    if (min === max) { min -= 1; max += 1; }
+    var span = max - min;
+    var step = Math.pow(10, Math.floor(Math.log10(span / count)));
+    var err = (span / count) / step;
+    if (err >= 7.5) step *= 10; else if (err >= 3.5) step *= 5; else if (err >= 1.5) step *= 2;
+    var niceMin = Math.floor(min / step) * step;
+    var niceMax = Math.ceil(max / step) * step;
+    var out = [];
+    for (var v = niceMin; v <= niceMax + step / 2; v += step) out.push(Math.round(v * 1e6) / 1e6);
+    return out;
+  }
+
+  function lineChart(container, opts) {
+    var series = (opts.series || []).filter(function (s) { return s.points && s.points.length > 0; });
+    var yFormat = opts.yFormat || fmtNum;
+    var wrap = h("div", { class: "mv-chart-wrap" });
+    container.appendChild(wrap);
+
+    var allPoints = [];
+    series.forEach(function (s) { s.points.forEach(function (p) { if (isNum(p.y)) allPoints.push(p); }); });
+    if (allPoints.length === 0) {
+      wrap.appendChild(h("div", { class: "mv-empty", text: "no data yet" }));
+      return;
+    }
+
+    var xs = allPoints.map(function (p) { return p.x; });
+    var ys = allPoints.map(function (p) { return p.y; });
+    var xMin = Math.min.apply(null, xs), xMax = Math.max.apply(null, xs);
+    var yMinRaw = Math.min.apply(null, ys), yMaxRaw = Math.max.apply(null, ys);
+    var yTicks = niceTicks(Math.min(0, yMinRaw), yMaxRaw, 4);
+    var yMin = yTicks[0], yMax = yTicks[yTicks.length - 1];
+
+    var innerW = CHART_W - PAD_L - PAD_R, innerH = CHART_H - PAD_T - PAD_B;
+    function sx(x) { return xMin === xMax ? PAD_L + innerW / 2 : PAD_L + ((x - xMin) / (xMax - xMin)) * innerW; }
+    function sy(y) { return yMax === yMin ? PAD_T + innerH / 2 : PAD_T + innerH - ((y - yMin) / (yMax - yMin)) * innerH; }
+
+    var root = svg("svg", { viewBox: "0 0 " + CHART_W + " " + CHART_H, width: "100%", height: "auto", role: "img",
+      "aria-label": present(opts.title) });
+
+    // gridlines + y ticks
+    yTicks.forEach(function (t) {
+      root.appendChild(svg("line", { x1: PAD_L, x2: CHART_W - PAD_R, y1: sy(t), y2: sy(t), stroke: "var(--grid-line)", "stroke-width": "1" }));
+      root.appendChild(svg("text", { x: PAD_L - 8, y: sy(t) + 3, "text-anchor": "end" }, document.createTextNode(yFormat(t))));
+    });
+    // baseline / axis
+    root.appendChild(svg("line", { x1: PAD_L, x2: PAD_L, y1: PAD_T, y2: CHART_H - PAD_B, stroke: "var(--axis-line)", "stroke-width": "1" }));
+    root.appendChild(svg("line", { x1: PAD_L, x2: CHART_W - PAD_R, y1: CHART_H - PAD_B, y2: CHART_H - PAD_B, stroke: "var(--axis-line)", "stroke-width": "1" }));
+
+    // x ticks: first + last captured date (sparse-safe; avoids collision at n<=2)
+    root.appendChild(svg("text", { x: sx(xMin), y: CHART_H - 8, "text-anchor": xMin === xMax ? "middle" : "start" }, document.createTextNode(fmtDate(new Date(xMin).toISOString()))));
+    if (xMax !== xMin) {
+      root.appendChild(svg("text", { x: sx(xMax), y: CHART_H - 8, "text-anchor": "end" }, document.createTextNode(fmtDate(new Date(xMax).toISOString()))));
+    }
+
+    var hitPoints = []; // { cx, cy, x(ms), items:[{label,color,value}] }
+    series.forEach(function (s) {
+      var valid = s.points.filter(function (p) { return isNum(p.y); });
+      if (valid.length === 0) return;
+      if (valid.length === 1) {
+        var p0 = valid[0];
+        var cx = sx(p0.x), cy = sy(p0.y);
+        root.appendChild(svg("circle", { cx: cx, cy: cy, r: 5, fill: s.color, stroke: "var(--surface-1)", "stroke-width": "2" }));
+        hitPoints.push({ cx: cx, x: p0.x, items: [{ label: s.label, color: s.color, value: yFormat(p0.y) }] });
+        return;
+      }
+      var d = valid.map(function (p, idx) { return (idx === 0 ? "M" : "L") + sx(p.x) + " " + sy(p.y); }).join(" ");
+      root.appendChild(svg("path", { d: d, fill: "none", stroke: s.color, "stroke-width": "2", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+      valid.forEach(function (p) {
+        var cx = sx(p.x), cy = sy(p.y);
+        root.appendChild(svg("circle", { cx: cx, cy: cy, r: 4, fill: s.color, stroke: "var(--surface-1)", "stroke-width": "2" }));
+        var existing = hitPoints.filter(function (hp) { return hp.x === p.x; })[0];
+        if (!existing) { existing = { cx: cx, x: p.x, items: [] }; hitPoints.push(existing); }
+        existing.items.push({ label: s.label, color: s.color, value: yFormat(p.y) });
+      });
+      // sparing direct end-label: only when this chart has a single series
+      // (multi-series end-labels collide per marks-and-anatomy; legend covers those).
+      if (series.length === 1) {
+        var last = valid[valid.length - 1];
+        root.appendChild(svg("text", { x: sx(last.x) + 6, y: sy(last.y) - 6, "text-anchor": "start", "font-weight": "700",
+          fill: "var(--text-primary)" }, document.createTextNode(yFormat(last.y))));
+      }
+    });
+
+    wrap.appendChild(root);
+
+    if (series.length >= 2) {
+      var legend = h("div", { class: "mv-legend" });
+      series.forEach(function (s) {
+        legend.appendChild(h("span", { class: "mv-legend-item" },
+          h("span", { class: "mv-legend-swatch", style: "background:" + s.color }),
+          h("span", { text: s.label })));
+      });
+      wrap.appendChild(legend);
+    }
+
+    // crosshair + shared tooltip: one readout listing every series at the nearest x.
+    var crosshair = svg("line", { x1: 0, x2: 0, y1: PAD_T, y2: CHART_H - PAD_B, stroke: "var(--axis-line)", "stroke-width": "1", opacity: "0" });
+    root.appendChild(crosshair);
+    var tooltip = h("div", { class: "mv-tooltip" });
+    wrap.appendChild(tooltip);
+
+    function nearest(px) {
+      var best = null, bestDist = Infinity;
+      hitPoints.forEach(function (hp) {
+        var d = Math.abs(hp.cx - px);
+        if (d < bestDist) { bestDist = d; best = hp; }
+      });
+      return best;
+    }
+    function showAt(hp, clientX, clientY) {
+      crosshair.setAttribute("x1", hp.cx); crosshair.setAttribute("x2", hp.cx); crosshair.setAttribute("opacity", "1");
+      tooltip.innerHTML = "";
+      tooltip.appendChild(h("div", { class: "mv-tt-x", text: fmtDate(new Date(hp.x).toISOString()) }));
+      hp.items.forEach(function (it) {
+        tooltip.appendChild(h("div", { class: "mv-tt-row" },
+          h("span", { class: "mv-tt-key", style: "background:" + it.color }),
+          h("span", { text: it.label }),
+          h("span", { class: "mv-tt-val", text: it.value })));
+      });
+      tooltip.style.display = "block";
+      var wrapRect = wrap.getBoundingClientRect();
+      var left = Math.min(Math.max(clientX - wrapRect.left + 10, 4), wrapRect.width - 160);
+      tooltip.style.left = left + "px";
+      tooltip.style.top = "4px";
+    }
+    function hide() { crosshair.setAttribute("opacity", "0"); tooltip.style.display = "none"; }
+    root.addEventListener("pointermove", function (ev) {
+      var rect = root.getBoundingClientRect();
+      var px = ((ev.clientX - rect.left) / rect.width) * CHART_W;
+      var hp = nearest(px);
+      if (hp) showAt(hp, ev.clientX, ev.clientY); else hide();
+    });
+    root.addEventListener("pointerleave", hide);
+  }
+
+  // ---- gate pass/fail status grid (state-over-time; not a line chart) -----
+
+  function gateStrip(container, gates) {
+    // gates: [{ label, cells: [{ x(ms), ok:boolean|null }] }]
+    var strip = h("div", { class: "mv-gate-strip" });
+    gates.forEach(function (g) {
+      var row = h("div", { class: "mv-gate-row" }, h("div", { class: "mv-gate-name", text: g.label }));
+      var cellsWrap = h("div", { class: "mv-gate-cells" });
+      g.cells.forEach(function (c) {
+        var color = c.ok == null ? "var(--text-muted)" : (c.ok ? "var(--status-good)" : "var(--status-critical)");
+        var title = fmtDate(new Date(c.x).toISOString()) + ": " + (c.ok == null ? "no data" : (c.ok ? "pass" : "fail"));
+        cellsWrap.appendChild(h("span", { class: "mv-gate-cell", style: "background:" + color, title: title }));
+      });
+      row.appendChild(cellsWrap);
+      strip.appendChild(row);
+    });
+    container.appendChild(strip);
+  }
+
+  // ---- data extraction ------------------------------------------------------
+
+  function rowTimestamp(row) {
+    var iso = present(row.captured);
+    var d = iso ? new Date(iso) : null;
+    return d && !isNaN(d.getTime()) ? d.getTime() : null;
+  }
+  function isComposition(row) { return row && row.schema === "fm-milestone/v1" && row.gates != null; }
+
+  function buildModelSeries(rows) {
+    var assign = slotAssigner();
+    var byModel = {}; // model -> { control:[], harness:[], lift:[] }
+    rows.forEach(function (row) {
+      var x = rowTimestamp(row);
+      if (x == null) return;
+      (row.models || []).forEach(function (m) {
+        var name = present(m.model) || "unknown model";
+        if (!byModel[name]) byModel[name] = { control: [], harness: [], lift: [] };
+        byModel[name].control.push({ x: x, y: isNum(m.control) ? m.control : null });
+        byModel[name].harness.push({ x: x, y: isNum(m.harness) ? m.harness : null });
+        byModel[name].lift.push({ x: x, y: isNum(m.lift) ? m.lift : null });
+        assign(name);
+      });
+    });
+    return byModel;
+  }
+
+  function render() {
+    var app = document.getElementById("mv-app");
+    var payload;
+    try {
+      payload = JSON.parse(document.getElementById("mv-payload").textContent);
+    } catch (e) {
+      app.appendChild(h("div", { class: "mv-alert", text: "Could not parse milestone data: " + e.message }));
+      return;
+    }
+    var rows = Array.isArray(payload.rows) ? payload.rows.slice() : [];
+    // chronological by captured timestamp when parseable, else keep file order.
+    rows.sort(function (a, b) {
+      var ta = rowTimestamp(a), tb = rowTimestamp(b);
+      if (ta == null || tb == null) return 0;
+      return ta - tb;
+    });
+    var rowErrors = Array.isArray(payload.rowErrors) ? payload.rowErrors : [];
+    var gitWeight = payload.gitWeight || { available: false, points: [] };
+
+    // ---- header ----
+    var dated = rows.map(rowTimestamp).filter(function (t) { return t != null; });
+    var rangeText = dated.length
+      ? fmtDate(new Date(Math.min.apply(null, dated)).toISOString()) + " to " + fmtDate(new Date(Math.max.apply(null, dated)).toISOString())
+      : "no dated rows";
+    app.appendChild(h("header", { class: "mv-card" },
+      h("div", { class: "mv-row" },
+        h("div", null,
+          h("div", { class: "mv-eyebrow", text: "Firstmate milestone ledger" }),
+          h("h1", { text: "Harness performance over time" }),
+          h("p", { class: "mv-secondary", text: rangeText })),
+        h("div", { style: "text-align:right;font-size:0.75rem" },
+          h("div", { class: "mv-muted" }, "source ", h("span", { class: "mv-mono", text: present(payload.source) })),
+          h("div", { class: "mv-muted" }, "as of ", h("span", { class: "mv-mono", text: present(payload.generated) })),
+          h("div", { class: "mv-muted" },
+            "live session/cost detail: ",
+            h("a", { href: "http://localhost:3847", class: "mv-mono", style: "color:var(--series-1)", text: "omp stats dashboard" }))))));
+
+    // ---- headline stats ----
+    var byModel = buildModelSeries(rows);
+    var modelNames = Object.keys(byModel);
+    var compositionRows = rows.filter(isComposition);
+    var latestCorpus = rows.length ? rows[rows.length - 1].corpus_scenarios : null;
+    app.appendChild(h("section", { class: "mv-grid mv-grid-stats" },
+      statTile("milestones", fmtNum(rows.length), "ledger rows"),
+      statTile("models tracked", fmtNum(modelNames.length), modelNames.join(", ") || "none"),
+      statTile("latest corpus", isNum(latestCorpus) ? fmtNum(latestCorpus) : "n/a", "scenarios"),
+      statTile("composition rows", fmtNum(compositionRows.length) + " / " + fmtNum(rows.length), "deterministic gate layer")));
+
+    // ---- gaps / transparency (adapted from the retiring kpi-view's "gaps" banner:
+    // the same not-faked-missing-data discipline, applied to ledger sparseness
+    // instead of KPI instrumentation gaps) ----
+    var gapNotes = [];
+    if (rows.length === 0) gapNotes.push("The ledger has no rows yet; every chart below will be empty until a milestone is captured.");
+    else if (rows.length < 5) gapNotes.push("Only " + rows.length + " milestone" + (rows.length === 1 ? "" : "s") + " captured so far; trends below are directional, not statistically robust.");
+    if (rowErrors.length) {
+      gapNotes.push(rowErrors.length + " ledger line" + (rowErrors.length === 1 ? "" : "s") + " could not be parsed and " + (rowErrors.length === 1 ? "was" : "were") + " skipped: "
+        + rowErrors.map(function (e) { return "line " + e.line; }).join(", ") + ".");
+    }
+    if (rows.length && compositionRows.length === 0) {
+      gapNotes.push("No row yet carries the deterministic composition layer (gates/context-weight from benchmarks/milestone/run.ts) - only legacy tri-model A/B fields are plotted.");
+    } else if (compositionRows.length > 0 && compositionRows.length < rows.length) {
+      gapNotes.push((rows.length - compositionRows.length) + " of " + rows.length + " rows predate the deterministic composition layer and carry only legacy tri-model fields (no gates/context-weight).");
+    }
+    if (modelNames.length) {
+      var lastRow = rows[rows.length - 1];
+      var lastModels = new Set((lastRow && lastRow.models || []).map(function (m) { return present(m.model); }));
+      var dropped = modelNames.filter(function (n) { return !lastModels.has(n); });
+      if (dropped.length) gapNotes.push("Model" + (dropped.length === 1 ? "" : "s") + " seen in an earlier milestone but absent from the latest: " + dropped.join(", ") + ".");
+    }
+    if (!gitWeight.available) {
+      gapNotes.push("Context-weight git-log backfill unavailable" + (gitWeight.reason ? " (" + gitWeight.reason + ")" : "") + "; only ledger-native context_weight is charted.");
+    }
+    if (gapNotes.length) {
+      var alertList = h("ul", null, gapNotes.map(function (n) { return h("li", { text: n }); }));
+      app.appendChild(h("section", { class: "mv-alert", role: "note" },
+        h("div", { style: "font-weight:600;font-size:0.85rem" }, "Gaps (not faked): " + gapNotes.length + " data caveat" + (gapNotes.length === 1 ? "" : "s")),
+        alertList));
+    }
+
+    if (rows.length === 0) {
+      app.appendChild(h("div", { class: "mv-card mv-empty", text: "No milestones in the ledger yet. Run fm-milestone to capture the first one." }));
+      renderGitWeightSection(app, gitWeight);
+      renderRawTable(app, rows);
+      return;
+    }
+
+    // ---- per-model harness vs control lift over time ----
+    if (modelNames.length) {
+      var modelSection = h("section", null, sectionTitle("Harness lift per model", "control vs harness overall correctness"));
+      var modelGrid = h("div", { class: "mv-grid mv-grid-2" });
+      var assign = slotAssigner();
+      modelNames.forEach(function (name) {
+        var slotControl = assign(name + ":control");
+        var slotHarness = assign(name + ":harness");
+        var data = byModel[name];
+        var lastLift = data.lift.filter(function (p) { return isNum(p.y); }).pop();
+        var box = h("div", { class: "mv-card" },
+          h("h3", null, name, lastLift ? h("span", { class: "mv-muted", style: "font-weight:400;font-size:0.78rem" }, "  lift " + signedPct(lastLift.y, 1) + " (latest)") : null));
+        lineChart(box, {
+          title: name + " control vs harness",
+          series: [
+            { key: "control", label: "control", color: seriesColor(1), points: data.control },
+            { key: "harness", label: "harness", color: seriesColor(2), points: data.harness },
+          ],
+          yFormat: function (v) { return pct(v, 0); },
+        });
+        modelGrid.appendChild(box);
+      });
+      modelSection.appendChild(modelGrid);
+      app.appendChild(modelSection);
+    }
+
+    // ---- corpus size + trials over time ----
+    var corpusSection = h("section", null, sectionTitle("Corpus over time"));
+    var corpusGrid = h("div", { class: "mv-grid mv-grid-2" });
+    var corpusBox = h("div", { class: "mv-card" }, h("h3", { text: "corpus scenarios" }));
+    lineChart(corpusBox, {
+      series: [{ key: "corpus", label: "corpus scenarios", color: seriesColor(1),
+        points: rows.map(function (r) { var x = rowTimestamp(r); return x == null ? null : { x: x, y: isNum(r.corpus_scenarios) ? r.corpus_scenarios : null }; }).filter(Boolean) }],
+      yFormat: fmtNum,
+    });
+    var trialsBox = h("div", { class: "mv-card" }, h("h3", { text: "trials" }));
+    lineChart(trialsBox, {
+      series: [{ key: "trials", label: "trials", color: seriesColor(2),
+        points: rows.map(function (r) { var x = rowTimestamp(r); return x == null ? null : { x: x, y: isNum(r.trials) ? r.trials : null }; }).filter(Boolean) }],
+      yFormat: fmtNum,
+    });
+    corpusGrid.appendChild(corpusBox);
+    corpusGrid.appendChild(trialsBox);
+    corpusSection.appendChild(corpusGrid);
+    app.appendChild(corpusSection);
+
+    // ---- deterministic composition metrics (fm-milestone/v1 rows only) ----
+    if (compositionRows.length) {
+      var compSection = h("section", null, sectionTitle("Deterministic composition metrics", "benchmarks/milestone/run.ts gates"));
+      var compGrid = h("div", { class: "mv-grid mv-grid-2" });
+
+      var cwBox = h("div", { class: "mv-card" }, h("h3", { text: "context weight (ledger)" }));
+      lineChart(cwBox, {
+        series: [{ key: "cw", label: "total tokens", color: seriesColor(1),
+          points: compositionRows.map(function (r) { var x = rowTimestamp(r); return x == null ? null : { x: x, y: isNum(r.context_weight && r.context_weight.total_tokens) ? r.context_weight.total_tokens : null }; }).filter(Boolean) }],
+        yFormat: fmtNum,
+      });
+      compGrid.appendChild(cwBox);
+
+      var supBox = h("div", { class: "mv-card" }, h("h3", { text: "supervision tokens (old vs new)" }));
+      lineChart(supBox, {
+        series: [
+          { key: "old", label: "old", color: seriesColor(1), points: compositionRows.map(function (r) { var x = rowTimestamp(r); var t = r.gates && r.gates.supervision && r.gates.supervision.totals; return x == null ? null : { x: x, y: t && isNum(t.old_tokens) ? t.old_tokens : null }; }).filter(Boolean) },
+          { key: "new", label: "new", color: seriesColor(2), points: compositionRows.map(function (r) { var x = rowTimestamp(r); var t = r.gates && r.gates.supervision && r.gates.supervision.totals; return x == null ? null : { x: x, y: t && isNum(t.new_tokens) ? t.new_tokens : null }; }).filter(Boolean) },
+        ],
+        yFormat: fmtNum,
+      });
+      compGrid.appendChild(supBox);
+
+      var corpusGateBox = h("div", { class: "mv-card" }, h("h3", { text: "corpus gate (total / synthetic / real-history)" }));
+      lineChart(corpusGateBox, {
+        series: [
+          { key: "total", label: "total", color: seriesColor(1), points: compositionRows.map(function (r) { var x = rowTimestamp(r); var g = r.gates && r.gates.corpus; return x == null ? null : { x: x, y: g && isNum(g.total) ? g.total : null }; }).filter(Boolean) },
+          { key: "synthetic", label: "synthetic", color: seriesColor(2), points: compositionRows.map(function (r) { var x = rowTimestamp(r); var g = r.gates && r.gates.corpus; return x == null ? null : { x: x, y: g && isNum(g.synthetic) ? g.synthetic : null }; }).filter(Boolean) },
+          { key: "real_history", label: "real history", color: seriesColor(3), points: compositionRows.map(function (r) { var x = rowTimestamp(r); var g = r.gates && r.gates.corpus; return x == null ? null : { x: x, y: g && isNum(g.real_history) ? g.real_history : null }; }).filter(Boolean) },
+        ],
+        yFormat: fmtNum,
+      });
+      compGrid.appendChild(corpusGateBox);
+
+      var testsBox = h("div", { class: "mv-card" }, h("h3", { text: "behavior-suite assertions" }));
+      lineChart(testsBox, {
+        series: [{ key: "assertions", label: "assertions", color: seriesColor(4),
+          points: compositionRows.map(function (r) { var x = rowTimestamp(r); var g = r.gates && r.gates.tests; return x == null ? null : { x: x, y: g && isNum(g.assertions) ? g.assertions : null }; }).filter(Boolean) }],
+        yFormat: fmtNum,
+      });
+      compGrid.appendChild(testsBox);
+
+      var testCountsBox = h("div", { class: "mv-card" }, h("h3", { text: "test files passed / failed" }));
+      lineChart(testCountsBox, {
+        series: [
+          { key: "passed", label: "passed", color: seriesColor(2), points: compositionRows.map(function (r) { var x = rowTimestamp(r); var g = r.gates && r.gates.tests; return x == null ? null : { x: x, y: g && isNum(g.passed) ? g.passed : null }; }).filter(Boolean) },
+          { key: "failed", label: "failed", color: seriesColor(8), points: compositionRows.map(function (r) { var x = rowTimestamp(r); var g = r.gates && r.gates.tests; return x == null ? null : { x: x, y: g && isNum(g.failed) ? g.failed : null }; }).filter(Boolean) },
+        ],
+        yFormat: fmtNum,
+      });
+      compGrid.appendChild(testCountsBox);
+
+      compSection.appendChild(compGrid);
+
+      // gate pass/fail history: state over time is a status grid, not a line chart.
+      var gateDefs = [
+        { key: "action_bench", label: "action-bench gates" },
+        { key: "corpus", label: "corpus" },
+        { key: "supervision", label: "supervision" },
+        { key: "tests", label: "tests" },
+        { key: "repo_invariants", label: "repo invariants" },
+      ];
+      var gateRows = gateDefs.map(function (def) {
+        return {
+          label: def.label,
+          cells: rows.map(function (r) {
+            var x = rowTimestamp(r);
+            if (x == null) return null;
+            var g = r.gates && r.gates[def.key];
+            return { x: x, ok: g ? !!g.ok : null };
+          }).filter(Boolean),
+        };
+      });
+      var gateCard = h("div", { class: "mv-card" }, h("h3", { text: "gate pass/fail history" }));
+      gateStrip(gateCard, gateRows);
+      compSection.appendChild(gateCard);
+
+      app.appendChild(compSection);
+    }
+
+    renderGitWeightSection(app, gitWeight);
+    renderRawTable(app, rows);
+  }
+
+  function renderGitWeightSection(app, gitWeight) {
+    if (!gitWeight.available && (!gitWeight.points || gitWeight.points.length === 0)) return;
+    var points = gitWeight.points || [];
+    if (points.length === 0) return;
+
+    var byLabel = {};
+    points.forEach(function (p) { (byLabel[p.label] = byLabel[p.label] || []).push(p); });
+    var labels = Object.keys(byLabel).sort(function (a, b) { return byLabel[b].length - byLabel[a].length; });
+    var primary = labels[0];
+
+    var section = h("section", null, sectionTitle("Context weight backfill", "scanned from git log \"Weight:\" commit trailers, optional enhancement"));
+    var box = h("div", { class: "mv-card" }, h("h3", { text: primary + " tokens (post-edit weight per commit)" }));
+    lineChart(box, {
+      series: [{ key: primary, label: primary, color: seriesColor(1),
+        points: byLabel[primary].map(function (p) { return { x: new Date(p.date).getTime(), y: p.after }; }) }],
+      yFormat: fmtNum,
+    });
+    section.appendChild(box);
+
+    if (labels.length > 1) {
+      var rest = labels.slice(1);
+      var tableWrap = h("div", { class: "mv-card mv-table-wrap" },
+        h("h3", { text: "other cited files/skills (fewer points, listed not charted)" }),
+        h("table", null,
+          h("thead", null, h("tr", null, h("th", { text: "label" }), h("th", { text: "points" }), h("th", { class: "mv-num", text: "first before" }), h("th", { class: "mv-num", text: "last after" }))),
+          h("tbody", null, rest.map(function (label) {
+            var pts = byLabel[label];
+            return h("tr", null,
+              h("td", { class: "mv-mono", text: label }),
+              h("td", { class: "mv-num", text: String(pts.length) }),
+              h("td", { class: "mv-num", text: fmtNum(pts[0].before) }),
+              h("td", { class: "mv-num", text: fmtNum(pts[pts.length - 1].after) }));
+          }))));
+      section.appendChild(tableWrap);
+    }
+    app.appendChild(section);
+  }
+
+  function renderRawTable(app, rows) {
+    var body = rows.map(function (r) {
+      var models = (r.models || []).map(function (m) { return present(m.model) + " " + (isNum(m.lift) ? signedPct(m.lift, 1) : "n/a"); }).join(", ");
+      var g = r.gates || {};
+      var cw = r.context_weight;
+      var gatesPassed = isComposition(r)
+        ? ["action_bench", "corpus", "supervision", "tests", "repo_invariants"].filter(function (k) { return g[k] && g[k].ok; }).length
+        : null;
+      return h("tr", null,
+        h("td", { text: fmtDate(r.captured) }),
+        h("td", { class: "mv-mono", text: present(r.milestone) }),
+        h("td", { class: "mv-mono", text: shortSha(r.sha) }),
+        h("td", { class: "mv-num", text: isNum(r.corpus_scenarios) ? fmtNum(r.corpus_scenarios) : "n/a" },),
+        h("td", { class: "mv-num", text: isNum(r.trials) ? fmtNum(r.trials) : "n/a" }),
+        h("td", { text: isComposition(r) ? "composition" : "legacy" }),
+        h("td", { class: "mv-num", text: gatesPassed == null ? "n/a" : gatesPassed + "/5" }),
+        h("td", { class: "mv-num", text: cw && isNum(cw.total_tokens) ? fmtNum(cw.total_tokens) : "n/a" }),
+        h("td", { class: "mv-num", text: g.tests && isNum(g.tests.passed) && isNum(g.tests.failed) ? (g.tests.passed + "/" + g.tests.failed) : "n/a" }),
+        h("td", { text: models || "n/a" }));
+    });
+    var details = h("details", null,
+      h("summary", { text: "Raw ledger rows (" + rows.length + ") - every value reachable without hovering a chart" }),
+      h("div", { class: "mv-card mv-table-wrap" },
+        h("table", null,
+          h("thead", null, h("tr", null,
+            h("th", { text: "captured" }), h("th", { text: "milestone" }), h("th", { text: "sha" }),
+            h("th", { class: "mv-num", text: "corpus" }), h("th", { class: "mv-num", text: "trials" }),
+            h("th", { text: "schema" }), h("th", { class: "mv-num", text: "gates ok" }),
+            h("th", { class: "mv-num", text: "ctx weight" }), h("th", { class: "mv-num", text: "tests p/f" }),
+            h("th", { text: "models (lift)" }))),
+          h("tbody", null, body))));
+    app.appendChild(details);
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
