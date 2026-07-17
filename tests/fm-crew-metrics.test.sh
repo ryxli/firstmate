@@ -7,7 +7,10 @@
 # fleet's state/ dir, neither of which belong in the pure behavior suite.
 # What matters here is that the wrapper's no-op path is captain-machine-
 # agnostic and that its --home default derives from fm_paths rather than a
-# hardcoded absolute.
+# hardcoded absolute. Also covers fm_paths.py's own root-derivation contract
+# (migrated here from the retired benchmarks/eval-runner/fm-eval-run.py test,
+# since fm_paths.py is a shared helper and crew-metrics is now its only
+# consumer).
 #
 # Requires python3. A host without it skips cleanly so the rest of the pure-
 # bash suite still runs everywhere.
@@ -84,8 +87,21 @@ print(fm_paths.fm_home())
 [ "$resolved_home" = "$FAKE_HOME" ] || fail "fm_paths.fm_home() = '$resolved_home', want FM_HOME override '$FAKE_HOME'"
 pass "crew-metrics --home default honors FM_HOME instead of a hardcoded path"
 
+# --- fm_paths.code_root() derives the repo root from its own on-disk location,
+#     regardless of cwd/$HOME/a stale $FM_HOME (migrated from the now-retired
+#     benchmarks/eval-runner/fm-eval-run.py test - fm_paths.py is shared, this
+#     is the only remaining consumer's test suite) --------------------------
+code_root_out="$(cd "$TMP" && EVAL_DIR="$EVAL_DIR" HOME="$DECOY_HOME" FM_HOME="$DECOY_HOME" python3 -c '
+import os, sys
+sys.path.insert(0, os.environ["EVAL_DIR"])
+import fm_paths
+print(fm_paths.code_root())
+')"
+[ "$code_root_out" = "$ROOT" ] || fail "code_root() = '$code_root_out', want repo root '$ROOT'"
+pass "fm_paths.code_root() derives the repo root from the script's own location"
+
 # --- python3 syntax check ----------------------------------------------------
-python3 -m py_compile "$EVAL_DIR/crew-metrics.py" || fail "crew-metrics.py fails py_compile"
-pass "crew-metrics.py is syntactically valid"
+python3 -m py_compile "$EVAL_DIR/crew-metrics.py" "$EVAL_DIR/fm_paths.py" || fail "crew-metrics.py / fm_paths.py fail py_compile"
+pass "crew-metrics.py and fm_paths.py are syntactically valid"
 
 printf 'PASS fm-crew-metrics\n'
