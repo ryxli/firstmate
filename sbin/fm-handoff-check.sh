@@ -3,7 +3,12 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_HOME="${FM_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+# shellcheck source=fm-root-lib.sh
+. "$SCRIPT_DIR/fm-root-lib.sh"
+# Resolve the home from the invocation dir when FM_HOME is unset (symlinked sbin
+# would otherwise resolve to the code root, not the operational home).
+FM_HOME="${FM_HOME:-$(fm_home_from_cwd)}"
+[ -n "$FM_HOME" ] || FM_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
 CURRENT="$FM_HOME/data/handoff/current-actions.md"
 READBACK="$FM_HOME/data/handoff/firstmate-readback.md"
 failed=0
@@ -22,6 +27,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A home with no handoff records at all (fresh / secondmate home) has nothing to
+# reconcile - skip cleanly. A single missing file below is a real mismatch.
+if [ ! -f "$CURRENT" ] && [ ! -f "$READBACK" ]; then
+  printf 'SKIP: no handoff records under %s/data/handoff (nothing to check)\n' "$FM_HOME"
+  exit 0
+fi
 if [ ! -f "$CURRENT" ]; then
   printf 'FAIL: current-actions.md:1 is missing; firstmate-readback.md:1 cannot be checked\n'
   exit 1

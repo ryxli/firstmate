@@ -18,7 +18,13 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+# shellcheck source=sbin/fm-root-lib.sh
+. "$SCRIPT_DIR/fm-root-lib.sh"
+# A session opened directly in a symlinked home has no FM_HOME; resolve it from
+# the invocation dir (nearest AGENTS.md) so we do not collapse onto the code root.
+FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$(fm_home_from_cwd)}}"
+[ -n "$FM_HOME" ] || FM_HOME="$FM_ROOT"
+export FM_HOME
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # shellcheck source=sbin/fm-tasks-axi-lib.sh

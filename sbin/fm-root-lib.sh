@@ -87,6 +87,20 @@ fm_code_root_from_script() {
   printf '%s\n' "$root"
 }
 
+# Resolve the operational home by walking up from the invocation directory to
+# the nearest AGENTS.md marker. Lets a session opened directly in a symlinked
+# secondmate home (no FM_HOME exported) find its real home instead of collapsing
+# onto the physical code root. Prints the home path, or nothing if unmarked.
+fm_home_from_cwd() {
+  local d
+  d=$(pwd -P 2>/dev/null) || return 0
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    [ -f "$d/AGENTS.md" ] && { printf '%s\n' "$d"; return 0; }
+    d=$(dirname "$d")
+  done
+  return 0
+}
+
 fm_init_roots() {
   local source_path=${1:?fm_init_roots requires a bash source path}
   FM_CODE_ROOT_EFFECTIVE=$(fm_code_root_from_script "$source_path") || return 1
@@ -95,7 +109,8 @@ fm_init_roots() {
       if [ -n "${FM_ROOT_OVERRIDE:-}" ] && [ -z "${FM_CODE_ROOT_OVERRIDE:-}" ]; then
         FM_HOME_EFFECTIVE=$(fm_normalize_path "$FM_ROOT_OVERRIDE")
       else
-        FM_HOME_EFFECTIVE=$FM_CODE_ROOT_EFFECTIVE
+        FM_HOME_EFFECTIVE=$(fm_home_from_cwd)
+        [ -n "$FM_HOME_EFFECTIVE" ] || FM_HOME_EFFECTIVE=$FM_CODE_ROOT_EFFECTIVE
       fi
       ;;
     *) FM_HOME_EFFECTIVE=$(fm_normalize_path "$FM_HOME") ;;
