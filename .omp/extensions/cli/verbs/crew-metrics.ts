@@ -15,7 +15,14 @@ const CREW_METRICS_PY = `${REPO_ROOT}/benchmarks/eval-runner/crew-metrics.py`;
 
 function run(argv: string[]): number {
 	const args = argv.slice(1);
-	const child = spawnSync("python3", [CREW_METRICS_PY, ...args], { stdio: "inherit" });
+	// PYTHONDONTWRITEBYTECODE keeps this a clean read-only no-op: without it,
+	// Apple's system python3 caches .pyc bytecode into $HOME/Library/Caches
+	// on import, which leaks writes into the caller's HOME. Same guard the
+	// spawn verb applies to python tooling a mate runs.
+	const child = spawnSync("python3", [CREW_METRICS_PY, ...args], {
+		stdio: "inherit",
+		env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+	});
 	if (child.error) throw child.error;
 	return child.status ?? 1;
 }
