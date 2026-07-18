@@ -47,6 +47,7 @@ import { fileURLToPath } from "node:url";
 import { supervisorName, workerLabel } from "../lib/identity";
 import { herdrReapHuskSlot, jsonGet, metaSet, metaValue } from "../lib/herdr";
 import { shellQuote } from "../lib/spawn";
+import { crewRoleContract, ensureSecondmateParentIdentity, secondmateRoleContract } from "../lib/role-contract";
 
 // Equivalent of the former script's SCRIPT_DIR/.. (sbin's parent = repo root),
 // resolved from this verb module's own location (verbs -> cli -> extensions -> .omp -> root).
@@ -259,6 +260,12 @@ function firstCommandWordFromRaw(cmd: string): string {
 		return parts[parts.length - 1];
 	}
 	return "";
+}
+
+export function injectOmpRoleContract(command: string, contract: string): string {
+	if (!command.startsWith("omp")) return command;
+	const rest = command.slice(3);
+	return `omp --append-system-prompt=${shellQuote(contract)}${rest}`;
 }
 
 function crewHarness(fmRoot: string): string {
@@ -890,6 +897,13 @@ async function run(argv: string[]): Promise<number> {
 		const sqOmpConfig = shellQuote(`${projAbs}/config/omp.yml`);
 		const stripped = launchCmd.startsWith("omp") ? launchCmd.slice(3) : launchCmd;
 		launchCmd = `omp --config ${sqOmpConfig}${stripped}`;
+	}
+	if (harness === "omp") {
+		const contract = kind === "secondmate"
+			? secondmateRoleContract({ home: projAbs, mainHome: fmHome })
+			: crewRoleContract({ home: projAbs, mainHome: fmHome, crewId: id, launchingSupervisor: supervisorName(config) });
+		if (kind === "secondmate") ensureSecondmateParentIdentity(projAbs, supervisorName(config));
+		launchCmd = injectOmpRoleContract(launchCmd, contract);
 	}
 	if (kind === "secondmate") {
 		const sqHome = shellQuote(projAbs);

@@ -202,7 +202,8 @@ resume_out=$(PATH="$resume_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$resume_l
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
   "$ROOT/sbin/fm" spawn anchor omp --secondmate 2>&1) \
   || fail "secondmate OMP recovery spawn should succeed: $resume_out"
-grep -qF 'omp --auto-approve -c' "$resume_log" || fail "OMP respawn did not continue the saved session"
+grep -qF 'omp --append-system-prompt=' "$resume_log" || fail "OMP respawn did not inject the runtime role contract"
+grep -qF -- '--auto-approve -c' "$resume_log" || fail "OMP respawn did not continue the saved session"
 if grep -qF 'charter prompt that must not be resent' "$resume_log"; then
   fail "OMP respawn resent the charter instead of continuing"
 fi

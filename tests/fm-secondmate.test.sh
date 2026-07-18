@@ -1197,7 +1197,7 @@ test_secondmate_spawn_preserves_shared_link_conflicts() {
 }
 
 test_secondmate_spawn_requires_seeded_matching_home() {
-  local home subhome wronghome marker_only active_descendant active_ancestor ancestor_active_home fakeroot root_descendant root_ancestor root_inside fakebin log err
+  local home subhome wronghome marker_only active_descendant active_ancestor ancestor_active_home fakeroot root_descendant root_ancestor root_inside fakebin log err out
   home="$TMP_ROOT/spawn-validate-home"
   subhome="$TMP_ROOT/spawn-validate-subhome"
   wronghome="$TMP_ROOT/spawn-validate-wronghome"
@@ -1214,6 +1214,7 @@ test_secondmate_spawn_requires_seeded_matching_home() {
   fakebin=$(make_fake_herdr "$TMP_ROOT/spawn-validate-fake")
   log="$TMP_ROOT/spawn-validate-fake/herdr.log"
   err="$TMP_ROOT/spawn-validate.err"
+  out="$TMP_ROOT/spawn-validate.out"
 
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
     "$ROOT/sbin/fm" spawn domain "$subhome" codex --secondmate >/dev/null 2>"$err"; then
@@ -1249,10 +1250,11 @@ test_secondmate_spawn_requires_seeded_matching_home() {
 
   printf 'domain\n' > "$home/.fm-secondmate-home"
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
-    "$ROOT/sbin/fm" spawn domain "$home" codex --secondmate >/dev/null 2>"$err"; then
+    "$ROOT/sbin/fm" spawn domain "$home" codex --secondmate >"$out" 2>"$err"; then
     fail "secondmate spawn accepted the active home"
   fi
-  grep -F 'secondmate home cannot be the active firstmate home' "$err" >/dev/null || fail "spawn did not reject active home"
+  grep -F 'WRONG_ROLE' "$out" >/dev/null || fail "spawn did not reject active home with structured wrong-role refusal"
+  rm -f "$home/.fm-secondmate-home"
 
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
     "$ROOT/sbin/fm" spawn domain "$ROOT" codex --secondmate >/dev/null 2>"$err"; then
@@ -1418,14 +1420,17 @@ EOF
     || fail "recovery did not create a replacement workspace with the registered display name"
   grep -F 'worktree create' "$log" >/dev/null && fail "recovery recreated the persistent home"
   grep -F -- '--workspace w-replacement' "$log" >/dev/null || fail "spawn did not use the replacement workspace"
-  grep -F 'omp --auto-approve -c' "$log" >/dev/null || fail "recovery did not resume the OMP session"
+  grep -F 'omp --append-system-prompt=' "$log" >/dev/null || fail "recovery did not inject the runtime role contract"
+  grep -F -- '--auto-approve -c' "$log" >/dev/null || fail "recovery did not resume the OMP session"
   grep -F 'workspace: w-replacement' "$home/data/secondmates.md" >/dev/null \
     || fail "recovery did not update the durable workspace registration"
   grep -F 'workspace: w-missing' "$home/data/secondmates.md" >/dev/null \
     && fail "recovery retained the missing workspace registration"
   grep -Fx 'workspace=w-replacement' "$meta" >/dev/null || fail "recovery did not update workspace metadata"
-  [ "$(cat "$subhome/config/identity")" = $'schema_version=1\nname=Bull' ] \
-    || fail "recovery changed the persistent home identity"
+  grep -Fx 'name=Bull' "$subhome/config/identity" >/dev/null \
+    || fail "recovery changed the persistent home name"
+  grep -Fx 'parent=firstmate' "$subhome/config/identity" >/dev/null \
+    || fail "recovery did not persist the generated parent identity"
   [ "$(cat "$subhome/state/keep")" = 'persisted child state' ] \
     || fail "recovery changed child operational state"
   [ "$(cat "$home/state/bull.status")" = 'persisted supervisor state' ] \

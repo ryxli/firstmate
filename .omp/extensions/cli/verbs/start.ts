@@ -11,12 +11,12 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { lockSnapshot, removeLockIfOwner, resolveLockPaths, sleepMs, withLockClaim, writeLockOwner } from "../lib/session-lock";
-import { homeFromCwd } from "../lib/root";
+
 import { FM_START_STATIC_CONTEXT_ENV, mainHomeStructurally, registryBlock, runStartupContext } from "../lib/startup-context";
+import { activeHome, roleContractForHome } from "../lib/role-contract";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
-const LEGACY_KICKOFF = "Session start: run your session-start sequence, then report fleet status.";
 const DEFAULT_LOCK_WAIT_TIMEOUT_MS = 300_000;
 const LOCK_POLL_MS = 100;
 
@@ -26,32 +26,26 @@ interface ReservedLaunch {
 	gate: string;
 }
 
-// Every-session skills injected into the cached system prefix, replacing two
-// uncached tool-reads per boot. All other skills stay lazy.
-const PRELOAD_SKILLS = ["firstmate-bootstrap", "firstmate-recovery"];
+function readOptional(path: string): string | null {
+	try {
+		return readFileSync(path, "utf8").trim();
+	} catch {
+		return null;
+	}
+}
 
-// Stable fleet registries: change rarely, read at every session start. Loading
-// them at launch keeps them in the cached prefix and in a deterministic order,
-// instead of N tool-reads scattered through the first turns.
-const PRELOAD_REGISTRIES = ["data/projects.md", "data/secondmates.md", "data/cap.md"];
-
-function legacyPreloadBlock(home: string): string {
-	const parts = ["# Preloaded skills", "The following mandatory session-start skills are already loaded in full - run them directly, never re-read them via a skill tool or file read."];
-	for (const name of PRELOAD_SKILLS) {
-		const path = join(REPO_ROOT, ".agents", "skills", name, "SKILL.md");
-		parts.push(`## skill://${name}\n\n${readFileSync(path, "utf8").trim()}`);
-	}
-	const registries: string[] = [];
-	for (const rel of PRELOAD_REGISTRIES) {
-		try {
-			registries.push(`## ${rel}\n\n${readFileSync(join(home, rel), "utf8").trim()}`);
-		} catch {
-			// Local-layer file absent (fresh clone): the skill flow handles it.
-		}
-	}
-	if (registries.length > 0) {
-		parts.push("# Preloaded fleet registries", "Current as of session launch - do not re-read these files unless you have changed them this session. Live state (panes, tasks, locks) is NOT here; get it from one `fm fleet --check` call.", ...registries);
-	}
+function secondmateContextBlock(home: string): string {
+	const parts = [
+		"# Secondmate startup context",
+		"This is a model-driven secondmate startup. Stay inside your generated Runtime Role Contract, your charter routing scope, and your own home.",
+		"Do not run main-fleet governance commands. Do not use `fm home`, `fm brief --secondmate`, or `fm spawn --secondmate` from this home.",
+	];
+	const charter = readOptional(join(home, "data", "charter.md"));
+	if (charter) parts.push("## Local charter", charter);
+	const cap = readOptional(join(home, "data", "cap.md"));
+	if (cap) parts.push("## Local cap context", cap);
+	const backlog = readOptional(join(home, "data", "backlog.md"));
+	if (backlog) parts.push("## Local backlog", backlog);
 	return parts.join("\n\n");
 }
 
@@ -67,6 +61,11 @@ function mainPreloadBlock(home: string): string {
 		parts.push("# Preloaded fleet registries", "Stable desired context loaded at session launch. Live state is owned by the static fleet representation above until refreshed.", ...registries);
 	}
 	return parts.join("\n\n");
+}
+
+function secondmateKickoff(contract: string): string {
+	const line = contract.split(/\r?\n/).find(entry => entry.startsWith("You are "));
+	return `Session start: ${line ?? "You are a secondmate."} Run your local secondmate startup from the injected charter/cap context, then report local status to your supervisor channel when needed.`;
 }
 
 function envMs(name: string, fallbackMs: number): number {
@@ -200,13 +199,15 @@ async function waitAndLaunch(ompArgs: string[], cwd: string, beforeLaunch?: () =
 
 async function legacyRun(argv: string[], home: string): Promise<number> {
 	const args = argv.slice(1);
-	const ompArgs = [`--append-system-prompt=${legacyPreloadBlock(home)}`, ...(args.length > 0 ? args : [LEGACY_KICKOFF])];
+	const contract = roleContractForHome(home);
+	const context = secondmateContextBlock(home);
+	const ompArgs = [`--append-system-prompt=${contract}`, `--append-system-prompt=${context}`, ...(args.length > 0 ? args : [secondmateKickoff(contract)])];
 	return await waitAndLaunch(ompArgs, home);
 }
 
 async function run(argv: string[]): Promise<number> {
 	const args = argv.slice(1);
-	const home = process.env.FM_HOME?.trim() || homeFromCwd() || REPO_ROOT;
+	const home = activeHome(REPO_ROOT);
 	if (!mainHomeStructurally(home)) return legacyRun(argv, home);
 
 	let staticFleet = "";
@@ -227,7 +228,7 @@ async function run(argv: string[]): Promise<number> {
 		preflightDone = true;
 		return true;
 	};
-	const ompArgs = [`--append-system-prompt=${mainPreloadBlock(home)}`, ...args];
+	const ompArgs = [`--append-system-prompt=${roleContractForHome(home)}`, `--append-system-prompt=${mainPreloadBlock(home)}`, ...args];
 	return await waitAndLaunch(ompArgs, home, async () => {
 		const ok = await beforeLaunch();
 		if (!ok) return false;

@@ -60,6 +60,7 @@ interface Fixture {
 interface LaunchResult {
 	cwd: string;
 	marker?: string;
+	rolePrompt: string;
 	appendSystemPrompt: string;
 	kickoff?: string;
 	argc: string;
@@ -225,8 +226,9 @@ function readLaunch(output: string): LaunchResult {
 	return {
 		cwd: readFileSync(`${output}.cwd`, "utf8"),
 		marker: maybeRead(`${output}.marker`),
-		appendSystemPrompt: args[0],
-		kickoff: args[1],
+		rolePrompt: args[0],
+		appendSystemPrompt: args[1],
+		kickoff: args[2],
 		argc: String(argc),
 		pid: maybeRead(`${output}.pid`),
 		lock: maybeRead(`${output}.lock`),
@@ -378,8 +380,11 @@ describe("fm start prompt", () => {
 		expect(run.status).toBe(0);
 		const result = readLaunch(fx.output);
 		expect(result.marker).toBe("");
-		expect(result.argc).toBe("1");
+		expect(result.argc).toBe("2");
 		expect(result.kickoff).toBeUndefined();
+		expect(result.rolePrompt.startsWith("--append-system-prompt=")).toBe(true);
+		expect(result.appendSystemPrompt.startsWith("--append-system-prompt=")).toBe(true);
+		expect(result.rolePrompt).toContain("kind: firstmate");
 		expect(run.stdout).toBe("");
 		expect(result.staticContext).toContain('"schema": "fm-start-static/1"');
 		expect(result.appendSystemPrompt).not.toContain(result.staticContext);
@@ -396,24 +401,39 @@ describe("fm start prompt", () => {
 		const run = await runFm(fx, fx.home, {}, ["-c", "previous"]);
 		expect(run.status).toBe(0);
 		const result = readLaunch(fx.output);
-		expect(result.argc).toBe("3");
-		expect(result.args.slice(1)).toEqual(["-c", "previous"]);
+		expect(result.argc).toBe("4");
+		expect(result.rolePrompt.startsWith("--append-system-prompt=")).toBe(true);
+		expect(result.appendSystemPrompt.startsWith("--append-system-prompt=")).toBe(true);
+		expect(result.args.slice(2)).toEqual(["-c", "previous"]);
 	});
 
-	it("preserves secondmate startup behavior byte-for-byte", async () => {
+	it("preserves secondmate model-driven startup without main-firstmate skill bodies", async () => {
 		const fx = fixture();
 		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
 		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		mkdirSync(join(fx.home, "data"), { recursive: true });
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=secondmate\nparent=Keel\n");
+		writeFileSync(join(fx.home, "data", "charter.md"), "# Charter\nRiggs\n\n# Routing scope\nfrontend routing\n");
+		writeFileSync(join(fx.home, "data", "cap.md"), "Cap prefs\n");
 		const run = await runFm(fx, undefined, {}, [], fx.home);
 		expect(run.status).toBe(0);
 		const result = readLaunch(fx.output);
 		expect(commandLog(fx)).toEqual([]);
 		expect(run.stdout).toBe("");
-		expect(result.argc).toBe("2");
+		expect(result.argc).toBe("3");
+		expect(result.rolePrompt).toContain("kind: secondmate");
+		expect(result.rolePrompt).toContain("You are Riggs, a secondmate reporting to Keel.");
+		expect(result.rolePrompt).toContain("reports_to: Keel");
 		expect(result.lock).toBe(result.pid);
-		expect(result.kickoff).toBe("Session start: run your session-start sequence, then report fleet status.");
-		expect(result.appendSystemPrompt).toContain("## skill://firstmate-bootstrap");
-		expect(result.appendSystemPrompt).toContain("Run `sbin/fm bootstrap`");
+		expect(result.kickoff).toContain("You are Riggs, a secondmate reporting to Keel.");
+		expect(result.appendSystemPrompt).toContain("# Secondmate startup context");
+		expect(result.appendSystemPrompt).toContain("frontend routing");
+		expect(result.appendSystemPrompt).toContain("Cap prefs");
+		expect(result.appendSystemPrompt).not.toContain("Firstmate bootstrap");
+		expect(result.appendSystemPrompt).not.toContain("Firstmate recovery");
+		expect(result.appendSystemPrompt).not.toContain("Run `sbin/fm bootstrap`");
+		expect(result.appendSystemPrompt).not.toContain("Run `fm home`");
 	});
 });
 

@@ -125,8 +125,18 @@ secondmate_prefix() {
   printf 'FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=%s ' "$sq_home"
 }
 
+secondmate_role_arg() {
+  local secondmate_home=$1 main_home=$2
+  (cd "$ROOT" && SECOND_HOME="$secondmate_home" MAIN_HOME_FOR_ROLE="$main_home" bun -e 'import { secondmateRoleContract } from "./.omp/extensions/cli/lib/role-contract.ts"; import { shellQuote } from "./.omp/extensions/cli/lib/spawn.ts"; console.log("--append-system-prompt=" + shellQuote(secondmateRoleContract({ home: process.env.SECOND_HOME, mainHome: process.env.MAIN_HOME_FOR_ROLE })));')
+}
+
+crew_role_arg() {
+  local supervisor_home=$1 id=$2
+  (cd "$ROOT" && SUPERVISOR_HOME="$supervisor_home" CREW_ID="$id" bun -e 'import { crewRoleContract } from "./.omp/extensions/cli/lib/role-contract.ts"; import { shellQuote } from "./.omp/extensions/cli/lib/spawn.ts"; console.log("--append-system-prompt=" + shellQuote(crewRoleContract({ home: process.env.SUPERVISOR_HOME, mainHome: process.env.SUPERVISOR_HOME, crewId: process.env.CREW_ID, launchingSupervisor: "Test Supervisor" })));')
+}
+
 test_omp_secondmate_uses_launched_home_overlay_once() {
-  local home fakebin secondmate secondmate_abs sq_overlay sq_brief expected actual count
+  local home fakebin secondmate secondmate_abs sq_overlay sq_brief role_arg expected actual count
   home=$(make_supervisor_home positive)
   fakebin=$(make_fake_herdr "$home")
   secondmate=$(make_secondmate_home "overlay mate's home" overlay-mate)
@@ -139,7 +149,8 @@ test_omp_secondmate_uses_launched_home_overlay_once() {
 
   sq_overlay=$(fm_shell_quote "$secondmate_abs/config/omp.yml")
   sq_brief=$(fm_shell_quote "$secondmate_abs/data/charter.md")
-  expected="$(secondmate_prefix "$secondmate_abs")omp --config $sq_overlay --auto-approve \"\$(cat $sq_brief)\"; exec \"\${SHELL:-/bin/zsh}\" -l"
+  role_arg=$(secondmate_role_arg "$secondmate_abs" "$home")
+  expected="$(secondmate_prefix "$secondmate_abs")omp $role_arg --config $sq_overlay --auto-approve \"\$(cat $sq_brief)\"; exec \"\${SHELL:-/bin/zsh}\" -l"
   actual=$(captured_command "$home")
   assert_equal "$expected" "$actual" "OMP secondmate launch did not safely quote the launched home's overlay"
   count=$(printf '%s' "$actual" | grep -o -- '--config' | wc -l | tr -d ' ')
@@ -149,7 +160,7 @@ test_omp_secondmate_uses_launched_home_overlay_once() {
 }
 
 test_omp_secondmate_resume_uses_home_overlay_once() {
-  local home fakebin secondmate secondmate_abs sq_overlay expected actual count
+  local home fakebin secondmate secondmate_abs sq_overlay role_arg expected actual count
   home=$(make_supervisor_home resume)
   fakebin=$(make_fake_herdr "$home")
   secondmate=$(make_secondmate_home resume-secondmate resume-mate)
@@ -161,7 +172,8 @@ test_omp_secondmate_resume_uses_home_overlay_once() {
     || fail "resumed OMP secondmate spawn with a home overlay failed"
 
   sq_overlay=$(fm_shell_quote "$secondmate_abs/config/omp.yml")
-  expected="$(secondmate_prefix "$secondmate_abs")omp --config $sq_overlay --auto-approve -c; exec \"\${SHELL:-/bin/zsh}\" -l"
+  role_arg=$(secondmate_role_arg "$secondmate_abs" "$home")
+  expected="$(secondmate_prefix "$secondmate_abs")omp $role_arg --config $sq_overlay --auto-approve -c; exec \"\${SHELL:-/bin/zsh}\" -l"
   actual=$(captured_command "$home")
   assert_equal "$expected" "$actual" "OMP secondmate resume lost the home overlay or existing continue behavior"
   count=$(printf '%s' "$actual" | grep -o -- '--config' | wc -l | tr -d ' ')
@@ -170,7 +182,7 @@ test_omp_secondmate_resume_uses_home_overlay_once() {
 }
 
 test_omp_secondmate_without_home_overlay_is_exact_baseline() {
-  local home fakebin secondmate secondmate_abs sq_brief expected actual
+  local home fakebin secondmate secondmate_abs sq_brief role_arg expected actual
   home=$(make_supervisor_home absent)
   fakebin=$(make_fake_herdr "$home")
   secondmate=$(make_secondmate_home absent-secondmate absent-mate)
@@ -181,7 +193,8 @@ test_omp_secondmate_without_home_overlay_is_exact_baseline() {
     || fail "OMP secondmate spawn without a home overlay failed"
 
   sq_brief=$(fm_shell_quote "$secondmate_abs/data/charter.md")
-  expected="$(secondmate_prefix "$secondmate_abs")omp --auto-approve \"\$(cat $sq_brief)\"; exec \"\${SHELL:-/bin/zsh}\" -l"
+  role_arg=$(secondmate_role_arg "$secondmate_abs" "$home")
+  expected="$(secondmate_prefix "$secondmate_abs")omp $role_arg --auto-approve \"\$(cat $sq_brief)\"; exec \"\${SHELL:-/bin/zsh}\" -l"
   actual=$(captured_command "$home")
   assert_equal "$expected" "$actual" "absent secondmate overlay changed the baseline OMP command"
   pass "absent secondmate overlay leaves the OMP launch byte-for-byte unchanged"
@@ -224,11 +237,11 @@ test_raw_secondmate_launch_is_exact_baseline() {
 }
 
 expected_ordinary_template() {
-  local harness=$1 model=$2 brief=$3 sq_model sq_brief
+  local harness=$1 model=$2 brief=$3 role_arg=${4:-} sq_model sq_brief
   sq_model=$(fm_shell_quote "$model")
   sq_brief=$(fm_shell_quote "$brief")
   case "$harness" in
-    omp) printf 'omp --model %s --auto-approve "$(cat %s)"' "$sq_model" "$sq_brief" ;;
+    omp) printf 'omp %s --model %s --auto-approve "$(cat %s)"' "$role_arg" "$sq_model" "$sq_brief" ;;
     claude) printf 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --model %s --dangerously-skip-permissions "$(cat %s)"' "$sq_model" "$sq_brief" ;;
     codex) printf 'codex --model %s --dangerously-bypass-approvals-and-sandbox "$(cat %s)"' "$sq_model" "$sq_brief" ;;
     opencode) printf 'OPENCODE_CONFIG_CONTENT='"'"'{"permission":{"*":"allow"}}'"'"' opencode --model %s --prompt "$(cat %s)"' "$sq_model" "$sq_brief" ;;
@@ -238,7 +251,7 @@ expected_ordinary_template() {
 }
 
 test_all_ordinary_templates_are_exact_baselines() {
-  local harness home fakebin project id brief model expected actual
+  local harness home fakebin project id brief model role_arg expected actual
   model='openai/gpt-5'
   for harness in omp claude codex opencode pi; do
     home=$(make_supervisor_home "ordinary-$harness")
@@ -253,7 +266,9 @@ test_all_ordinary_templates_are_exact_baselines() {
     run_spawn "$home" "$fakebin" "$id" "$project" "$harness" --crew-model "$model" \
       || fail "ordinary $harness spawn failed"
 
-    expected="$(expected_ordinary_template "$harness" "$model" "$brief"); exec \"\${SHELL:-/bin/zsh}\" -l"
+    role_arg=""
+    [ "$harness" = omp ] && role_arg=$(crew_role_arg "$home" "$id")
+    expected="$(expected_ordinary_template "$harness" "$model" "$brief" "$role_arg"); exec \"\${SHELL:-/bin/zsh}\" -l"
     actual=$(captured_command "$home")
     assert_equal "$expected" "$actual" "home overlay changed the ordinary $harness launch or its model handling"
   done

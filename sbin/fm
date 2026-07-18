@@ -17,6 +17,7 @@ import { readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { output, validationError } from "../.omp/extensions/cli/common";
 import { commandHelp } from "../.omp/extensions/cli/help";
+import { activeHome, forbiddenInSecondmate, isSecondmateHome } from "../.omp/extensions/cli/lib/role-contract";
 
 interface Verb {
 	name: string;
@@ -46,9 +47,22 @@ async function loadVerbs(): Promise<Verb[]> {
 
 async function main(): Promise<number> {
 	const argv = process.argv.slice(2);
+	const home = activeHome(fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, ""));
+	const secondmate = isSecondmateHome(home);
 	if (!argv.length || argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
-		output(commandHelp());
+		output(commandHelp("fm", { secondmate }));
 		return 0;
+	}
+	const forbidden = secondmate ? forbiddenInSecondmate(argv) : null;
+	if (forbidden) {
+		output({
+			error: `WRONG_ROLE: ${forbidden} is only available from the main firstmate home`,
+			code: "WRONG_ROLE",
+			role: "secondmate",
+			home,
+			help: ["Run this command from the main firstmate home, or use local fleet/task/status commands here."],
+		});
+		return 1;
 	}
 
 	const verbs = await loadVerbs();

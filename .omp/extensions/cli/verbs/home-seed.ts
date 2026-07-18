@@ -44,6 +44,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMateMiseToml } from "../lib/mise-home";
 import { linkShipExtensions } from "../lib/ship-ext";
+import { identityValue } from "../lib/identity";
 
 // Canonical repo root, resolved from this module's own physical location
 // (four directories up from .omp/extensions/cli/verbs/) - independent of
@@ -608,8 +609,9 @@ function writeRegistry(ctx: Ctx, id: string, home: string, projectsCsv: string, 
 	writeFileSync(ctx.reg, lines.map(l => `${l}\n`).join(""));
 }
 
-function writeSeedIdentity(home: string, id: string, role: string): void {
+function writeSeedIdentity(ctx: Ctx, home: string, id: string, role: string): void {
 	const name = capitalizeId(id);
+	const parent = identityValue(join(ctx.fmHome, "config"), "name") ?? "firstmate";
 	const identityFile = join(home, "config", "identity");
 	if (existsSync(identityFile)) {
 		const line = readFileSync(identityFile, "utf8")
@@ -620,7 +622,7 @@ function writeSeedIdentity(home: string, id: string, role: string): void {
 			if (value === "1") return;
 		}
 	}
-	writeFileSync(identityFile, `schema_version=1\nname=${name}\nrole=${role}\n`);
+	writeFileSync(identityFile, `schema_version=1\nname=${name}\nrole=${role}\nparent=${parent}\n`);
 }
 
 // ---- herdr worktree acquisition -----------------------------------------------
@@ -1015,7 +1017,7 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 
 		const projectsCsv = projects.join(", ");
 		writeFileSync(markerPath, `${id}\n`);
-		writeSeedIdentity(home, id, charterSummary);
+		writeSeedIdentity(ctx, home, id, charterSummary);
 		writeRegistry(ctx, id, home, projectsCsv, state.parentBrief, state.herdrWorkspaceId);
 		if (!runValidateRegistry(ctx.reg)) throw new SeedFailure("post-write registry validation failed");
 

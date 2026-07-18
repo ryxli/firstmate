@@ -207,7 +207,7 @@ test_crew_model_flag_injected_for_template_harnesses() {
       || fail "$harness spawn with --crew-model did not complete: $out"
     agent_start=$(last_agent_start)
     case "$harness" in
-      omp) expected="omp --model 'openai/gpt-5' --auto-approve" ;;
+      omp) expected="omp --append-system-prompt=" ;;
       claude) expected="claude --model 'openai/gpt-5' --dangerously-skip-permissions" ;;
       codex) expected="codex --model 'openai/gpt-5' --dangerously-bypass-approvals-and-sandbox" ;;
       opencode) expected="opencode --model 'openai/gpt-5' --prompt" ;;
@@ -216,6 +216,10 @@ test_crew_model_flag_injected_for_template_harnesses() {
     esac
     printf '%s\n' "$agent_start" | grep -F -- "$expected" >/dev/null \
       || fail "$harness launch did not include quoted crew model at the harness-specific location: $agent_start"
+    if [ "$harness" = omp ]; then
+      grep -F -- " --model 'openai/gpt-5' --auto-approve" "$HERDR_LOG" >/dev/null \
+        || fail "omp launch did not preserve crew model placement after the role contract: $(cat "$HERDR_LOG")"
+    fi
     grep -F "crew_model=openai/gpt-5" "$FM_TEST_HOME/state/$id.meta" >/dev/null \
       || fail "$harness spawn did not record crew_model metadata"
   done

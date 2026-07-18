@@ -2,7 +2,7 @@
 // fleet/home verb modules so `fm`, `fm fleet --help`, and `fm home --help`
 // keep emitting byte-identical TOON to the pre-split monolith.
 
-export function commandHelp(command = "fm"): Record<string, unknown> {
+export function commandHelp(command = "fm", options: { secondmate?: boolean } = {}): Record<string, unknown> {
 	const home = command === "fm home";
 	const root = command === "fm";
 	const fleetCommands = [
@@ -14,16 +14,17 @@ export function commandHelp(command = "fm"): Record<string, unknown> {
 		{ command: "fleet metrics", description: "Optional cost and productivity metrics." },
 		{ command: "fleet snapshot", description: "Raw FleetSnapshot JSON for visual consumers (--json), optionally with metrics." },
 	];
+	const fleetUsage = "fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics|snapshot [--json] [--metrics] [--home <path>]]";
 	return {
 		command,
-		usage: home ? "fm home <check|repair> <mate|--all>" : root ? "fm fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics|snapshot [--json] [--metrics] [--home <path>]] | home <check|repair> <mate|--all>" : "fm fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics|snapshot [--json] [--metrics] [--home <path>]]",
+		usage: home ? "fm home <check|repair> <mate|--all>" : root ? options.secondmate ? `fm ${fleetUsage}` : `fm ${fleetUsage} | home <check|repair> <mate|--all>` : `fm ${fleetUsage}`,
 		commands: home
 			? [
 				{ command: "home check <mate|--all>", description: "Check shared-code links for one registered mate or every registered mate." },
 				{ command: "home repair <mate|--all>", description: "Repair shared-code links for one registered mate or every registered mate." },
 			]
 			: root
-				? [...fleetCommands, { command: "home", description: "Check or repair shared-code links for registered mates." }]
+				? options.secondmate ? fleetCommands : [...fleetCommands, { command: "home", description: "Check or repair shared-code links for registered mates." }]
 				: fleetCommands,
 	};
 }
