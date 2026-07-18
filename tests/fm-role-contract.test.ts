@@ -91,11 +91,21 @@ describe("secondmate structural gate", () => {
 		const main = tempHome("fm-role-main-");
 		const sm = secondmateHome("kodiak", "Kodiak", "frontend", "Keel");
 		writeFileSync(join(sm, "data", "secondmates.md"), "fixture\n");
+		mkdirSync(join(main, "state"));
+		mkdirSync(join(main, "projects"));
 		try {
 			const before = readFileSync(join(sm, "data", "secondmates.md"), "utf8");
 			const result = spawnSync(FM, ["spawn", "new-sm", "--secondmate"], {
 				cwd: sm,
-				env: { ...process.env, FM_HOME: main },
+				env: {
+					...process.env,
+					FM_HOME: main,
+					FM_ROOT_OVERRIDE: main,
+					FM_STATE_OVERRIDE: join(main, "state"),
+					FM_DATA_OVERRIDE: join(main, "data"),
+					FM_PROJECTS_OVERRIDE: join(main, "projects"),
+					FM_CONFIG_OVERRIDE: join(main, "config"),
+				},
 				encoding: "utf8",
 			});
 			expect(result.status).toBe(1);
@@ -107,10 +117,17 @@ describe("secondmate structural gate", () => {
 		}
 	});
 
-	it("filters forbidden root help and still dispatches allowed local commands", () => {
+	it("filters forbidden root help and still dispatches allowed local commands inside the structural secondmate home", () => {
+		const main = tempHome("fm-role-main-");
 		const sm = secondmateHome("kodiak", "Kodiak", "frontend", "Keel");
 		const bin = join(sm, "bin");
+		const mainState = join(main, "state");
+		const smState = join(sm, "state");
 		mkdirSync(bin);
+		mkdirSync(mainState);
+		mkdirSync(smState);
+		mkdirSync(join(main, "projects"));
+		writeFileSync(join(mainState, ".lock"), "999999\n");
 		writeFileSync(join(bin, "ps"), "#!/bin/sh\nexit 1\n");
 		chmodSync(join(bin, "ps"), 0o755);
 		try {
@@ -118,13 +135,26 @@ describe("secondmate structural gate", () => {
 			expect(help.status).toBe(0);
 			expect(help.stdout).not.toContain("command: home");
 			expect(help.stdout).toContain("fleet update");
-			const state = join(sm, "state");
-			mkdirSync(state);
-			const allowed = spawnSync(FM, ["lock", "status"], { cwd: sm, env: { ...process.env, FM_STATE_OVERRIDE: state, PATH: `${bin}:${process.env.PATH ?? ""}` }, encoding: "utf8" });
+			const allowed = spawnSync(FM, ["lock", "status"], {
+				cwd: sm,
+				env: {
+					...process.env,
+					FM_HOME: main,
+					FM_ROOT_OVERRIDE: main,
+					FM_STATE_OVERRIDE: mainState,
+					FM_DATA_OVERRIDE: join(main, "data"),
+					FM_PROJECTS_OVERRIDE: join(main, "projects"),
+					FM_CONFIG_OVERRIDE: join(main, "config"),
+					PATH: `${bin}:${process.env.PATH ?? ""}`,
+				},
+				encoding: "utf8",
+			});
 			expect(allowed.status).toBe(0);
 			expect(allowed.stdout).toBe("lock: free\n");
-			expect(existsSync(join(state, ".lock"))).toBe(false);
+			expect(readFileSync(join(mainState, ".lock"), "utf8")).toBe("999999\n");
+			expect(existsSync(join(smState, ".lock"))).toBe(false);
 		} finally {
+			rmSync(main, { recursive: true, force: true });
 			rmSync(sm, { recursive: true, force: true });
 		}
 	});

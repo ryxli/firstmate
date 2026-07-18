@@ -49,6 +49,14 @@ async function main(): Promise<number> {
 	const argv = process.argv.slice(2);
 	const home = activeHome(fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, ""));
 	const secondmate = isSecondmateHome(home);
+	if (secondmate) {
+		process.env.FM_HOME = home;
+		delete process.env.FM_ROOT_OVERRIDE;
+		delete process.env.FM_STATE_OVERRIDE;
+		delete process.env.FM_DATA_OVERRIDE;
+		delete process.env.FM_PROJECTS_OVERRIDE;
+		delete process.env.FM_CONFIG_OVERRIDE;
+	}
 	if (!argv.length || argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
 		output(commandHelp("fm", { secondmate }));
 		return 0;
