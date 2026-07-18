@@ -517,6 +517,26 @@ echo "$out" | grep -qi 'did you mean' || fail "did-you-mean: top-level unknown v
 echo "$out" | grep -qF 'tasks' || fail "did-you-mean: expected 'tasks' to be suggested for 'tasx', got: $out"
 pass "an unknown top-level verb gets a structured did-you-mean naming tasks/task"
 
+# The cap explicitly rejected a `next` alias: the recursive scheduler lives
+# in `ready`, and `next` must not be advertised anywhere nor accepted as a
+# subcommand.
+home=$(fm_home)
+skeleton "$home"
+tasks_help=$(run_fm "$home" tasks --help)
+echo "$tasks_help" | grep -qw 'next' && fail "fm tasks --help must not advertise a next subcommand, got: $tasks_help"
+task_help=$(run_fm "$home" task --help)
+echo "$task_help" | grep -qw 'next' && fail "fm task --help must not advertise a next subcommand, got: $task_help"
+pass "fm tasks/fm task --help never advertises next; ready is the sole scheduler command"
+
+before=$(cat "$(backlog_of "$home")")
+out=$(run_fm "$home" tasks next)
+code=$?
+[ "$code" -ne 0 ] || fail "fm tasks next must fail (no next alias), got exit $code: $out"
+echo "$out" | grep -qF 'UNKNOWN_SUBCOMMAND' || fail "fm tasks next must be a structured UNKNOWN_SUBCOMMAND error, got: $out"
+after=$(cat "$(backlog_of "$home")")
+[ "$before" = "$after" ] || fail "fm tasks next must never mutate the backlog"
+pass "fm tasks next is a structured, non-mutating unknown-command error"
+
 # ---------------------------------------------------------------------------
 # free-form line preservation: prose lines and unrelated sections/items must
 # survive every mutation byte for byte.

@@ -910,7 +910,7 @@ async function run(argv: string[]): Promise<number> {
 
 	if (!sub) return cmdDashboard();
 	if (sub === "--help" || sub === "-h") {
-		process.stdout.write(`${toon({ command: "tasks", usage: "fm tasks [--fleet] [add|list|show|start|done|reopen|update|block|unblock|hold|unhold|ready|mv|prune|render|fleet|next]", commands: SUBCOMMANDS.map(name => ({ command: name, usage: HELP_TEXT[name] })) })}\n`);
+		process.stdout.write(`${toon({ command: "tasks", usage: "fm tasks [--fleet] [add|list|show|start|done|reopen|update|block|unblock|hold|unhold|ready|mv|prune|render|fleet]", commands: SUBCOMMANDS.map(name => ({ command: name, usage: HELP_TEXT[name] })) })}\n`);
 		return 0;
 	}
 	if (rest[0] === "--help" || rest[0] === "-h") {
@@ -968,6 +968,6 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "tasks",
-	describe: "Canonical backlog ledger + live fleet task system (add/list/show/start/done/reopen/update/block/unblock/hold/unhold/ready/mv/prune/render/fleet/next).",
+	describe: "Canonical backlog ledger + live fleet task system (add/list/show/start/done/reopen/update/block/unblock/hold/unhold/ready/mv/prune/render/fleet).",
 	run,
 };

@@ -635,7 +635,7 @@ export class BacklogStore {
 }
 
 // ---------------------------------------------------------------------------
-// Derived projections shared by `ready`/`list`/`show`/`next` (report §8 style:
+// Derived projections shared by `ready`/`list`/`show` (report §8 style:
 // blocked/ready/held are computed here, not stored).
 // ---------------------------------------------------------------------------
 
