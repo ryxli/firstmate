@@ -6,28 +6,12 @@ import {
 	findAgent,
 	findTask,
 	normalizeTaskState,
+	rankedTasks,
 } from "../../bridge/collect";
-import type { FleetSnapshot, TaskRow } from "../../bridge/fleet";
+import type { TaskRow } from "../../bridge/fleet";
 import { updateFleet } from "../../bridge/update";
 import { ambiguous, missing, operationalError, output, validationError } from "../common";
 import { commandHelp } from "../help";
-
-function taskKey(task: TaskRow): string {
-	return task.key ?? `${task.owner}/${task.id}`;
-}
-
-function rankedTasks(snapshot: FleetSnapshot, state?: TaskRow["state"]): TaskRow[] {
-	const attention = new Map((snapshot.attention ?? snapshot.pending).map((row, index) => [row.key ?? `${row.home}/${row.id}`, { rank: row.clsRank, index }]));
-	const stateRank: Record<TaskRow["state"], number> = { inflight: 3, queued: 2, done: 1 };
-	return snapshot.tasks
-		.filter(task => !state || task.state === state)
-		.slice()
-		.sort((a, b) => {
-			const aa = attention.get(taskKey(a));
-			const bb = attention.get(taskKey(b));
-			return (bb?.rank ?? stateRank[b.state]) - (aa?.rank ?? stateRank[a.state]) || (aa?.index ?? 9999) - (bb?.index ?? 9999) || taskKey(a).localeCompare(taskKey(b));
-		});
-}
 
 async function run(argv: string[]): Promise<number> {
 	if (argv.length === 1) {

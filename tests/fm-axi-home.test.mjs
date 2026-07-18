@@ -63,7 +63,7 @@ function assertRecord(record, expected) {
 function setupHome(home) {
   for (const directory of ["data", "state", "config", "projects"]) mkdirSync(join(home, directory), { recursive: true });
   writeFileSync(join(home, ".fm-secondmate-home"), "fixture secondmate\n");
-  for (const name of ["AGENTS.md", "sbin", ".agents", ".tasks.toml", ".claude", ".omp"]) {
+  for (const name of ["AGENTS.md", "sbin", ".agents", ".claude", ".omp"]) {
     symlinkSync(join(codeRoot, name), join(home, name));
   }
 }
@@ -71,7 +71,6 @@ function setupHome(home) {
 try {
   for (const directory of ["sbin", ".agents", ".claude", ".omp", ".omp/extensions"]) mkdirSync(join(codeRoot, directory), { recursive: true });
   writeFileSync(join(codeRoot, "AGENTS.md"), "fixture code root\n");
-  writeFileSync(join(codeRoot, ".tasks.toml"), "[tasks]\n");
   mkdirSync(join(firstmate, "sbin"), { recursive: true });
   writeFileSync(join(firstmate, "sbin", "fm-spawn.sh"), "");
   mkdirSync(join(firstmate, "data"), { recursive: true });

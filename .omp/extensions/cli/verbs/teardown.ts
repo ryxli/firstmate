@@ -27,9 +27,9 @@
 //   secondmate child work for kind=secondmate. Only use it when the cap has
 //   explicitly said to discard the work.
 //
-// The backlog reminder no longer branches on the (never-installed) external
-// tasks-axi tool: it always points at the native `fm task done` / `fm task
-// ready` subcommands (see verbs/task.ts).
+// The backlog reminder always points at the native `fm tasks done` /
+// `fm tasks ready` subcommands (see verbs/tasks.ts; `fm task` is its
+// explicit zero-ambiguity singular alias, verbs/task.ts).
 //
 // sbin/fm fleet-sync has itself been ported to the `fleet-sync` verb, so
 // the post-teardown refresh below shells out to `fm fleet-sync` rather than a
@@ -165,25 +165,24 @@ function defaultBranch(proj: string): string | null {
 }
 
 // backlogRefreshReminder: the reminder printed after a successful teardown.
-// Always points at the native `fm task` subcommands (verbs/task.ts) - the
-// former tasks-axi-compatible/manual-backlog branch is gone entirely.
+// Always points at the native `fm tasks` subcommands (verbs/tasks.ts).
 function backlogRefreshReminder(id: string, kind: string, mode: string, prUrl: string): string {
 	let doneCmd: string;
 	switch (kind) {
 		case "scout":
-			doneCmd = `fm task done ${id} --report data/${id}/report.md`;
+			doneCmd = `fm tasks done ${id} --report data/${id}/report.md`;
 			break;
 		case "secondmate":
-			doneCmd = `fm task done ${id} --note "retired"`;
+			doneCmd = `fm tasks done ${id} --note "retired"`;
 			break;
 		default:
 			if (mode === "local-only") {
-				doneCmd = `fm task done ${id} --note "local main"`;
+				doneCmd = `fm tasks done ${id} --note "local main"`;
 			} else {
-				doneCmd = `fm task done ${id} --pr ${prUrl || "PR_URL"}`;
+				doneCmd = `fm tasks done ${id} --pr ${prUrl || "PR_URL"}`;
 			}
 	}
-	return `Backlog: ${id} just finished. Run ${doneCmd}, then run fm task ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.`;
+	return `Backlog: ${id} just finished. Run ${doneCmd}, then run fm tasks ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.`;
 }
 
 // registryHomeForLine: extract the "home: <path>" field out of one

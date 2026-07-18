@@ -4,10 +4,10 @@
 // sbin/fm-identity-lib.sh, sbin/fm-herdr-lib.sh, sbin/fm-spawn-lib.sh, and
 // sbin/fm-tasks-axi-lib.sh. Their TS equivalents (lib/identity.ts,
 // lib/herdr.ts, lib/spawn.ts) are imported below.
-// The tasks-axi compatibility probe (fm-tasks-axi-lib.sh) has no standalone TS
-// port yet, so its version-gate logic is reproduced locally in
-// tasksAxiCompatible/tasksAxiVersionParts, used only by the best-effort
-// backlog bookkeeping in appendBacklogInflight.
+// Backlog bookkeeping (appendBacklogInflight) is unconditional: it always
+// records the dispatched task through the native `fm tasks add --start` verb
+// (verbs/tasks.ts) - the single executable task system - never an external
+// tool probe.
 //
 // Usage: fm spawn <task-id> <project-dir> [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>] [--crew-model=<model>]
 //        fm spawn <task-id> [<firstmate-home>] [harness|launch-command] --secondmate [--workspace=<id>] [--tab=<id>]
@@ -32,7 +32,6 @@
 
 import { spawnSync } from "node:child_process";
 import {
-	appendFileSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -364,31 +363,12 @@ function replaceSecondmateMetaWorkspace(metaPath: string, workspace: string, id:
 	}
 }
 
-// --- tasks-axi compatibility probe (best-effort backlog bookkeeping only) -----
-// Mirrors sbin/fm-tasks-axi-lib.sh: compatible means tasks-axi --version
-// reports 0.1.1 or newer.
-function tasksAxiVersionParts(): [number, number, number] | null {
-	const res = spawnSync("tasks-axi", ["--version"], { encoding: "utf8" });
-	if (res.error || typeof res.stdout !== "string") return null;
-	const m = res.stdout.match(/(\d+)\.(\d+)\.(\d+)/);
-	if (!m) return null;
-	return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-
-function tasksAxiCompatible(): boolean {
-	const parts = tasksAxiVersionParts();
-	if (!parts) return false;
-	const [major, minor, patch] = parts;
-	if (major > 0) return true;
-	if (major === 0 && minor > 1) return true;
-	if (major === 0 && minor === 1 && patch >= 1) return true;
-	return false;
-}
-
 // appendBacklogInflight: record a dispatched ship/scout task before returning
-// success. Best-effort: every failure path is swallowed (the caller never
-// lets this affect the spawn's own exit code), matching the bash `|| true`.
-function appendBacklogInflight(dataDir: string, fmHome: string, id: string, repo: string, kind: string): void {
+// success, via the native `fm tasks add --start` verb (verbs/tasks.ts) - the
+// single source of truth for backlog mutation. Best-effort: every failure
+// path is swallowed (the caller never lets this affect the spawn's own exit
+// code), matching the bash `|| true`.
+function appendBacklogInflight(dataDir: string, fmRoot: string, fmHome: string, id: string, repo: string, kind: string): void {
 	const backlog = `${dataDir}/backlog.md`;
 
 	try {
@@ -405,43 +385,13 @@ function appendBacklogInflight(dataDir: string, fmHome: string, id: string, repo
 	}
 
 	const text = readFileSync(backlog, "utf8");
-	if (new RegExp(`^- (\\[ \\] |\\*\\*)${id}( |\\*|-|$)`, "m").test(text)) return;
+	if (new RegExp(`^- \\[ \\] ${id}( |-|$)`, "m").test(text)) return;
 
-	if (existsSync(`${fmHome}/.tasks.toml`) && tasksAxiCompatible()) {
-		const res = spawnSync("tasks-axi", ["add", id, `${kind} task`, "--kind", kind, "--repo", repo, "--start"], {
-			cwd: fmHome,
-			stdio: "ignore",
-		});
-		if (res.status === 0) return;
-	}
-
-	const today = new Date().toISOString().slice(0, 10);
-	const line = `- [ ] ${id} - ${kind} task (repo: ${repo}, since ${today})`;
-
-	if (/^## In flight$/m.test(text)) {
-		const lines = text.split(/\r?\n/);
-		if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-		const out: string[] = [];
-		let inserted = false;
-		for (const l of lines) {
-			out.push(l);
-			if (l === "## In flight" && !inserted) {
-				out.push(line);
-				inserted = true;
-			}
-		}
-		try {
-			writeFileSync(backlog, out.map(l => `${l}\n`).join(""));
-		} catch {
-			// best-effort
-		}
-	} else {
-		try {
-			appendFileSync(backlog, `## In flight\n${line}\n`);
-		} catch {
-			// best-effort
-		}
-	}
+	spawnSync(join(fmRoot, "sbin", "fm"), ["tasks", "add", id, `${kind} task`, "--kind", kind, "--repo", repo, "--start"], {
+		cwd: fmHome,
+		env: { ...process.env, FM_HOME: fmHome },
+		stdio: "ignore",
+	});
 }
 
 // --- secondmate home validation ------------------------------------------------
@@ -1026,7 +976,7 @@ async function run(argv: string[]): Promise<number> {
 
 	if (kind !== "secondmate") {
 		try {
-			appendBacklogInflight(data, fmHome, id, basename(projAbs), kind);
+			appendBacklogInflight(data, fmRoot, fmHome, id, basename(projAbs), kind);
 		} catch {
 			// best-effort
 		}

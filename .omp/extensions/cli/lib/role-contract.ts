@@ -137,7 +137,8 @@ export function roleContractForHome(home: string, mainHome?: string): string {
 
 export function forbiddenInSecondmate(argv: string[]): string | null {
 	const verb = argv[0] ?? "";
-	if (["home", "home-seed", "update", "merge-local", "promote", "backlog-handoff", "link-ship-ext"].includes(verb)) return verb;
+	if (["home", "home-seed", "update", "merge-local", "promote", "link-ship-ext"].includes(verb)) return verb;
+	if ((verb === "tasks" || verb === "task") && argv[1] === "mv") return `${verb} mv`;
 	if (verb === "spawn" && argv.includes("--secondmate")) return "spawn --secondmate";
 	if (verb === "brief" && (argv.includes("--secondmate") || argv.includes("--regen") || argv.includes("--check"))) return "brief secondmate projection";
 	return null;

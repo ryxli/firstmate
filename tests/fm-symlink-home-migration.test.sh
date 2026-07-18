@@ -61,7 +61,6 @@ make_code_root() {
   mkdir -p "$dir/.agents/skills" "$dir/.claude" "$dir/.omp/extensions"
   printf '# Test code root\n' > "$dir/AGENTS.md"
   printf 'Compatibility link target\n' > "$dir/CLAUDE.md"
-  printf 'tasks\n' > "$dir/.tasks.toml"
   ln -s "$ROOT/sbin" "$dir/sbin"
   printf 'skill\n' > "$dir/.agents/skills/test.md"
   printf 'ext\n' > "$dir/.omp/extensions/test-ext.ts"
@@ -211,7 +210,7 @@ make_current_home() {
   code=$(canonical "$code")
   make_link_home "$code" "$home" "$id"
   rm -f "$home/.omp"
-  rm -f "$home/.agents" "$home/.claude" "$home/.tasks.toml"
+  rm -f "$home/.agents" "$home/.claude"
   mkdir -p "$home/.omp/extensions"
   for entry in "$code/.omp/extensions"/*; do
     [ -e "$entry" ] || continue

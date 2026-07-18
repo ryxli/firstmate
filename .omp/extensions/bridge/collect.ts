@@ -963,3 +963,26 @@ export function normalizeTaskState(value: string): BacklogSection | undefined {
 	if (value === "done") return "done";
 	return undefined;
 }
+
+function taskAttentionKey(task: TaskRow): string {
+	return task.key ?? `${task.owner}/${task.id}`;
+}
+
+/**
+ * Task list ranked by fleet attention first (cap-blocked/review-ready rows
+ * surface before ordinary state ordering), then by state, then id. Shared by
+ * `fm fleet tasks`/`fm fleet task get` and the `fm tasks fleet` facet so both
+ * surfaces stay byte-identical.
+ */
+export function rankedTasks(snapshot: FleetSnapshot, state?: TaskRow["state"]): TaskRow[] {
+	const attention = new Map((snapshot.attention ?? snapshot.pending).map((row, index) => [row.key ?? `${row.home}/${row.id}`, { rank: row.clsRank, index }]));
+	const stateRank: Record<TaskRow["state"], number> = { inflight: 3, queued: 2, done: 1 };
+	return snapshot.tasks
+		.filter(task => !state || task.state === state)
+		.slice()
+		.sort((a, b) => {
+			const aa = attention.get(taskAttentionKey(a));
+			const bb = attention.get(taskAttentionKey(b));
+			return (bb?.rank ?? stateRank[b.state]) - (aa?.rank ?? stateRank[a.state]) || (aa?.index ?? 9999) - (bb?.index ?? 9999) || taskAttentionKey(a).localeCompare(taskAttentionKey(b));
+		});
+}

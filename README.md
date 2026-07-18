@@ -60,7 +60,7 @@ Run `sbin/fm toolbelt` for the live, generated tool list.
 ## Configuration
 
 Shared orchestrator behavior lives in `AGENTS.md`.
-`AGENTS.md` section 2 documents `FM_HOME` and its override behavior, the environment variables that tune runtime timing, and the registry files (`data/projects.md`, `data/secondmates.md`, `data/cap.md`, `.tasks.toml`) that drive routing and backlog behavior.
+`AGENTS.md` section 2 documents `FM_HOME` and its override behavior, the environment variables that tune runtime timing, and the registry files (`data/projects.md`, `data/secondmates.md`, `data/cap.md`) that drive routing and backlog behavior; `data/backlog.md` itself is mutated exclusively through `fm tasks`.
 Personal fleet state under `data/`, `state/`, and `config/` is gitignored and never tracked.
 
 ## Development

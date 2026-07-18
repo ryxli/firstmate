@@ -60,8 +60,8 @@ This idle contract is encoded in the charter brief (section 11), so it travels w
 
 **Hand off in-scope backlog on creation.**
 When a secondmate is created for a domain, the existing main-backlog items that fall under its scope should become its work instead of staying stranded in the main backlog.
-Scope-matching is firstmate's judgment against the secondmate's natural-language scope, not a keyword rule: read `data/backlog.md`, pick the queued items that fit the new scope, and move them with `sbin/fm backlog-handoff <secondmate-id> <item-key>...`.
-The helper resolves the secondmate home from `data/secondmates.md` and mechanically moves each named item from the main `data/backlog.md` into the secondmate home's `data/backlog.md`, preserving the line and its section, so the item is neither duplicated nor lost.
+Scope-matching is firstmate's judgment against the secondmate's natural-language scope, not a keyword rule: read `data/backlog.md`, pick the queued items that fit the new scope, and move them with `fm tasks mv <item-key>... --to <secondmate-id>`.
+The verb resolves the secondmate home from `data/secondmates.md` and mechanically moves each named item from the main `data/backlog.md` into the secondmate home's `data/backlog.md`, preserving the line and its section byte-exact, so the item is neither duplicated nor lost.
 It refuses `## In flight` entries because active task ownership also lives in herdr and `state/`.
 It is idempotent (an item already in the secondmate backlog is skipped) and refuses any destination that is not a genuine seeded firstmate home with safe operational directories and a matching `.fm-secondmate-home` marker, so a move can never land in a project.
 Do not hand off `local-only` items: that work stays with the main firstmate (section 7).
@@ -140,7 +140,7 @@ If a secondmate's scope fits, steer that secondmate with one concise instruction
 The bare `fm-<id>` target resolves through this home's `state/<id>.meta`; pass a pane id directly only when intentionally targeting a pane outside this firstmate home.
 Do not spawn a direct crewmate for work that belongs to a secondmate scope unless the secondmate is blocked or the cap explicitly redirects it.
 If no secondmate scope fits, proceed in the main firstmate or create a new secondmate with the cap when that domain should become persistent.
-When you create a new secondmate, hand its in-scope queued items off from the main backlog into its home with `sbin/fm backlog-handoff` so it owns its domain's queue from day one (section 6).
+When you create a new secondmate, hand its in-scope queued items off from the main backlog into its home with `fm tasks mv` so it owns its domain's queue from day one (section 6).
 
 Then classify the shape:
 
@@ -244,8 +244,8 @@ sbin/fm teardown <id>
 The script refuses if the worktree holds unpushed work; treat a refusal as a stop-and-investigate, not an obstacle.
 Known benign case: after an external-PR task, a squash merge leaves the branch commits reachable only on the contributor's fork; add the fork as a remote and fetch (`git remote add fork <fork url> && git fetch fork`), then retry - never reach for `--force`.
 After a successful PR-based teardown, it also runs `sbin/fm fleet-sync` for that project, best-effort, so the clone's local default catches up to the merge and the just-merged branch, now gone on the remote and free of its worktree, is pruned immediately.
-Then update the backlog using the teardown reminder: run `tasks-axi done` when the compatible tool is available, otherwise move the task to Done in `data/backlog.md` manually with the full `https://...` PR URL or local merge note and date and keep Done to the 10 most recent.
-Re-evaluate the queue and dispatch only queued work whose blockers are gone and whose time/date gate, if any, has arrived.
+Then update the backlog using the teardown reminder: run `fm tasks done <id> --pr <url>` (or `--note "local main"`) - it auto-prunes Done to the 10 most recent, archiving the rest.
+Run `fm tasks ready` to re-evaluate the queue and dispatch only work whose blockers are gone and whose date/hold gate, if any, has cleared.
 
 ### Secondmate teardown (explicit only)
 
@@ -265,7 +265,7 @@ A scout task follows Intake, Spawn, and Supervise exactly as above - scaffold th
 - There is no Validate or PR-ready stage. When the crewmate's status says `done`, read `data/<id>/report.md`.
 - Relay the findings to the cap: plain chat for a focused answer, lavish-axi when the report has structure worth a visual (multiple findings, options, a plan).
 - Tear down immediately - no merge gate. `sbin/fm teardown` allows a scout worktree's scratch commits and dirty files once the report exists; if the report is missing, it refuses, because the findings are the work product.
-- Record it in Done with the report path instead of a PR link using `tasks-axi done` when compatible tasks-axi is available, otherwise hand-edit `data/backlog.md` and keep Done to the 10 most recent, then re-evaluate the queue and dispatch only queued work whose blockers are gone and whose time/date gate, if any, has arrived.
+- Record it in Done with the report path instead of a PR link: `fm tasks done <id> --report data/<id>/report.md`. Then run `fm tasks ready` to re-evaluate the queue and dispatch only work whose blockers are gone and whose date/hold gate, if any, has cleared.
 
 **Promotion.** When a scout's findings reveal shippable work (a reproduced bug with a clear fix) and the cap wants it shipped, promote the task in place instead of respawning: run `sbin/fm promote <id>` (flips `kind=` to ship in meta, restoring teardown's full protection), then send the crewmate its ship instructions - inventory scratch state, reset to a clean default-branch base, carry over only intended fix changes, create branch `fm/<id>`, implement, and report `done` according to the project's delivery mode.
 The crewmate keeps its worktree, loaded context, and repro, but the ship branch must start from a clean base with only intended changes; scratch commits and debug edits from the scout phase never ride along.
@@ -274,46 +274,50 @@ From there the task is an ordinary ship task through its mode-specific validatio
 
 ## 10. Backlog format
 
-`data/backlog.md` is the durable queue.
+`data/backlog.md` is the durable queue, mutated exclusively through `fm tasks` (`fm task` is the explicit zero-ambiguity singular alias - the same verb byte-for-byte).
 Update it on every dispatch, completion, and decision.
 
 ```markdown
 ## In flight
-- [ ] <id> - <one line> (repo: <name>, since <date>)
+- [ ] <id> - <one line> (repo: <name>) (since <date>)
 
 ## Queued
 - [ ] <id> - <one line> (repo: <name>) blocked-by: <id> - <reason>
 
 ## Done
 - [x] <id> - <one line> - <https://github.com/owner/repo/pull/number> (merged <date>)
-- [x] <id> - <one line> - local main (merged <date>)
+- [x] <id> - <one line> - local main (done <date>)
 - [x] <id> - <one line> - data/<id>/report.md (reported <date>)
 ```
 
-Re-evaluate Queued on every teardown and every heartbeat: anything whose blocker is gone and whose time/date gate, if any, has arrived gets dispatched.
+`fm tasks ready` is the recursive-scheduler command, not a bare listing: it fresh-reconciles the local backlog and the live fleet snapshot on every call - never a cached belief - lists everything whose blocker is Done and whose hold, if any, has cleared its date gate, AND returns exactly one scheduler `class` - `completion` (a lane is legitimately closed, i.e. delivery-mode landed, never just worker-reported done), `active_command` (the highest-priority independent ready work as `next_command`, plus every other ready id as `parallel_ready` so independent work is never serialized), `unblock_action` (what would unblock the highest-priority blocked or held item), or `failure` (evidence-backed, e.g. a malformed backlog) - never a fixed wait or a permission prompt.
+An empty local Queued section falls back to the same live-fleet reconciliation `fm tasks fleet` and `fm fleet` use.
 
 Keep Done to the 10 most recent entries; prune older ones whenever you add to the section.
 Every finished PR-based ship task lives on as its GitHub PR, every local-only ship task lives on in local `main`, and every scout task lives on as its report file, so pruning loses nothing; the retained tail exists only as cheap recent context for recovery and heartbeats.
 
-A tracked `.tasks.toml` at this repo root pins the `tasks-axi` markdown backend to `data/backlog.md`, with `done_keep = 10` and an archive at `data/done-archive.md`.
-When a compatible `tasks-axi` is on PATH, firstmate mutates the backlog through its verbs instead of hand-editing, with secondmate handoffs still going through the validated helper described in section 6.
-Compatible means the shared bootstrap probe accepts `tasks-axi --version` as 0.1.1 or newer.
-The `## In flight` / `## Queued` / `## Done` format above stays the contract: the verbs edit `data/backlog.md` in place, byte-exact, preserving whatever item forms the file already uses - the bold in-flight `- **<id>**` form, the `- [ ]`/`- [x]` queued and done forms, and `blocked-by: <id> - <reason>` - rather than reformatting them.
-Map firstmate's real backlog operations to the approved commands:
+`fm tasks` owns its own defaults directly (`data/backlog.md`, `data/done-archive.md`, `done_keep = 10`) - there is no config file and no external tool to detect.
+`fm tasks` edits `data/backlog.md` in place, byte-exact: a mutation touches only the targeted item's line(s), every other line - including untouched items and free-form (no-id) prose - is preserved byte-for-byte, and a cross-home `mv` relocates the moved item's original source lines verbatim rather than rewriting them.
+Map firstmate's real backlog operations to the canonical commands:
 
-- File an item: `tasks-axi add <id> "<one line>" --kind <ship|scout> --repo <name>`, plus `--start` for immediate dispatch (In flight) or the default queue placement, and `--blocked-by <id>` (repeatable) when it waits on another task.
-- Start an existing queued item: `tasks-axi start <id>` before dispatching work from Queued, after checking that blockers are gone and any time/date gate has arrived.
-- Move a finished task to Done: `tasks-axi done <id> --pr <url>` for a PR-based ship, `--report <path>` for a scout, or `--note "local main"` for a local-only merge.
-- Append a status note: `tasks-axi update <id> --append "<note>"`; replace fields with `--title`, `--body`, or `--body-file <path>`.
-- Manage dependencies: `tasks-axi block <id> --by <other>` and `tasks-axi unblock <id> --by <other>`, then `tasks-axi ready` to list queued work with no unresolved blockers.
+- File an item: `fm tasks add <id> "<one line>" --kind <ship|scout> --repo <name>`, plus `--start` for immediate dispatch (In flight) or the default queue placement, `--blocked-by <id>` (repeatable) when it waits on another task, and `--priority 0-4`.
+  Pass `--mint [--prefix <p>]` in place of an id to generate a `slug-xx` id from the title instead.
+- Start an existing queued item: `fm tasks start <id>` before dispatching work from Queued, after checking that blockers are gone and any hold has cleared (or just run `fm tasks ready`, which names the highest-priority ready item as `next_command`).
+- Move a finished task to Done: `fm tasks done <id> --pr <url>` for a PR-based ship, `--report <path>` for a scout, or `--note "local main"` for a local-only merge.
+- Reopen a task: `fm tasks reopen <id>` moves a Done or In-flight item back to Queued.
+- Update fields: `fm tasks update <id> --title "<text>"`; body notes are inspect-then-replace - read the current body with `show <id> --full`, then write the curated whole with `--body "<text>"` or `--body-file <path>` (`--archive-body` preserves the superseded body in `data/note-archive.md`); `--priority 0-4` re-ranks it.
+- Manage dependencies: `fm tasks block <id> --by <other>` and `fm tasks unblock <id> --by <other>`, then `fm tasks ready` to list queued work with no unresolved blocker and no active hold.
   This is a dependency check only; future-dated items still stay queued until their date arrives.
-- Read an item's full notes: `tasks-axi show <id> --full`.
-- Hand a task off to a secondmate home: keep using `sbin/fm backlog-handoff <secondmate-id> <item-key>...`; do not call bare `tasks-axi mv` for this path, because the helper resolves and validates the secondmate home before moving anything.
-- Normalize the file: `tasks-axi render` rewrites every id'd task in canonical form and leaves free-form lines untouched.
+- Pause dispatch without turning it into prose: `fm tasks hold <id> --reason "<text>" [--kind captain|external|load|parked|future] [--until YYYY-MM-DD]` and `fm tasks unhold <id>`; `fm tasks ready --include-held` reviews paused work in a separate group.
+- Read an item's full notes: `fm tasks show <id> --full`.
+- Hand a task off to a secondmate home: `fm tasks mv <id> [<id>...] --to <secondmate-id>` - it resolves and validates the secondmate home exactly as the retired `fm backlog-handoff` verb did (which it absorbed and replaced), refuses `## In flight` entries, and refuses a move that would strand a `blocked-by` edge across the two files unless the whole connected set moves together.
+  `mv` is main-home-only; a secondmate cannot run it against a sibling.
+- Normalize the file: `fm tasks render` rewrites every id'd task in canonical form and leaves free-form lines untouched.
 
-`tasks-axi done` auto-prunes Done to `done_keep = 10` and archives the pruned entries to `data/done-archive.md`, which supersedes the manual "keep Done to the 10 most recent" pruning above: when compatible `tasks-axi` is present you do not hand-prune Done, and nothing is lost because pruned entries are archived rather than deleted.
-When `tasks-axi` is absent or fails the compatibility probe, every firstmate home (main and each secondmate) hand-edits `data/backlog.md` exactly as this section describes, including the manual Done pruning.
-Secondmates inherit this automatically: each secondmate home carries the same `AGENTS.md` and its own `.tasks.toml`, so the same present-or-absent rule applies in every home with no separate setup.
+`fm tasks done` auto-prunes Done to `done_keep = 10` and archives the pruned entries to `data/done-archive.md`, which supersedes the manual "keep Done to the 10 most recent" pruning above; run `fm tasks prune [--keep N] [--state queued|in-flight|done]` directly for an out-of-band prune.
+Secondmates inherit this automatically: `fm tasks` in a secondmate home always operates on that home's own `data/backlog.md`.
+The live fleet facet - the ranked view across every registered home, not just this one's backlog - is `fm tasks fleet [--state <in-flight|queued|done>]` or `fm tasks fleet get <id>` (also reachable as `fm fleet tasks` / `fm fleet task get <id>`, which reuse the identical collector, so the two surfaces never drift).
+Output is TOON, content-first: bare `fm tasks` (or `fm task`) prints a dashboard (in-flight/queued tables, summary counts, next-step hints); every mutation leads with a terse `ok:` confirmation line; an unknown subcommand gets a structured did-you-mean and runs nothing.
 
 **Productivity log.** Firstmate maintains a weekly productivity log at `data/productivity-log.md` (local, gitignored, temporary - may migrate to an external system).
 Update it on task teardown with cycle time and escalation count; close each week's entry at the first session of the following Monday.
@@ -334,7 +338,7 @@ If you scaffold without `FM_SECONDMATE_CHARTER`, replace the `{TASK}` placeholde
 Keep each charter to about 40 lines or fewer and focused only on the persistent responsibility, available project clones, escalation path, and definition of done; fleet-wide discipline belongs here once, not in every charter.
 The scaffold's definition of done encodes the idle-by-default contract (section 6): on startup the secondmate reconciles only its own in-flight work and then waits for routed tasks, never self-initiating a survey or audit; preserve that wording when filling the charter.
 `sbin/fm home-seed` copies the charter into the secondmate home as `data/charter.md`; `sbin/fm spawn --secondmate` launches it through the same launch-template path.
-After seeding, hand the new secondmate's in-scope queued items off from the main backlog with `sbin/fm backlog-handoff` (section 6).
+After seeding, hand the new secondmate's in-scope queued items off from the main backlog with `fm tasks mv` (section 6).
 `sbin/fm home-seed` refuses to copy a missing or placeholder charter.
 Once seeded, `data/secondmates.md` becomes the source of truth for that secondmate's identity and scope: do not hand-edit `data/<id>/brief.md` or `<home>/data/charter.md` again except inside their one mate-owned section.
 Update the registry line instead, then run `sbin/fm brief --regen <id>` to regenerate both projections and `sbin/fm brief --check <id>` to confirm they match what the registry generates.

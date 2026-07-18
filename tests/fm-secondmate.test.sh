@@ -1165,7 +1165,6 @@ test_secondmate_spawn_repairs_shared_links() {
 
   { [ ! -e "$subhome/CLAUDE.md" ] && [ ! -L "$subhome/CLAUDE.md" ]; } \
     || fail "link repair recreated CLAUDE.md"
-  [ -L "$subhome/.tasks.toml" ] || fail "link repair did not restore .tasks.toml link"
   grep -F -- '--workspace w-link' "$log" >/dev/null || fail "repaired home did not launch"
   pass "secondmate spawn repairs shared code links"
 }
@@ -2089,7 +2088,7 @@ test_secondmate_charter_brief_is_idle_by_default() {
   pass "secondmate charter brief is idle by default and does not self-initiate work"
 }
 
-test_backlog_handoff_moves_in_scope_items() {
+test_tasks_mv_moves_in_scope_items() {
   local home subhome subhome_abs out before
   home="$TMP_ROOT/handoff-main"
   subhome="$TMP_ROOT/handoff-sub"
@@ -2110,10 +2109,10 @@ test_backlog_handoff_moves_in_scope_items() {
 - [x] old-task - shipped thing - local main (merged 2026-06-19)
 EOF
 
-  out=$(FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff design feat-x feat-y) \
-    || fail "handoff failed for in-scope items"
-  printf '%s\n' "$out" | grep -F 'handed off 2 item(s) to design' >/dev/null \
-    || fail "handoff did not report the moved items"
+  out=$(FM_HOME="$home" "$ROOT/sbin/fm" tasks mv feat-x feat-y --to design) \
+    || fail "mv failed for in-scope items"
+  printf '%s\n' "$out" | grep -F 'mv feat-x feat-y ->' >/dev/null \
+    || fail "mv did not report the moved items"
 
   # Moved items leave the main backlog; untouched items stay.
   grep -F 'feat-x' "$home/data/backlog.md" >/dev/null && fail "feat-x was not removed from the main backlog"
@@ -2121,17 +2120,17 @@ EOF
   grep -F 'bug-z' "$home/data/backlog.md" >/dev/null || fail "out-of-scope bug-z was wrongly removed from the main backlog"
   grep -F 'live-task' "$home/data/backlog.md" >/dev/null || fail "in-flight item was wrongly removed from the main backlog"
 
-  # Moved items arrive in the secondmate backlog, verbatim and under their section.
+  # Moved items arrive in the secondmate backlog, byte-exact and under their section.
   grep -F -- '- [ ] feat-x - add feature x (repo: alpha)' "$subhome/data/backlog.md" >/dev/null \
-    || fail "feat-x did not arrive verbatim in the secondmate backlog"
+    || fail "feat-x did not arrive byte-exact in the secondmate backlog"
   grep -F -- '- [ ] feat-y - add feature y (repo: beta) blocked-by: feat-x - waits' "$subhome/data/backlog.md" >/dev/null \
-    || fail "feat-y line was not preserved verbatim in the secondmate backlog"
+    || fail "feat-y line was not preserved byte-exact in the secondmate backlog"
   awk '/^## Queued/{q=1;next} /^## /{q=0} q && /feat-x/{found=1} END{exit found?0:1}' "$subhome/data/backlog.md" \
     || fail "feat-x did not land under the Queued section in the secondmate backlog"
 
   # Idempotent re-run: no error, no duplication, main untouched.
   before=$(cat "$home/data/backlog.md")
-  FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff design feat-x feat-y >/dev/null 2>&1 \
+  FM_HOME="$home" "$ROOT/sbin/fm" tasks mv feat-x feat-y --to design >/dev/null 2>&1 \
     || fail "idempotent re-run failed"
   [ "$(grep -cF -- '- [ ] feat-x - add feature x (repo: alpha)' "$subhome/data/backlog.md")" -eq 1 ] \
     || fail "idempotent re-run duplicated feat-x in the secondmate backlog"
@@ -2139,28 +2138,28 @@ EOF
 
   # A key matching neither backlog aborts atomically: nothing moves.
   before=$(cat "$home/data/backlog.md")
-  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff design bug-z no-such-key >/dev/null 2>&1; then
-    fail "handoff succeeded despite an unmatched key"
+  if FM_HOME="$home" "$ROOT/sbin/fm" tasks mv bug-z no-such-key --to design >/dev/null 2>&1; then
+    fail "mv succeeded despite an unmatched key"
   fi
-  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "handoff with an unmatched key still mutated the main backlog"
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "mv with an unmatched key still mutated the main backlog"
   grep -F 'bug-z' "$home/data/backlog.md" >/dev/null || fail "atomic abort lost the valid bug-z item from the main backlog"
 
   before=$(cat "$home/data/backlog.md")
-  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff design live-task >/dev/null 2>&1; then
-    fail "handoff accepted an in-flight backlog item"
+  if FM_HOME="$home" "$ROOT/sbin/fm" tasks mv live-task --to design >/dev/null 2>&1; then
+    fail "mv accepted an in-flight backlog item"
   fi
-  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "handoff with an in-flight key mutated the main backlog"
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "mv with an in-flight key mutated the main backlog"
   grep -F 'live-task' "$home/data/backlog.md" >/dev/null || fail "in-flight refusal lost the live task"
   grep -F 'live-task' "$subhome/data/backlog.md" >/dev/null && fail "in-flight refusal copied the live task"
 
   # An unregistered secondmate is refused.
-  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff ghost bug-z >/dev/null 2>&1; then
-    fail "handoff accepted an unregistered secondmate id"
+  if FM_HOME="$home" "$ROOT/sbin/fm" tasks mv bug-z --to ghost >/dev/null 2>&1; then
+    fail "mv accepted an unregistered secondmate id"
   fi
-  pass "fm-backlog-handoff moves in-scope items, is idempotent, and aborts safely"
+  pass "fm tasks mv moves in-scope items, is idempotent, and aborts safely"
 }
 
-test_backlog_handoff_creates_absent_section_and_refuses_non_secondmate_home() {
+test_tasks_mv_creates_absent_section_and_refuses_non_secondmate_home() {
   local home subhome subhome_abs projhome projhome_abs markerhome markerhome_abs symlinkhome symlinkhome_abs outside
   home="$TMP_ROOT/handoff-safety-main"
   subhome="$TMP_ROOT/handoff-safety-sub"
@@ -2170,45 +2169,61 @@ test_backlog_handoff_creates_absent_section_and_refuses_non_secondmate_home() {
   outside="$TMP_ROOT/handoff-safety-outside"
   mkdir -p "$home/data" "$home/state"
 
-  # A Done item handed into a secondmate backlog lacking a Done section gets one.
+  # A Done item moved into a secondmate backlog lacking a Done section gets one.
   seed_secondmate_home_marker "$subhome" archive
   subhome_abs=$(cd "$subhome" && pwd -P)
   printf '## Queued\n- [ ] keep-me - stays (repo: alpha)\n' > "$subhome/data/backlog.md"
   printf -- '- archive - archival (home: %s; scope: archival; projects: alpha; added 2026-06-22)\n' "$subhome_abs" > "$home/data/secondmates.md"
   cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+
 ## Done
 - [x] shipped-task - shipped thing - local main (merged 2026-06-19)
 EOF
-  FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff archive shipped-task >/dev/null \
-    || fail "handoff of a Done item failed"
+  FM_HOME="$home" "$ROOT/sbin/fm" tasks mv shipped-task --to archive >/dev/null \
+    || fail "mv of a Done item failed"
   grep -F '## Done' "$subhome/data/backlog.md" >/dev/null \
-    || fail "handoff did not create the missing Done section in the secondmate backlog"
+    || fail "mv did not create the missing Done section in the secondmate backlog"
   awk '/^## Done/{d=1;next} /^## /{d=0} d && /shipped-task/{found=1} END{exit found?0:1}' "$subhome/data/backlog.md" \
     || fail "Done item did not land under the created Done section"
-  grep -F 'keep-me' "$subhome/data/backlog.md" >/dev/null || fail "handoff clobbered the existing secondmate backlog content"
+  grep -F 'keep-me' "$subhome/data/backlog.md" >/dev/null || fail "mv clobbered the existing secondmate backlog content"
 
   # A registered home that is not a seeded secondmate home (e.g. a project clone)
   # is refused, and nothing is written into it.
   make_git_project "$projhome"
   projhome_abs=$(cd "$projhome" && pwd -P)
   printf -- '- proj-sm - bogus (home: %s; scope: bogus; projects: alpha; added 2026-06-22)\n' "$projhome_abs" >> "$home/data/secondmates.md"
-  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff proj-sm shipped-task >/dev/null 2>&1; then
-    fail "handoff wrote into a destination that is not a seeded secondmate home"
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+
+## Done
+- [x] shipped-task - shipped thing - local main (merged 2026-06-19)
+EOF
+  if FM_HOME="$home" "$ROOT/sbin/fm" tasks mv shipped-task --to proj-sm >/dev/null 2>&1; then
+    fail "mv wrote into a destination that is not a seeded secondmate home"
   fi
-  [ ! -e "$projhome/data/backlog.md" ] || fail "handoff created a backlog inside a non-secondmate home"
+  [ ! -e "$projhome/data/backlog.md" ] || fail "mv created a backlog inside a non-secondmate home"
 
   mkdir -p "$markerhome/data"
   markerhome_abs=$(cd "$markerhome" && pwd -P)
   printf 'marker-sm\n' > "$markerhome/.fm-secondmate-home"
   printf -- '- marker-sm - bogus (home: %s; scope: bogus; projects: alpha; added 2026-06-22)\n' "$markerhome_abs" >> "$home/data/secondmates.md"
   cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
 ## Queued
 - [ ] marker-task - should not move (repo: alpha)
+
+## Done
 EOF
-  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff marker-sm marker-task >/dev/null 2>&1; then
-    fail "handoff accepted a marker-only directory as a secondmate home"
+  if FM_HOME="$home" "$ROOT/sbin/fm" tasks mv marker-task --to marker-sm >/dev/null 2>&1; then
+    fail "mv accepted a marker-only directory as a secondmate home"
   fi
-  [ ! -e "$markerhome/data/backlog.md" ] || fail "handoff wrote into a marker-only directory"
+  [ ! -e "$markerhome/data/backlog.md" ] || fail "mv wrote into a marker-only directory"
   grep -F 'marker-task' "$home/data/backlog.md" >/dev/null || fail "marker-only refusal lost the main backlog item"
 
   seed_secondmate_home_marker "$symlinkhome" symlink-sm
@@ -2218,15 +2233,19 @@ EOF
   ln -s "$outside" "$symlinkhome/data"
   printf -- '- symlink-sm - bogus (home: %s; scope: bogus; projects: alpha; added 2026-06-22)\n' "$symlinkhome_abs" >> "$home/data/secondmates.md"
   cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
 ## Queued
 - [ ] symlink-task - should not move (repo: alpha)
+
+## Done
 EOF
-  if FM_HOME="$home" "$ROOT/sbin/fm" backlog-handoff symlink-sm symlink-task >/dev/null 2>&1; then
-    fail "handoff accepted a secondmate home with data outside the home"
+  if FM_HOME="$home" "$ROOT/sbin/fm" tasks mv symlink-task --to symlink-sm >/dev/null 2>&1; then
+    fail "mv accepted a secondmate home with data outside the home"
   fi
-  [ ! -e "$outside/backlog.md" ] || fail "handoff wrote through a symlinked secondmate data directory"
+  [ ! -e "$outside/backlog.md" ] || fail "mv wrote through a symlinked secondmate data directory"
   grep -F 'symlink-task' "$home/data/backlog.md" >/dev/null || fail "symlink refusal lost the main backlog item"
-  pass "fm-backlog-handoff creates absent sections and refuses unsafe homes"
+  pass "fm tasks mv creates absent sections and refuses unsafe homes"
 }
 
 test_home_seed_ship_extensions_linked() {
@@ -2480,8 +2499,8 @@ test_secondmate_force_teardown_refuses_unregistered_child_worktree
 test_secondmate_teardown_refuses_home_ancestor
 test_secondmate_teardown_refuses_home_descendants
 test_secondmate_charter_brief_is_idle_by_default
-test_backlog_handoff_moves_in_scope_items
-test_backlog_handoff_creates_absent_section_and_refuses_non_secondmate_home
+test_tasks_mv_moves_in_scope_items
+test_tasks_mv_creates_absent_section_and_refuses_non_secondmate_home
 test_home_seed_ship_extensions_linked
 test_home_seed_ship_extensions_idempotent
 test_home_seed_ship_extensions_skips_real_file

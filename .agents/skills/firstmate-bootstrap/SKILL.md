@@ -23,11 +23,8 @@ Otherwise it prints one line per problem or capability fact; handle each:
 - `NEEDS_GH_AUTH` - ask the cap to run `! gh auth login` (interactive; you cannot run it for them).
 - `CREW_HARNESS_OVERRIDE: <name>` - record and use the override silently; surface a harness fact only if it actually blocks work or the cap asks.
 - `FLEET_SYNC: <repo>: skipped: <reason>` - bootstrap continued; investigate only if the dirty, diverged, or offline clone blocks work.
-- `TASKS_AXI: available` - an optional capability fact, not a problem; record it silently and never surface it to the cap.
-  Bootstrap prints this only after the `tasks-axi` compatibility probe passes for version 0.1.1 or newer.
-  When a compatible `tasks-axi` is on PATH, firstmate routes routine `data/backlog.md` mutations through its verbs instead of hand-editing the file, exactly as `skill://firstmate-task-lifecycle` describes.
-  When `tasks-axi` is absent or fails the compatibility probe, firstmate hand-edits `data/backlog.md` exactly as before, so the silent guarantee that backlog bookkeeping keeps working holds either way.
-  It is never a missing tool to install: its absence or incompatibility only falls back to hand-editing and never blocks work.
+- `TASKS: native` - bootstrap always prints this; `fm tasks` (see `skill://firstmate-task-lifecycle`) is the single, unconditional backlog mutation surface, never an optional external-tool probe.
+  Record it silently and never surface it to the cap.
 
 Bootstrap's fleet refresh is bounded by `FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT` seconds, default 20; a timeout is reported as a `FLEET_SYNC` skip and does not block startup.
 

@@ -142,22 +142,22 @@ test_local_only_fork_remote_allows() {
   pass "local-only worktree with HEAD on a fork remote is torn down (fix holds)"
 }
 
-test_teardown_prompts_fm_task_done_with_pr() {
+test_teardown_prompts_fm_tasks_done_with_pr() {
   local case_dir out
   case_dir=$(make_case fm-task-reminder)
   write_meta "$case_dir" no-mistakes ship
   printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$case_dir/state/task-x1.meta"
 
   out=$(run_teardown "$case_dir") || fail "teardown failed"
-  printf '%s\n' "$out" | grep -F 'fm task done task-x1 --pr https://github.com/example/repo/pull/7' >/dev/null \
-    || fail "teardown did not prompt fm task done: $out"
-  printf '%s\n' "$out" | grep -F 'fm task ready' >/dev/null \
-    || fail "teardown did not prompt fm task ready: $out"
+  printf '%s\n' "$out" | grep -F 'fm tasks done task-x1 --pr https://github.com/example/repo/pull/7' >/dev/null \
+    || fail "teardown did not prompt fm tasks done: $out"
+  printf '%s\n' "$out" | grep -F 'fm tasks ready' >/dev/null \
+    || fail "teardown did not prompt fm tasks ready: $out"
   printf '%s\n' "$out" | grep -F 'check date gates' >/dev/null \
     || fail "teardown did not preserve date-gate check: $out"
   printf '%s\n' "$out" | grep -F 'keep Done to the 10 most recent' >/dev/null \
     && fail "teardown printed the retired manual Done-pruning prompt: $out"
-  pass "teardown prompts native fm task backlog refresh with the PR"
+  pass "teardown prompts native fm tasks backlog refresh with the PR"
 }
 
 test_local_only_truly_unpushed_refuses() {
@@ -253,7 +253,7 @@ test_local_only_force_overrides_unpushed() {
 }
 
 test_local_only_fork_remote_allows
-test_teardown_prompts_fm_task_done_with_pr
+test_teardown_prompts_fm_tasks_done_with_pr
 test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows

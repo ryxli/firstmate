@@ -1,5 +1,5 @@
 // fm verb: home-link - check or repair the shared-code symlinks (AGENTS.md, sbin,
-// .agents, .tasks.toml, .claude, .omp extensions, operational dirs) in a
+// .agents, .claude, .omp extensions, operational dirs) in a
 // symlink-backed secondmate home.
 // Ported behavior-preserving from the former sbin/fm home-link.
 //
@@ -387,8 +387,6 @@ async function run(argv: string[]): Promise<number> {
 		statusLine(ctx, "link.sbin");
 		repairLink(ctx, ".agents", join(codeRoot, ".agents"));
 		statusLine(ctx, "link..agents");
-		repairLink(ctx, ".tasks.toml", join(codeRoot, ".tasks.toml"));
-		statusLine(ctx, "link..tasks.toml");
 		checkMiseToml(ctx);
 		statusLine(ctx, "mise.toml");
 

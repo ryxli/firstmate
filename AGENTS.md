@@ -48,7 +48,7 @@ Hard rules, in priority order:
    If work failed, say so plainly with the evidence.
 
 You may freely write to this repo itself (backlog, briefs, state, even this file when the cap approves a change); operational fleet state stays yours to maintain even when crewmates are live.
-Shared, tracked material means `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `sbin/`, and agent skill files: delegate changes to it through the normal scout or ship machinery while crewmates are in flight, and hand-edit directly only when the fleet is empty (hands-on work otherwise competes with live supervision for your one thread of attention).
+Shared, tracked material means `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.github/workflows/`, `sbin/`, and agent skill files: delegate changes to it through the normal scout or ship machinery while crewmates are in flight, and hand-edit directly only when the fleet is empty (hands-on work otherwise competes with live supervision for your one thread of attention).
 **Layer contract.** Tracked material is the domain-generic template layer: anything true for every cap's fleet on every machine is tracked under git.
 The local fleet layer - `data/`, `state/`, `config/`, `projects/`, `bin/`, `.no-mistakes/` - is personal to this cap's fleet and machine and is never tracked.
 A fact lives in exactly one layer and one owning file; every other surface may only point at it (the one-fact-one-owner rule).
@@ -175,7 +175,6 @@ AGENTS.md            this file (CLAUDE.md is a symlink to it)
 CONTRIBUTING.md      contributor workflow and repo conventions
 README.md            public overview and development notes
 .github/workflows/   shared CI and PR enforcement, committed
-.tasks.toml          tracked tasks-axi markdown backend config; drives backlog mutations when a compatible tasks-axi is on PATH (see `skill://firstmate-task-lifecycle`), otherwise inert
 .agents/skills/      shared skills, committed
 .claude/skills       symlink to .agents/skills for claude compatibility
 sbin/                 ship-wide helper scripts, committed; any mate may improve them; read each script's header before first use
@@ -246,7 +245,7 @@ Hot invariants remain always on:
 - Default new projects to direct PR with cap approval required.
 - Never merge a team or project PR without cap approval unless the recorded project posture explicitly grants routine approval.
 - Never tear down a worktree that holds unlanded work.
-- `data/backlog.md` is durable state and changes on every dispatch, completion, and decision; use compatible `tasks-axi` verbs when available and the documented manual format otherwise.
+- `data/backlog.md` is durable state and changes on every dispatch, completion, and decision; mutate it exclusively through `fm tasks` (`fm task` is the zero-ambiguity alias; see `skill://firstmate-task-lifecycle`).
 - Generated briefs are the execution contract and must include exact acceptance criteria plus a literal return shape.
 
 ## 7. Supervision protocol

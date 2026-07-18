@@ -15,7 +15,7 @@
 
 import { readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { output, validationError } from "../.omp/extensions/cli/common";
+import { didYouMean, output, validationError } from "../.omp/extensions/cli/common";
 import { commandHelp } from "../.omp/extensions/cli/help";
 import { activeHome, forbiddenInSecondmate, isSecondmateHome } from "../.omp/extensions/cli/lib/role-contract";
 
@@ -76,7 +76,8 @@ async function main(): Promise<number> {
 	const verbs = await loadVerbs();
 	const verb = verbs.find(candidate => candidate.name === argv[0]);
 	if (!verb) {
-		return validationError(`Unknown command: ${argv[0]}`, ["Run `fm --help` for available commands."]);
+		const suggestions = didYouMean(verbs.map(candidate => candidate.name), argv[0]);
+		return validationError(`Unknown command: ${argv[0]}`, suggestions.length > 0 ? [`Did you mean: ${suggestions.join(", ")}?`] : ["Run `fm --help` for available commands."]);
 	}
 	return await verb.run(argv);
 }
