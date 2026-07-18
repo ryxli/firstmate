@@ -1,21 +1,22 @@
 // fm verb: start - launch a fresh interactive firstmate session with zero typing.
 //
-// Runs omp from the active firstmate home so home-local identity and instructions
-// load for persistent supervisors. Without FM_HOME, falls back to the repo root
-// so project-dir discovery picks up the ship extensions and .omp/config.yml.
-// With no arguments it sends the standard kickoff message so AGENTS.md's
-// session-start sequence begins immediately; any arguments are passed through
-// to omp verbatim instead (e.g. `fm start -c` to continue the previous session).
+// Runs OMP from the active home so home-local identity and instructions load.
+// Main-firstmate startup executes deterministic checks before OMP, then opens
+// idle with one visible static fleet message already in developer context.
+// Secondmate homes preserve their existing startup prompt and cached context.
+// Explicit arguments are passed through to OMP verbatim.
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { lockSnapshot, removeLockIfOwner, resolveLockPaths, sleepMs, withLockClaim, writeLockOwner } from "../lib/session-lock";
+import { homeFromCwd } from "../lib/root";
+import { FM_START_STATIC_CONTEXT_ENV, mainHomeStructurally, registryBlock, runStartupContext } from "../lib/startup-context";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
-const KICKOFF = "Session start: run your session-start sequence, then report fleet status.";
+const LEGACY_KICKOFF = "Session start: run your session-start sequence, then report fleet status.";
 const DEFAULT_LOCK_WAIT_TIMEOUT_MS = 300_000;
 const LOCK_POLL_MS = 100;
 
@@ -34,13 +35,12 @@ const PRELOAD_SKILLS = ["firstmate-bootstrap", "firstmate-recovery"];
 // instead of N tool-reads scattered through the first turns.
 const PRELOAD_REGISTRIES = ["data/projects.md", "data/secondmates.md", "data/cap.md"];
 
-function preloadBlock(): string {
+function legacyPreloadBlock(home: string): string {
 	const parts = ["# Preloaded skills", "The following mandatory session-start skills are already loaded in full - run them directly, never re-read them via a skill tool or file read."];
 	for (const name of PRELOAD_SKILLS) {
 		const path = join(REPO_ROOT, ".agents", "skills", name, "SKILL.md");
 		parts.push(`## skill://${name}\n\n${readFileSync(path, "utf8").trim()}`);
 	}
-	const home = process.env.FM_HOME?.trim() || REPO_ROOT;
 	const registries: string[] = [];
 	for (const rel of PRELOAD_REGISTRIES) {
 		try {
@@ -55,6 +55,20 @@ function preloadBlock(): string {
 	return parts.join("\n\n");
 }
 
+function mainPreloadBlock(home: string): string {
+	const parts = [
+		"# Startup preflight",
+		"`fm start` already ran bootstrap, identity migration/check, home link check/repair when needed, Lavish recovery, and one fleet snapshot before launching this OMP process.",
+		"Bootstrap and recovery procedure bodies are not preloaded in this default context.",
+		"The static fleet representation is delivered as one visible `fm-start-static` session-start message. Treat it as static as of its embedded `static_as_of` timestamp, and refresh live state explicitly before acting on later changes.",
+	];
+	const registries = registryBlock(home, REPO_ROOT);
+	if (registries.length > 0) {
+		parts.push("# Preloaded fleet registries", "Stable desired context loaded at session launch. Live state is owned by the static fleet representation above until refreshed.", ...registries);
+	}
+	return parts.join("\n\n");
+}
+
 function envMs(name: string, fallbackMs: number): number {
 	const raw = process.env[name]?.trim();
 	if (!raw) return fallbackMs;
@@ -63,8 +77,8 @@ function envMs(name: string, fallbackMs: number): number {
 	return Math.floor(seconds * 1000);
 }
 
-function childEnv(): NodeJS.ProcessEnv {
-	const env = { ...process.env };
+function childEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+	const env = { ...process.env, ...extra };
 	delete env.FM_SUPERVISED_SUCCESSOR;
 	return env;
 }
@@ -95,13 +109,13 @@ function terminateChild(child: ReturnType<typeof spawn>): void {
 	}
 }
 
-function startReservedChild(ompArgs: string[], cwd: string): ReservedLaunch {
+function startReservedChild(ompArgs: string[], cwd: string, env: NodeJS.ProcessEnv): ReservedLaunch {
 	const paths = resolveLockPaths();
 	const gate = join(paths.state, `.fm-start-gate-${process.pid}-${Date.now()}`);
 	const child = spawn("/bin/sh", ["-c", "gate=$1; shift; while [ ! -e \"$gate\" ]; do sleep 0.01; done; exec omp \"$@\"", "fm-start-gate", gate, ...ompArgs], {
 		cwd,
 		stdio: "inherit",
-		env: childEnv(),
+		env,
 	});
 	if (child.pid === undefined) {
 		terminateChild(child);
@@ -149,7 +163,7 @@ async function waitForReservedChild(launch: ReservedLaunch): Promise<number> {
 	return status;
 }
 
-async function waitAndLaunch(ompArgs: string[], cwd: string): Promise<number> {
+async function waitAndLaunch(ompArgs: string[], cwd: string, beforeLaunch?: () => Promise<boolean>, launchEnv?: () => NodeJS.ProcessEnv): Promise<number> {
 	const paths = resolveLockPaths();
 	const deadlineMs = Date.now() + envMs("FM_START_LOCK_WAIT_TIMEOUT_SECS", DEFAULT_LOCK_WAIT_TIMEOUT_MS);
 	let announced = false;
@@ -172,8 +186,10 @@ async function waitAndLaunch(ompArgs: string[], cwd: string): Promise<number> {
 			const launched = await withLockClaim(paths, deadlineMs, async () => {
 				const claimedSnapshot = lockSnapshot(paths);
 				if (claimedSnapshot.state === "live") return undefined;
-				return startReservedChild(ompArgs, cwd);
+				if (beforeLaunch && !await beforeLaunch()) return false;
+				return startReservedChild(ompArgs, cwd, launchEnv ? launchEnv() : childEnv());
 			});
+			if (launched === false) return 1;
 			if (launched !== undefined) return await waitForReservedChild(launched);
 		} catch (error) {
 			process.stderr.write(`fm start: ${(error as Error).message}; no omp process launched\n`);
@@ -182,10 +198,41 @@ async function waitAndLaunch(ompArgs: string[], cwd: string): Promise<number> {
 	}
 }
 
+async function legacyRun(argv: string[], home: string): Promise<number> {
+	const args = argv.slice(1);
+	const ompArgs = [`--append-system-prompt=${legacyPreloadBlock(home)}`, ...(args.length > 0 ? args : [LEGACY_KICKOFF])];
+	return await waitAndLaunch(ompArgs, home);
+}
+
 async function run(argv: string[]): Promise<number> {
 	const args = argv.slice(1);
-	const ompArgs = [`--append-system-prompt=${preloadBlock()}`, ...(args.length > 0 ? args : [KICKOFF])];
-	return await waitAndLaunch(ompArgs, process.env.FM_HOME?.trim() || REPO_ROOT);
+	const home = process.env.FM_HOME?.trim() || homeFromCwd() || REPO_ROOT;
+	if (!mainHomeStructurally(home)) return legacyRun(argv, home);
+
+	let staticFleet = "";
+	let preflightDone = false;
+	const beforeLaunch = async (): Promise<boolean> => {
+		if (preflightDone) return true;
+		const outcome = await runStartupContext({
+			fmBin: process.env.FM_START_FM_BIN?.trim() || join(REPO_ROOT, "sbin", "fm"),
+			home,
+			cwd: home,
+			env: childEnv(),
+		});
+		if (!outcome.ok) {
+			process.stderr.write(`fm start preflight failed: ${JSON.stringify(outcome.failure)}\n`);
+			return false;
+		}
+		staticFleet = outcome.context.staticFleet;
+		preflightDone = true;
+		return true;
+	};
+	const ompArgs = [`--append-system-prompt=${mainPreloadBlock(home)}`, ...args];
+	return await waitAndLaunch(ompArgs, home, async () => {
+		const ok = await beforeLaunch();
+		if (!ok) return false;
+		return true;
+	}, () => childEnv({ [FM_START_STATIC_CONTEXT_ENV]: staticFleet }));
 }
 
 export default {
