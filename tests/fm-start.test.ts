@@ -14,7 +14,8 @@ const tempDirs: string[] = [];
 const children: ChildProcess[] = [];
 
 const DEFAULT_OMP = `#!/bin/sh
-lock=$(cat "$FM_STATE_OVERRIDE/.lock" 2>/dev/null || true)
+state=\${FM_STATE_OVERRIDE:-$FM_HOME/state}
+lock=$(cat "$state/.lock" 2>/dev/null || true)
 printf '%s' "$PWD" > "$FM_START_TEST_OUTPUT.cwd"
 printf '%s' "\${FM_SUPERVISED_SUCCESSOR:-}" > "$FM_START_TEST_OUTPUT.marker"
 printf '%s' "$#" > "$FM_START_TEST_OUTPUT.argc"
@@ -40,7 +41,8 @@ done
 `;
 
 const EVENT_OMP = `#!/bin/sh
-lock=$(cat "$FM_STATE_OVERRIDE/.lock" 2>/dev/null || true)
+state=\${FM_STATE_OVERRIDE:-$FM_HOME/state}
+lock=$(cat "$state/.lock" 2>/dev/null || true)
 [ "$lock" = "$$" ] || exit 42
 printf 'start %s\n' "$$" >> "$FM_START_TEST_OUTPUT.events"
 sleep 0.2
