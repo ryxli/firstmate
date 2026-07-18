@@ -153,7 +153,7 @@ grep -qF 'pane rename w1:p-new label-check' "$spawn_log" || fail "worker label w
 grep -qF 'agent_slot=label-check-k3' "$spawn_home/state/label-check-k3.meta" || fail "spawn metadata omitted agent slot"
 grep -qF 'worker=label-check' "$spawn_home/state/label-check-k3.meta" || fail "spawn metadata omitted worker label"
 grep -qF 'agent_identity=omp' "$spawn_home/state/label-check-k3.meta" || fail "spawn metadata omitted harness identity"
-grep -qF -- '- [ ] label-check-k3 - ship task (repo: demo, since ' "$spawn_home/data/backlog.md" \
+grep -qE -- '^- \[ \] label-check-k3 - ship task .*\(repo: demo\).*\(since [0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$spawn_home/data/backlog.md" \
   || fail "ship spawn did not record its in-flight backlog entry"
 if [ "$(grep -c 'label-check-k3' "$spawn_home/data/backlog.md")" -ne 1 ]; then
   fail "ship spawn recorded its backlog entry more than once"
@@ -165,7 +165,7 @@ scout_out=$(PATH="$spawn_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$spawn_log"
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
   "$ROOT/sbin/fm" spawn scout-check-k4 projects/demo omp --scout 2>&1) \
   || fail "scout spawn should create a labeled replacement tab: $scout_out"
-grep -qF -- '- [ ] scout-check-k4 - scout task (repo: demo, since ' "$spawn_home/data/backlog.md" \
+grep -qE -- '^- \[ \] scout-check-k4 - scout task .*\(repo: demo\).*\(since [0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$spawn_home/data/backlog.md" \
   || fail "scout spawn did not record its in-flight backlog entry"
 pass "spawn separates display labels from the durable herdr slot"
 
@@ -180,9 +180,9 @@ batch_out=$(PATH="$spawn_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$batch_log"
 case "$batch_out" in *'spawned batch-a-k5'*'spawned batch-b-k6'*) : ;; *) fail "batch dispatch did not spawn both tasks: $batch_out" ;; esac
 grep -qF 'agent start batch-a-k5' "$batch_log" || fail "batch dispatch omitted first task"
 grep -qF 'agent start batch-b-k6' "$batch_log" || fail "batch dispatch omitted second task"
-grep -qF -- '- [ ] batch-a-k5 - ship task (repo: demo, since ' "$spawn_home/data/backlog.md" \
+grep -qE -- '^- \[ \] batch-a-k5 - ship task .*\(repo: demo\).*\(since [0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$spawn_home/data/backlog.md" \
   || fail "batch dispatch did not record first backlog entry"
-grep -qF -- '- [ ] batch-b-k6 - ship task (repo: demo, since ' "$spawn_home/data/backlog.md" \
+grep -qE -- '^- \[ \] batch-b-k6 - ship task .*\(repo: demo\).*\(since [0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$spawn_home/data/backlog.md" \
   || fail "batch dispatch did not record second backlog entry"
 pass "spawn batch dispatch re-enters the fm spawn entrypoint for each pair"
 

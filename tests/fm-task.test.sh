@@ -33,6 +33,13 @@ fm_home() {
 	local home
 	home=$(mktemp -d "$TMP_ROOT/home.XXXXXX")
 	mkdir -p "$home/data"
+	# resolveMainHome (bridge/collect.ts) treats FM_HOME as an explicit main
+	# home only when AGENTS.md is present (isExplicitMainHome); without it,
+	# collectSnapshot() silently falls through past FM_HOME to the invoking
+	# shell's cwd and then known clones, leaking the REAL live fleet's data
+	# into a test that believes it is hermetic. Every fixture home must be
+	# explicitly recognizable as its own main home.
+	printf '# fixture main home\n' > "$home/AGENTS.md"
 	printf '%s\n' "$home"
 }
 
