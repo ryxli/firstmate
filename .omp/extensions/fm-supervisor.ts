@@ -593,6 +593,7 @@ interface Supervisor {
 	flushTimer?: Timer;
 	checkTimer?: Timer;
 	lastStatusSeen: Map<string, string>; // task -> last processed status line
+	dependencyReceipts?: Set<string>;
 	internalLogWrites: number;
 	activationReceiptPath?: string;
 	activationIdentity?: ActivationIdentity;
@@ -1218,7 +1219,7 @@ async function onStatusFileChange(sup: Supervisor, filename: string): Promise<vo
 	const crew = findCrewByTask(sup, task);
 	const pane = crew?.pane ?? "?";
 	if (captainRelevantStatusLine(last)) {
-		if (!validateBlockedReport(last).valid) {
+		if (crew?.dependency && !validateBlockedReport(last).valid) {
 			await appendInternalLog(sup, task, `rejected malformed blocked report: ${last}`);
 			return;
 		}
@@ -1380,7 +1381,7 @@ async function flush(sup: Supervisor): Promise<void> {
 	}
 	await deliverDependencyWakes(sup, prioritizeDependencyEdges(
 		events.flatMap((event) => event.dependency ? [event.dependency] : []),
-	), events, true);
+	), events, true, "record");
 }
 
 async function reconcileDependencyArtifacts(sup: Supervisor): Promise<void> {
@@ -1399,26 +1400,72 @@ async function reconcileDependencyArtifacts(sup: Supervisor): Promise<void> {
 			relevant: true,
 		});
 	}
-	await deliverDependencyWakes(sup, prioritizeDependencyEdges(events.flatMap((event) => event.dependency ? [event.dependency] : [])), events, false);
+	await deliverDependencyWakes(sup, prioritizeDependencyEdges(events.flatMap((event) => event.dependency ? [event.dependency] : [])), events, false, "suppress-and-record");
 }
 
-async function deliverDependencyWakes(sup: Supervisor, edges: readonly DependencyEdge[], events: readonly FleetEvent[], parentAlreadyDelivered: boolean): Promise<void> {
+type DependencyReceiptMode = "record" | "suppress-and-record";
+
+function dependencyReceiptPath(sup: Supervisor): string {
+	return join(sup.stateDir, ".dependency-handoffs.json");
+}
+
+async function dependencyReceiptSet(sup: Supervisor): Promise<Set<string>> {
+	if (sup.dependencyReceipts) return sup.dependencyReceipts;
+	try {
+		const parsed = JSON.parse(await readFile(dependencyReceiptPath(sup), "utf8"));
+		sup.dependencyReceipts = new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []);
+	} catch {
+		sup.dependencyReceipts = new Set();
+	}
+	return sup.dependencyReceipts;
+}
+
+async function persistDependencyReceipts(sup: Supervisor, receipts: Set<string>): Promise<void> {
+	const path = dependencyReceiptPath(sup);
+	const tmp = `${path}.${process.pid}.tmp`;
+	await mkdir(dirname(path), { recursive: true });
+	await writeFile(tmp, `${JSON.stringify([...receipts].sort())}\n`);
+	await rename(tmp, path);
+}
+
+function dependencyReceiptKey(edge: DependencyEdge, terminalState: string, observedSha: string): string {
+	return createHash("sha256").update(JSON.stringify({
+		producer: edge.producer,
+		consumers: [...edge.consumers].sort(),
+		artifactPath: edge.artifactPath,
+		expectedSha: edge.artifactSha,
+		observedSha,
+		wakeAction: edge.wakeAction,
+		criticalPath: edge.criticalPath,
+		terminalState,
+	})).digest("hex");
+}
+
+async function deliverDependencyWakes(sup: Supervisor, edges: readonly DependencyEdge[], events: readonly FleetEvent[], parentAlreadyDelivered: boolean, receiptMode: DependencyReceiptMode): Promise<void> {
 	const seen = new Set<string>();
+	const receipts = await dependencyReceiptSet(sup);
+	let receiptsChanged = false;
 	for (const edge of edges) {
-		const terminal = events.some((event) => event.task === edge.producer && event.kind === "status" && /\b(done|merged|ready in branch|pr ready|checks green):?/i.test(event.status_line ?? ""));
-		if (!terminal || seen.has(edge.producer)) continue;
+		const terminalState = events.find((event) => event.task === edge.producer && event.kind === "status" && /\b(done|merged|ready in branch|pr ready|checks green):?/i.test(event.status_line ?? ""))?.status_line ?? "";
+		if (!terminalState || seen.has(edge.producer)) continue;
 		seen.add(edge.producer);
-		let matches = true;
+		let observedSha = "";
 		try {
 			const bytes = await readFile(edge.artifactPath);
-			matches = createHash("sha256").update(bytes).digest("hex") === edge.artifactSha;
+			observedSha = createHash("sha256").update(bytes).digest("hex");
 		} catch {
-			matches = false;
+			observedSha = "";
 		}
+		const matches = observedSha.length > 0 && observedSha === edge.artifactSha;
+		const receiptKey = dependencyReceiptKey(edge, terminalState, observedSha);
+		if (receiptMode === "suppress-and-record" && receipts.has(receiptKey)) continue;
+		let failed = false;
+		let delivered = false;
 		for (const delivery of dependencyDeliveries(edge, matches, matches)) {
 			const message = `dependency ${edge.producer} completed; artifact ${edge.artifactPath} exists sha=${edge.artifactSha}; action: ${delivery.action}`;
 			if (delivery.target === "parent") {
 				if (!parentAlreadyDelivered) inject(sup, message, true);
+				delivered = true;
 				continue;
 			}
 			if (!delivery.consumer) continue;
@@ -1428,11 +1475,18 @@ async function deliverDependencyWakes(sup: Supervisor, edges: readonly Dependenc
 					signal: sup.abort.signal,
 					cwd: sup.ctx.cwd,
 				});
+				delivered = true;
 			} catch (err) {
+				failed = true;
 				logWarn(sup, `fm-supervisor: dependency wake failed for ${delivery.consumer}: ${String(err)}`);
 			}
 		}
+		if (delivered && !failed) {
+			receipts.add(receiptKey);
+			receiptsChanged = true;
+		}
 	}
+	if (receiptsChanged) await persistDependencyReceipts(sup, receipts);
 }
 
 export const FM_WAKE_DELIVERY_OPTIONS = { deliverAs: "nextTurn", triggerTurn: true } as const;
