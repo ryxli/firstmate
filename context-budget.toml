@@ -11,4 +11,4 @@
 # Local-layer files (data/cap.md, data/charter.md, data/*/brief.md) are
 # deliberately NOT budgeted: they vary per machine and fleet and never travel.
 always_on_max = 8086      # AGENTS.md - loaded on every turn of every mate
-governance_max = 30563    # AGENTS.md + all .agents/skills/**/SKILL.md
+governance_max = 30493    # AGENTS.md + all .agents/skills/**/SKILL.md
