@@ -97,7 +97,7 @@
  * imports it standalone under Bun. The live loop calls it too.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, unwatchFile, watchFile } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -593,7 +593,7 @@ interface Supervisor {
 	flushTimer?: Timer;
 	checkTimer?: Timer;
 	lastStatusSeen: Map<string, string>; // task -> last processed status line
-	dependencyReceipts?: Set<string>;
+	dependencyReceipts?: Map<string, string>;
 	internalLogWrites: number;
 	activationReceiptPath?: string;
 	activationIdentity?: ActivationIdentity;
@@ -1385,6 +1385,7 @@ async function flush(sup: Supervisor): Promise<void> {
 }
 
 async function reconcileDependencyArtifacts(sup: Supervisor): Promise<void> {
+	await pruneDependencyReceipts(sup);
 	const events: FleetEvent[] = [];
 	for (const crew of sup.crewByPane.values()) {
 		if (!crew.dependency) continue;
@@ -1404,28 +1405,70 @@ async function reconcileDependencyArtifacts(sup: Supervisor): Promise<void> {
 }
 
 type DependencyReceiptMode = "record" | "suppress-and-record";
+type DependencyReceiptStore = Map<string, string>;
+type DependencyReceiptRecord = { key: string; producer: string };
 
 function dependencyReceiptPath(sup: Supervisor): string {
 	return join(sup.stateDir, ".dependency-handoffs.json");
 }
 
-async function dependencyReceiptSet(sup: Supervisor): Promise<Set<string>> {
+async function dependencyReceiptSet(sup: Supervisor): Promise<DependencyReceiptStore> {
 	if (sup.dependencyReceipts) return sup.dependencyReceipts;
 	try {
 		const parsed = JSON.parse(await readFile(dependencyReceiptPath(sup), "utf8"));
-		sup.dependencyReceipts = new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []);
+		const entries = Array.isArray(parsed) ? parsed.flatMap((value): DependencyReceiptRecord[] => {
+			if (typeof value === "string") return [{ key: value, producer: "" }];
+			if (value && typeof value === "object") {
+				const record = value as Record<string, unknown>;
+				if (typeof record.key === "string" && typeof record.producer === "string") return [{ key: record.key, producer: record.producer }];
+			}
+			return [];
+		}) : [];
+		sup.dependencyReceipts = new Map(entries.map((entry) => [entry.key, entry.producer]));
 	} catch {
-		sup.dependencyReceipts = new Set();
+		sup.dependencyReceipts = new Map();
 	}
 	return sup.dependencyReceipts;
 }
 
-async function persistDependencyReceipts(sup: Supervisor, receipts: Set<string>): Promise<void> {
+async function writeDependencyReceiptFile(path: string, receipts: DependencyReceiptStore, onError?: (message: string) => void): Promise<boolean> {
+	const tmp = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+	try {
+		const records = [...receipts].map(([key, producer]) => ({ key, producer })).sort((left, right) => left.key.localeCompare(right.key));
+		await mkdir(dirname(path), { recursive: true });
+		await writeFile(tmp, `${JSON.stringify(records)}\n`);
+		await rename(tmp, path);
+		return true;
+	} catch (error) {
+		try {
+			await unlink(tmp);
+		} catch {
+			// best-effort cleanup
+		}
+		onError?.(`fm-supervisor: dependency receipt persistence failed: ${error instanceof Error ? error.message : String(error)}`);
+		return false;
+	}
+}
+
+export async function writeDependencyReceiptFileForTest(path: string, records: readonly DependencyReceiptRecord[]): Promise<boolean> {
+	return await writeDependencyReceiptFile(path, new Map(records.map((record) => [record.key, record.producer])));
+}
+
+async function persistDependencyReceipts(sup: Supervisor, receipts: DependencyReceiptStore): Promise<boolean> {
 	const path = dependencyReceiptPath(sup);
-	const tmp = `${path}.${process.pid}.tmp`;
-	await mkdir(dirname(path), { recursive: true });
-	await writeFile(tmp, `${JSON.stringify([...receipts].sort())}\n`);
-	await rename(tmp, path);
+	return await writeDependencyReceiptFile(path, receipts, (message) => logWarn(sup, message));
+}
+
+async function pruneDependencyReceipts(sup: Supervisor): Promise<void> {
+	const receipts = await dependencyReceiptSet(sup);
+	const liveProducers = new Set([...sup.crewByPane.values()].map((crew) => crew.task));
+	let changed = false;
+	for (const [key, producer] of receipts) {
+		if (!producer || liveProducers.has(producer)) continue;
+		receipts.delete(key);
+		changed = true;
+	}
+	if (changed) await persistDependencyReceipts(sup, receipts);
 }
 
 function dependencyReceiptKey(edge: DependencyEdge, terminalState: string, observedSha: string): string {
@@ -1482,7 +1525,7 @@ async function deliverDependencyWakes(sup: Supervisor, edges: readonly Dependenc
 			}
 		}
 		if (delivered && !failed) {
-			receipts.add(receiptKey);
+			receipts.set(receiptKey, edge.producer);
 			receiptsChanged = true;
 		}
 	}

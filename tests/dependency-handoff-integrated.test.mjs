@@ -67,13 +67,21 @@ try {
   await startAndStop();
   if (parentWakes.length !== 4) throw new Error("changed dependency artifact identity did not wake parent");
   if (consumerWakes.length !== 10) throw new Error("changed dependency artifact identity did not wake consumers");
+  rmSync(join(state, "producer.meta"));
+  await startAndStop();
+  if (parentWakes.length !== 4) throw new Error("absent producer pruning unexpectedly woke parent");
+  if (consumerWakes.length !== 10) throw new Error("absent producer pruning unexpectedly woke consumers");
+  writeFileSync(join(state, "producer.meta"), `pane=w1:p1\nkind=ship\n${edgeFor("consumer-a,consumer-b,consumer-c", changedSha)}`);
+  await startAndStop();
+  if (parentWakes.length !== 5) throw new Error("re-created producer was not eligible after receipt pruning");
+  if (consumerWakes.length !== 13) throw new Error("re-created producer did not deliver to consumers after receipt pruning");
   await handlers.get("session_start")({}, { cwd: home });
   writeFileSync(join(state, "producer.status"), "blocked: waiting_on=producer\n");
   await Bun.sleep(150);
-  if (parentWakes.length !== 4) throw new Error("malformed dependency BLOCKED report incorrectly woke parent");
+  if (parentWakes.length !== 5) throw new Error("malformed dependency BLOCKED report incorrectly woke parent");
   writeFileSync(join(state, "consumer-a.status"), "blocked: need credentials\n");
   await Bun.sleep(150);
-  if (parentWakes.length !== 5) throw new Error("generic BLOCKED report without dependency did not wake parent");
+  if (parentWakes.length !== 6) throw new Error("generic BLOCKED report without dependency did not wake parent");
   await handlers.get("session_shutdown")();
   console.log("integrated dependency startup reconciliation passed");
 } finally {
