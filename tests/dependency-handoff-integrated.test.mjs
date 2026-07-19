@@ -34,7 +34,7 @@ const pi = {
     if (command === "bash" && args[0].endsWith("fm-send.sh")) { consumerWakes.push(args); return Promise.resolve({ stdout: "", stderr: "", code: 0, killed: false }); }
     return Promise.resolve({ stdout: "", stderr: "", code: 0, killed: false });
   },
-  sendMessage(message) { parentWakes.push(message.content); },
+  sendMessage(message, options) { parentWakes.push({ message, options }); },
   logger: { warn() {} },
 };
 try {
@@ -47,7 +47,10 @@ try {
   await startAndStop();
   if (parentWakes.length !== 1) throw new Error(`expected one parent wake, got ${parentWakes.length}`);
   if (consumerWakes.length !== 2) throw new Error(`expected two consumer wakes, got ${consumerWakes.length}`);
-  if (!String(parentWakes[0]).includes("producer") || !consumerWakes.every((args) => args.at(-2) === "fm-consumer-a" || args.at(-2) === "fm-consumer-b")) throw new Error("dependency wake routing lost producer or consumer target");
+  if (parentWakes[0].message.customType !== "fleet-attention-changed" || parentWakes[0].message.content !== "fleet-attention-changed: Read `fm fleet` once." || parentWakes[0].message.display !== false || JSON.stringify(parentWakes[0].options) !== JSON.stringify({ triggerTurn: true })) {
+    throw new Error("producer-side dependency attention was not silent and payload-free");
+  }
+  if (!consumerWakes.every((args) => args.at(-2) === "fm-consumer-a" || args.at(-2) === "fm-consumer-b")) throw new Error("dependency wake routing lost consumer target");
   await startAndStop();
   if (parentWakes.length !== 1) throw new Error("duplicate startup reconciliation woke parent again");
   if (consumerWakes.length !== 2) throw new Error("duplicate startup reconciliation woke consumers again");

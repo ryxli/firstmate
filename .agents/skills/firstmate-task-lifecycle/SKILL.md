@@ -231,7 +231,7 @@ Review and evidence safeguards are owned by AGENTS.md; before parallel lane work
 For PR-based ship tasks (`direct-PR`), the crewmate reports `done: PR <url>` after opening the PR, adding `checks green` once the project's CI (if any) is green.
 Run `sbin/fm pr-check <id> <PR url>` - it records `pr=` in the task's meta and registers a merge check for the supervision extension's poll timer.
 Tell the cap: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the cap's terminal makes a full URL clickable) and a one-paragraph summary.
-(The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when firstmate should wake, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
+(The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when it should add durable fleet attention, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
 
 If the cap says "merge it", run `gh-axi pr merge` yourself; that instruction is the explicit approval. If `yolo=on`, merge a green/approved PR yourself and post the required FYI.
 
@@ -342,7 +342,7 @@ After seeding, hand the new secondmate's in-scope queued items off from the main
 `sbin/fm home-seed` refuses to copy a missing or placeholder charter.
 Once seeded, `data/secondmates.md` becomes the source of truth for that secondmate's identity and scope: do not hand-edit `data/<id>/brief.md` or `<home>/data/charter.md` again except inside their one mate-owned section.
 Update the registry line instead, then run `sbin/fm brief --regen <id>` to regenerate both projections and `sbin/fm brief --check <id>` to confirm they match what the registry generates.
-The status-reporting protocol is intentionally sparse: crewmates append status only for supervisor-actionable phase changes or `needs-decision`/`blocked`/`done`/`failed`, because every append wakes firstmate.
+The status-reporting protocol is intentionally sparse: crewmates append status only for supervisor-actionable phase changes or `needs-decision`/`blocked`/`done`/`failed`, because each relevant append records durable fleet attention and may coalesce into one silent edge.
 For any generated brief that still contains `{TASK}`, replace it with a clear task description, acceptance criteria, and any constraints or context the crewmate needs before spawning or seeding.
 When the task hands the crewmate a compiled action (an exact command or procedure), always pair it with an explicit return-shape contract - what the final report/output must literally contain - or the crewmate may act and report "done" without the data (measured: data/research/fm-panes-ab).
 Adjust the other sections only when the task genuinely deviates from the standard ship-a-new-PR shape (e.g. fixing an existing external PR); the scaffold is the contract, not a suggestion.

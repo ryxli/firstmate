@@ -19,9 +19,9 @@ date '+%s' > state/.afk
 ```
 
 2. Confirm that away mode is active.
-The in-process supervision extension observes the flag and batches relevant events over `FM_ESCALATE_BATCH_SECS`, default 90 seconds.
+The in-process supervision extension observes the flag and retains relevant events as durable fleet attention over `FM_ESCALATE_BATCH_SECS`, default 90 seconds, without interrupting the cap per event.
 There is no separate daemon, sentinel marker, watcher, wake queue, or busy guard to start.
-OMP owns delivery timing through `deliverAs: nextTurn` and `triggerTurn`, so an injection does not collide with a half-typed line.
+When away mode is absent, a relevant burst produces one non-visible `fleet-attention-changed` edge; firstmate reads `fm fleet` once for its details.
 
 3. If `state/.idle-digest.md` already exists after a restart, resume it with:
 
@@ -72,4 +72,4 @@ fi
 rm -f state/.afk
 ```
 
-Full per-event supervision resumes automatically when the flag is absent.
+Silent attention-edge supervision resumes automatically when the flag is absent.

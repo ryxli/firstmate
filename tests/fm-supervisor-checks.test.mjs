@@ -100,9 +100,11 @@ try {
   await handlers.get("session_start")({}, { cwd: home });
 
   await waitFor(() => sent.length === 1, "live PR merge check wake");
-  const firstWake = String(sent[0].message.content);
-  if (!firstWake.includes(`${task} ${pane} - merged`)) throw new Error("live merge check wake lost task or state");
-  if (!firstWake.includes("action: confirm merge + teardown")) throw new Error("live merge check wake lost merge action");
+  const firstWake = sent[0].message;
+  if (firstWake.customType !== "fleet-attention-changed" || firstWake.content !== "fleet-attention-changed: Read `fm fleet` once." || firstWake.display !== false) {
+    throw new Error("live merge check did not emit the silent fleet attention edge");
+  }
+  if (JSON.stringify(sent[0].options) !== JSON.stringify({ triggerTurn: true })) throw new Error("attention delivery options changed");
 
   handlers.get("agent_start")?.({}, {});
   await waitFor(() => checkCalls >= 2, "second merge check");

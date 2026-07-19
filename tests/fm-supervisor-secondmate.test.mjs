@@ -69,6 +69,12 @@ const osNotifications = [];
 const sent = [];
 const handlers = new Map();
 const response = (stdout = "") => ({ stdout, stderr: "", code: 0, killed: false });
+function assertAttention(entry) {
+  if (entry.message.customType !== "fleet-attention-changed") throw new Error("attention type changed");
+  if (entry.message.content !== "fleet-attention-changed: Read `fm fleet` once.") throw new Error("attention message carried event payload");
+  if (entry.message.display !== false) throw new Error("attention message was visible");
+  if (JSON.stringify(entry.options) !== JSON.stringify({ triggerTurn: true })) throw new Error("attention delivery options changed");
+}
 const pi = {
   setLabel() {},
   on(name, handler) { handlers.set(name, handler); },
@@ -117,16 +123,19 @@ writeFileSync(join(state, `${ship.task}.status`), "done: PR https://github.com/o
 await Bun.sleep(80);
 if (sent.length !== 0) throw new Error("status wake injected into an active firstmate turn");
 handlers.get("agent_end")?.({}, {});
-await waitFor(() => sent.length === 1, "cap-relevant status file wake");
-if (!String(sent[0].message.content).includes("done: PR")) throw new Error("status-file wake lost the terminal status");
-if (!/^\[wake \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] /.test(String(sent[0].message.content))) throw new Error("status wake missing compact UTC timestamp prefix");
+await waitFor(() => sent.length === 1, "cap-relevant status file attention");
+assertAttention(sent[0]);
+handlers.get("agent_start")?.({}, {});
+handlers.get("agent_end")?.({}, {});
 
 emit(ship.pane, "working");
 emit(ship.pane, "blocked");
 await waitFor(() => sent.length === 2, "first ship blocked wake");
-if (!String(sent[1].message.content).includes("ship") || !/blocked/i.test(sent[1].message.content)) throw new Error("ship blocked wake lost task or state");
+assertAttention(sent[1]);
 if (!readFileSync(join(state, `${ship.task}.meta`), "utf8").includes(`pane=${ship.pane}`)) throw new Error("live pane identity did not refresh meta");
-if (osNotifications.length !== 2 || !osNotifications[0].join(" ").includes("firstmate")) throw new Error("cap-actionable wakes did not issue main-home OS notifications");
+if (osNotifications.length !== 0) throw new Error("routine fleet attention issued an OS notification");
+handlers.get("agent_start")?.({}, {});
+handlers.get("agent_end")?.({}, {});
 
 emit(ship.pane, "working");
 emit(ship.pane, "blocked");
@@ -141,9 +150,10 @@ if (sent.length !== 2) throw new Error("secondmate blocked transition woke main 
 emit(secondmate.pane, "working");
 emit(secondmate.pane, "done");
 await waitFor(() => sent.length === 3, "secondmate routed completion wake");
-if (!/^\[wake \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] /.test(String(sent[2].message.content))) throw new Error("completion wake missing compact UTC timestamp prefix");
-if (sent[2].options.deliverAs !== "nextTurn" || sent[2].options.triggerTurn !== true) throw new Error("wake delivery options changed");
-if (osNotifications.length !== 2) throw new Error("secondmate completion sent an OS notification instead of escalating through supervision");
+assertAttention(sent[2]);
+if (osNotifications.length !== 0) throw new Error("secondmate completion issued an OS notification");
+handlers.get("agent_start")?.({}, {});
+handlers.get("agent_end")?.({}, {});
 const beforeReplayCount = observedStatusEvents;
 emit(secondmate.pane, "idle");
 emit(secondmate.pane, "idle");
@@ -156,9 +166,9 @@ if (sent.length !== 3) throw new Error("replayed idle after completion produced 
 emit(crew.pane, "working");
 emit(crew.pane, "idle");
 await waitFor(() => sent.length === 4, "ordinary crewmate completion wake");
-if (!String(sent[3].message.content).includes("crew") || !/crewmate idle after task, no status/i.test(sent[3].message.content)) {
-  throw new Error("ordinary crewmate completion wake lost task or action");
-}
+assertAttention(sent[3]);
+handlers.get("agent_start")?.({}, {});
+handlers.get("agent_end")?.({}, {});
 emit(crew.pane, "idle");
 await Bun.sleep(20);
 if (sent.length !== 4) throw new Error("ordinary crewmate idle replay produced a duplicate completion wake");

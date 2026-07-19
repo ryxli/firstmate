@@ -251,13 +251,14 @@ Hot invariants remain always on:
 ## 7. Supervision protocol
 
 Supervision is automatic and in-process: the omp extension `.omp/extensions/fm-supervisor.ts` loads at session start and runs one long-lived driver for the whole session, blocking at zero token cost until something needs you - there is nothing to arm, drain, or re-arm yourself.
-A relevant event (a crewmate reaching done/blocked/failed/needs-decision, a PR going green, or a check firing with output) arrives as ONE dense, self-contained `fm-wake` message carrying the task, pane, state, and recommended action - act on it directly, it needs no follow-up read, and non-relevant status noise never wakes you.
-There is no periodic heartbeat: the event stream surfaces every relevant change directly, so review the fleet and reconcile `data/backlog.md` as you handle wakes, teardowns, and PR merges, not on a timer.
+A relevant event (a crewmate reaching done/blocked/failed/needs-decision, a PR going green, or a check firing with output) records durable fleet attention and coalesces into at most one silent `fleet-attention-changed` edge per unresolved burst.
+When that edge arrives, run `fm fleet` once for the authoritative ranked snapshot; its message is non-visible and carries no task, pane, status, check output, or other event detail.
+There is no periodic heartbeat: the event stream surfaces each attention burst directly, so review the snapshot and reconcile `data/backlog.md` as you handle its ranked items, teardowns, and PR merges, not on a timer.
 
-**Stale.** An idle crewmate with no cap-relevant last status gets a stale wake after a timeout: peek the pane (`sbin/fm peek <pane_id>`) to diagnose.
+**Stale.** An idle crewmate with no cap-relevant last status adds fleet attention after a timeout: inspect the ranked snapshot, then peek the pane (`sbin/fm peek <pane_id>`) when it identifies the stale worker.
 Stale is SKIPPED for `kind=secondmate` panes (an idle secondmate is healthy - it runs its own supervision) and for ship tasks parked on a green PR; those stay covered by the merge `check.sh` and the status stream.
 
-Token discipline: the injected digest is self-contained - act on it without re-reading; default any pane peek to 40 lines; batch what you tell the cap.
+Token discipline: the opaque nudge carries no detail and directs one `fm fleet` read; default any pane peek to 40 lines; batch what you tell the cap.
 Herdr's native agent status is the ground truth, so each harness's herdr integration must be installed once per machine: `herdr integration install omp` for omp panes and `herdr integration install claude` (which manages the `~/.claude/hooks/herdr-agent-state.sh` SessionStart hook) for Claude panes; without it crewmate panes report `unknown` and only the status-file stream carries signals.
 Event-source mechanics (the socket stream, the relevance regex, grace-window/stale-timer constants), lean-loop reasoning discipline, and autonomous-loop-incident debugging are documented in code comments in `.omp/extensions/fm-supervisor.ts`, next to the mechanism they describe.
 

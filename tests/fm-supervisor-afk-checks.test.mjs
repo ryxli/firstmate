@@ -99,14 +99,8 @@ try {
   if (sent.length !== 0) throw new Error("AFK batch escaped active-turn deferral before teardown");
 
   handlers.get("agent_end")?.({}, {});
-  await waitFor(() => sent.length === 1, "filtered AFK batch delivery");
-  const content = String(sent[0].message.content);
-  if (!content.includes("[wake x1 ") || !content.includes("1 relevant event(s)")) {
-    throw new Error(`filtered AFK batch kept the wrong count: ${content}`);
-  }
-  if (content.includes("checked-a") || !content.includes("live-b")) {
-    throw new Error(`filtered AFK batch did not preserve the live entry: ${content}`);
-  }
+  await Bun.sleep(120);
+  if (sent.length !== 0) throw new Error("AFK attention batch interrupted the cap instead of remaining durable in fm fleet");
 
   await handlers.get("session_shutdown")();
   console.log("supervisor AFK cross-task merge checks passed");

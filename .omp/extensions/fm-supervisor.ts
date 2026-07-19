@@ -3,11 +3,11 @@
  *
  * Replaces the retired bash supervision stack (a polling watcher, a background
  * supervise daemon, a wake-queue, and a busy guard) with ONE in-process
- * extension that blocks on herdr fleet events and injects ONE dense,
- * self-contained wake digest per relevant
- * event. Higher signal-per-token at the LLM interface, and no per-turn
- * drain -> handle -> re-arm ritual: the supervision driver lives for the whole
- * session and never needs re-arming.
+ * extension that blocks on herdr fleet events and injects one opaque attention
+ * edge per unresolved burst. The authoritative detail remains in `fm fleet`;
+ * the model interface is intentionally constant-size and never carries an
+ * event digest. The supervision driver lives for the whole session and never
+ * needs re-arming.
  *
  * =========================== omp APIs used ==============================
  * - default export factory `(pi: ExtensionAPI) => void`. At load time ONLY
@@ -23,24 +23,16 @@
  * - pi.exec(cmd, args, { timeout, signal, cwd }) -> { stdout, stderr, code,
  *   killed }: every herdr CLI call (agent get) and every *.check.sh run carries
  *   a timeout + the shutdown AbortSignal, so no herdr call is ever unbounded.
- * - pi.sendMessage(message, { deliverAs, triggerTurn }): inject a wake digest.
- *   The real API takes a CustomMessage-shaped object (the digest string rides
- *   in `content`), NOT a bare string as the prose spec sketched, so we pass
- *   `{ customType: "fm-wake", content: digest, display: true }`.
+ * - pi.sendMessage(message, { triggerTurn }): inject one silent attention edge.
+ *   Its content is a fixed instruction to read the authoritative fleet
+ *   snapshot. It contains no task, pane, status, check output, or event detail.
  * - pi.logger: best-effort diagnostics.
  *
  * ============ pi.sendMessage delivery semantics (assumed) =========
- * We inject with `{ deliverAs: "nextTurn", triggerTurn: true }`:
- *   - deliverAs "nextTurn" stores the message hidden from the editable
- *     pending-message UI and injects it on the next user prompt.
- *   - triggerTurn true starts a turn when the session is idle, and while the
- *     session is streaming it schedules an internal continuation that consumes
- *     the message on the next turn.
- * Therefore omp owns delivery timing: the extension does NOT need the bash
- * daemon's manual busy-guard / input-pending guard / submit-confirm retries.
- * One pi.sendMessage == one supervisor wake. (If live verification shows
- * nextTurn is too lazy for an idle supervisor, switch to "followUp"; the call
- * site is the single `inject()` helper.)
+ * We inject with `{ triggerTurn: true }`. OMP starts a turn when idle and
+ * schedules delivery after an active turn. The reducer keeps exactly one edge
+ * outstanding until that turn ends, so a burst cannot become deferred
+ * per-event continuations.
  *
  * ===================== herdr primitives (live loop) ====================
  * The live loop blocks on the herdr socket event STREAM,
@@ -75,9 +67,10 @@
  *   - state/<task>.status: status lines; the last non-empty line is the signal.
  *   - dependency-bearing meta records producer, named consumers, artifact path/SHA,
  *     and wake action; completed artifacts wake those consumers directly.
- *   - state/<task>.check.sh: per-task poll; non-empty stdout == a wake.
+ *   - state/<task>.check.sh: per-task poll; non-empty stdout requests fleet
+ *     attention.
  *   - state/.afk: when present, batch relevant events over a short window and
- *     inject ONE combined digest.
+ *     retain attention durably without interrupting the cap.
  *   - state/.status-internal.log: non-relevant status lines appended here, no
  *     wake (trimmed to the last STATUS_INTERNAL_LOG_MAX lines like bash).
  *   - periodic stale wakes are skipped for kind=secondmate panes and for ship
@@ -91,10 +84,9 @@
  *   - a live pane is refreshed from its durable herdr task identity before
  *     subscribing, and an idle backstop confirms that the pane still exists and
  *     is not rendering a busy banner before waking.
- * The PURE export `classifyAndDigest` below is the single source of truth for
- * relevance + digest building (the canonical definition; benchmarks/relevance.ts
- * mirrors it exactly). It has no I/O and no omp/herdr imports, so the benchmark
- * imports it standalone under Bun. The live loop calls it too.
+ * The PURE export `classifyAttention` below is the single source of truth for
+ * relevance. It has no I/O and no omp/herdr imports, so benchmarks import it
+ * standalone under Bun and the live loop reuses it.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -129,13 +121,10 @@ export type FleetEvent = {
 	relevant: boolean; // GROUND TRUTH: should this wake the supervisor?
 };
 
-// Result of classifyAndDigest. Named here (no ReturnType<>) so the contract is
-// importable directly by the benchmark and the live loop.
-export interface ClassifyResult {
-	wakes: number; // wake events generated
-	digests: string[]; // one dense self-contained line per wake (afk: 1 combined)
-	falseWakes: number; // wakes whose triggering events were all non-relevant
-	detected: number; // distinct relevant events that produced a wake
+export interface AttentionClassifyResult {
+	edges: number; // one unresolved attention burst requires one edge
+	falseEdges: number; // edges whose triggering events were all non-relevant
+	detected: number; // distinct relevant events retained by the fleet snapshot
 }
 
 // Canonical cap-relevance classifier: optional ISO-ish timestamp prefix, then
@@ -152,13 +141,9 @@ function captainRelevantStatusLine(line: string): boolean {
 	return STATUS_PREFIX_RE.test(stripped) || STATUS_PHRASE_RE.test(stripped);
 }
 
-// Same grace as bash FM_SIGNAL_GRACE (30s): same-pane relevant events within
-// this window coalesce into ONE wake (one digest), latest state wins.
-const GRACE_MS = 30_000;
-
 // Relevance per the shared contract (identical to benchmarks/relevance.ts):
 //   status: regex match; check: non-empty output; herdr: ->blocked / ->done.
-// A herdr working->idle is a turn-end (NOT a wake by itself); idle->idle is a
+// A herdr working->idle is a turn-end (NOT an attention edge by itself); idle->idle is a
 // re-observation (NOT a wake). The live loop turns a turn-end into a stale
 // backstop, but stale is NOT modeled here - this fn is event-relevance only.
 function isRelevant(e: FleetEvent): boolean {
@@ -174,117 +159,23 @@ function isRelevant(e: FleetEvent): boolean {
 	}
 }
 
-// The recommended cap action for a relevant state string. Ordered so the
-// most specific terminal outcome wins.
-function actionFor(state: string): string {
-	if (/merged/i.test(state)) return "confirm merge + teardown";
-	if (/\bPR\b|PR ready|checks green|ready in branch/i.test(state)) return "review + merge PR";
-	if (/needs-decision/i.test(state)) return "decide";
-	if (/blocked/i.test(state)) return "unblock";
-	if (/failed/i.test(state)) return "triage failure";
-	if (/done/i.test(state)) return "review + close out";
-	return "review";
-}
-
-// The state phrase for one event (what the crewmate is reporting).
-function stateOf(e: FleetEvent): string {
-	switch (e.kind) {
-		case "status":
-			return (e.status_line ?? "").trim();
-		case "check":
-			return ((e.check_out ?? "").trim().split("\n")[0] ?? "").trim();
-		case "herdr":
-			return `herdr ${e.herdr_from ?? "?"}->${e.herdr_to ?? "?"}`;
-		default:
-			return "";
-	}
-}
-
-// Compact UTC timestamp for wake prefixes. Milliseconds are intentionally
-// truncated so every digest uses the same second-resolution wire format.
-export function formatWakeTimestamp(epochMs: number): string {
-	return new Date(Math.trunc(epochMs / 1000) * 1000).toISOString().replace(".000Z", "Z");
-}
-
-// One dense, self-contained wake line: task, pane, state, recommended action.
-// The middle dot (U+00B7) is an intentional separator (NOT an em-dash).
-function buildDigest(e: FleetEvent): string {
-	const state = stateOf(e);
-	const lineage = e.worker ? ` ${e.worker}` : "";
-	return `[wake ${formatWakeTimestamp(e.t)}] ${e.task}${lineage} ${e.pane} - ${state} \u00b7 action: ${actionFor(state)}`;
-}
-
-// AFK: ONE combined digest covering every relevant event (still self-contained).
-function buildBatchDigest(relevant: FleetEvent[]): string {
-	const stamp = formatWakeTimestamp(relevant[0]?.t ?? Date.now());
-	const head = `[wake x${relevant.length} ${stamp}] afk batch - ${relevant.length} relevant event(s):`;
-	const lines = relevant.map((e) => {
-		const state = stateOf(e);
-		const lineage = e.worker ? ` ${e.worker}` : "";
-		return `  - ${e.task}${lineage} ${e.pane} - ${state} \u00b7 ${actionFor(state)}`;
-	});
-	return [head, ...lines].join("\n");
-}
-
 /**
- * Classify a batch of fleet events into wake digests. Single source of truth
- * for relevance + digest building; pure (no I/O), so the benchmark imports it
- * directly and the live loop reuses it.
+ * Classify a batch of fleet events into one opaque attention edge.
  *
- * - Non-relevant events produce NO wake.
- * - A herdr working->idle coalesces with a relevant status in the grace window
- *   into ONE wake (the working->idle is non-relevant, so the relevant status
- *   drives the single wake); same-pane relevant events within the window also
- *   coalesce (latest state wins) while each still counts toward `detected`.
- * - opts.afk batches ALL relevant events into ONE combined digest (wakes = 1).
- * - falseWakes is 0 by construction: this model only ever wakes on relevant
- *   events, so a wake triggered solely by non-relevant events cannot occur.
+ * The snapshot owns event detail. A non-empty relevant batch has one edge,
+ * regardless of pane, time, or AFK state. AFK callers retain the same durable
+ * attention but intentionally suppress delivery.
  */
-export function classifyAndDigest(events: FleetEvent[], opts?: { afk?: boolean }): ClassifyResult {
-	const afk = opts?.afk === true;
-	const ordered = [...events].sort((a, b) => a.t - b.t);
-
-	if (afk) {
-		const relevant = ordered.filter(isRelevant);
-		if (relevant.length === 0) return { wakes: 0, digests: [], falseWakes: 0, detected: 0 };
-		return {
-			wakes: 1,
-			digests: [buildBatchDigest(relevant)],
-			falseWakes: 0,
-			detected: relevant.length,
-		};
-	}
-
-	const digests: string[] = [];
-	const idxByPane = new Map<string, number>();
-	const lastTByPane = new Map<string, number>();
-	let wakes = 0;
-	let detected = 0;
-
-	for (const e of ordered) {
-		if (!isRelevant(e)) continue; // non-relevant -> no wake
-		detected++;
-		const prevT = lastTByPane.get(e.pane);
-		const idx = idxByPane.get(e.pane);
-		if (prevT !== undefined && idx !== undefined && e.t - prevT <= GRACE_MS) {
-			digests[idx] = buildDigest(e); // coalesce into the open wake; latest wins
-			lastTByPane.set(e.pane, e.t);
-			continue;
-		}
-		idxByPane.set(e.pane, digests.length);
-		lastTByPane.set(e.pane, e.t);
-		digests.push(buildDigest(e));
-		wakes++;
-	}
-
-	return { wakes, digests, falseWakes: 0, detected };
+export function classifyAttention(events: FleetEvent[]): AttentionClassifyResult {
+	const detected = events.filter(isRelevant).length;
+	return { edges: detected > 0 ? 1 : 0, falseEdges: 0, detected };
 }
 
 // ======================= AGENTS.md operator narrative ===================
 // Relocated here from AGENTS.md section 7 (supervision protocol): this is the
 // mechanism detail an engineer debugging or modifying this extension needs.
-// AGENTS.md itself only keeps the compressed operative sentences (wake
-// digest behavior, stale behavior, token discipline) that firstmate needs
+// AGENTS.md itself only keeps the compressed operative sentences (silent
+// attention edge, stale behavior, token discipline) that firstmate needs
 // every turn - the rest was over-owned prose duplicating what this file
 // already documents in code, so it lives here now, not in both places.
 //   - Three sources feed the live loop: the herdr socket event stream (every
@@ -295,12 +186,10 @@ export function classifyAndDigest(events: FleetEvent[], opts?: { afk?: boolean }
 //     timer firing each state/*.check.sh (e.g. a merged-PR poll).
 //   - Every event runs through the relevance rule above (STATUS_PREFIX_RE /
 //     STATUS_PHRASE_RE / herdr ->blocked|->done / a check with non-empty
-//     output, see isRelevant()). A relevant event becomes ONE dense,
-//     self-contained wake digest injected via pi.sendMessage. Non-relevant
-//     status lines only reach state/.status-internal.log.
-//   - A herdr working->idle (turn-end) is not a wake by itself; it only
-//     coalesces with a relevant status within GRACE_MS / FM_SIGNAL_GRACE
-//     (default 30s, see readTunables() below).
+//     output, see isRelevant()). A relevant batch requests ONE opaque,
+//     non-visible fleet-attention-changed edge. The model reads `fm fleet`
+//     once; non-relevant status lines only reach state/.status-internal.log.
+//   - A herdr working->idle (turn-end) is not an attention edge by itself.
 //   - Stale backstop: on turn-end the driver arms staleMs /
 //     FM_STALE_ESCALATE_SECS (default 240s, see readTunables() below);
 //     firing directs firstmate to peek the pane (sbin/fm peek). Skipped
@@ -308,8 +197,8 @@ export function classifyAndDigest(events: FleetEvent[], opts?: { afk?: boolean }
 //     supervision) and for ship tasks parked on a green PR (pr= set and a
 //     terminal done: PR / PR-ready status line); those stay covered by the
 //     merge check.sh and the status stream instead.
-//   - Autonomous-loop incidents (notification spam, 429s, repeated blocked
-//     wakes, cost growth): see docs/runbooks/autonomous-loop-incident-triage.md.
+//   - Autonomous-loop incidents (attention-loop spam, 429s, repeated blocked
+//     edges, cost growth): see docs/runbooks/autonomous-loop-incident-triage.md.
 //   - Lean-loop reasoning discipline (fork self-contained side-work to a
 //     disposable subagent, or route domain work to a secondmate, rather than
 //     burning firstmate's own context on it) is a firstmate reasoning habit,
@@ -324,9 +213,7 @@ export function classifyAndDigest(events: FleetEvent[], opts?: { afk?: boolean }
 // for the benchmark stays side-effect free.
 
 // Live-loop timing. These honor the same FM_* env tunables (in seconds) as the
-// bash stack so behavior stays at parity and tests can shrink the windows. The
-// pure GRACE_MS above stays a fixed constant: classifyAndDigest must be
-// deterministic for the benchmark, independent of the environment.
+// bash stack so behavior stays at parity and tests can shrink the windows.
 const STATUS_INTERNAL_LOG_MAX = 500;
 const INTERNAL_LOG_TRIM_EVERY = 50;
 
@@ -580,13 +467,13 @@ interface Supervisor {
 	staleTimers: Map<string, Timer>;
 	lastBlockedWakeMs: Map<string, number>; // pane -> last blocked-wake ts (ship/scout debounce)
 	pendingEvents: FleetEvent[];
-	pendingStale: string[];
-	deferredWakes: Array<{
-		content: string;
-		notifyOs: boolean;
-		requiredMetaTasks: string[];
-		afkBatch: boolean;
-	}>;
+	pendingStale: number;
+	attentionEdge: "none" | "deferred" | "delivered";
+	attentionChangedDuringTurn: boolean;
+	attentionCheckTasks: Set<string>;
+	attentionHasDurableSource: boolean;
+	attentionChangedCheckTasks: Set<string>;
+	attentionChangedHasDurableSource: boolean;
 	activeTurn: boolean;
 	statusWatchers: Set<string>;
 	statusRefreshTimer?: Timer;
@@ -614,7 +501,7 @@ export default function fmSupervisor(pi: ExtensionAPI): void {
 	pi.on("agent_end", () => {
 		if (!supervisor) return;
 		supervisor.activeTurn = false;
-		flushDeferredWakes(supervisor);
+		consumeAttentionEdge(supervisor);
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -649,8 +536,13 @@ function createSupervisor(pi: ExtensionAPI, ctx: ExtensionContext): Supervisor {
 		lastBlockedWakeMs: new Map(),
 		staleTimers: new Map(),
 		pendingEvents: [],
-		pendingStale: [],
-		deferredWakes: [],
+		pendingStale: 0,
+		attentionEdge: "none",
+		attentionChangedDuringTurn: false,
+		attentionCheckTasks: new Set(),
+		attentionHasDurableSource: false,
+		attentionChangedCheckTasks: new Set(),
+		attentionChangedHasDurableSource: false,
 		activeTurn: false,
 		statusWatchers: new Set(),
 		lastStatusSeen: new Map(),
@@ -1046,7 +938,7 @@ function clearStaleTimer(sup: Supervisor, pane: string): void {
 	sup.staleTimers.delete(pane);
 }
 
-async function fireStale(sup: Supervisor, crew: Crewmate, idleStart: number): Promise<void> {
+async function fireStale(sup: Supervisor, crew: Crewmate, _idleStart: number): Promise<void> {
 	if (sup.abort.signal.aborted) return;
 	const cur = sup.prevStatus.get(crew.pane);
 	if (cur !== "idle" && cur !== "unknown") return; // no longer idle
@@ -1060,14 +952,8 @@ async function fireStale(sup: Supervisor, crew: Crewmate, idleStart: number): Pr
 	}
 	if (await isAwaitingMerge(sup, crew)) return; // parked on a green PR: by design
 	const last = await lastStatusLine(sup, crew.task);
-	const mins = Math.max(1, Math.round((Date.now() - idleStart) / 60_000));
 	if (last && captainRelevantStatusLine(last)) return; // already reported something cap-worthy
-	const lineage = crew.worker ? ` ${crew.worker}` : "";
-	enqueueStale(
-		sup,
-		`[wake] ${crew.task}${lineage} ${crew.pane} - STALE ${mins}m idle, no status \u00b7 action: peek pane`,
-		Date.now(),
-	);
+	enqueueStale(sup);
 }
 
 async function isAwaitingMerge(sup: Supervisor, crew: Crewmate): Promise<boolean> {
@@ -1104,14 +990,7 @@ async function fireCompletion(sup: Supervisor, crew: Crewmate): Promise<void> {
 	}
 	const last = await lastStatusLine(sup, crew.task);
 	if (last && captainRelevantStatusLine(last)) return;
-	const lineage = crew.worker ? ` ${crew.worker}` : "";
-	const idleState =
-		crew.kind === "secondmate" ? "secondmate idle after routed work" : "crewmate idle after task";
-	enqueueStale(
-		sup,
-		`[wake] ${crew.task}${lineage} ${crew.pane} - ${idleState}, no status \u00b7 action: review + close out`,
-		Date.now(),
-	);
+	enqueueStale(sup);
 }
 
 // ---------------------- durable-identity pane resolution ---------------------
@@ -1334,9 +1213,8 @@ function enqueueEvent(sup: Supervisor, e: FleetEvent): void {
 	scheduleFlush(sup);
 }
 
-function enqueueStale(sup: Supervisor, digest: string, enqueueMs: number): void {
-	const content = digest.replace(/^\[wake\]/, `[wake ${formatWakeTimestamp(enqueueMs)}]`);
-	sup.pendingStale.push(content);
+function enqueueStale(sup: Supervisor): void {
+	sup.pendingStale++;
 	scheduleFlush(sup);
 }
 
@@ -1362,26 +1240,17 @@ async function flush(sup: Supervisor): Promise<void> {
 	const events = sup.pendingEvents.splice(0).filter(
 		(e) => e.kind !== "check" || existsSync(join(sup.stateDir, `${e.task}.meta`)),
 	);
-	const stale = sup.pendingStale.splice(0);
-	if (events.length === 0 && stale.length === 0) return;
+	const stale = sup.pendingStale;
+	sup.pendingStale = 0;
+	if (events.length === 0 && stale === 0) return;
 	const afk = isAfkActive(sup);
-	const { digests } = classifyAndDigest(events, { afk });
-	const checkTasks = [...new Set(events.filter((e) => e.kind === "check").map((e) => e.task))];
-	const requiredMetaTasksFor = (content: string): string[] =>
-		checkTasks.filter((task) => content.includes(`] ${task} `) || content.includes(`- ${task} `));
-	const all = [...digests, ...stale];
-	if (all.length > 0) {
-		if (afk) {
-			const content = all.length === 1 ? (all[0] ?? "") : all.join("\n");
-			inject(sup, content, digests.length > 0, requiredMetaTasksFor(content), true);
-		} else {
-			for (const digest of digests) inject(sup, digest, true, requiredMetaTasksFor(digest));
-			for (const staleDigest of stale) inject(sup, staleDigest, false);
-		}
-	}
+	const { edges } = classifyAttention(events);
+	const checkTasks = events.filter((event) => event.kind === "check").map((event) => event.task);
+	const hasDurableSource = stale > 0 || events.some((event) => event.kind !== "check" && isRelevant(event));
+	if (!afk && (edges > 0 || stale > 0)) requestAttention(sup, checkTasks, hasDurableSource);
 	await deliverDependencyWakes(sup, prioritizeDependencyEdges(
 		events.flatMap((event) => event.dependency ? [event.dependency] : []),
-	), events, true, "record");
+	), events, afk || edges > 0 || stale > 0, "record");
 }
 
 async function reconcileDependencyArtifacts(sup: Supervisor): Promise<void> {
@@ -1507,7 +1376,7 @@ async function deliverDependencyWakes(sup: Supervisor, edges: readonly Dependenc
 		for (const delivery of dependencyDeliveries(edge, matches, matches)) {
 			const message = `dependency ${edge.producer} completed; artifact ${edge.artifactPath} exists sha=${edge.artifactSha}; action: ${delivery.action}`;
 			if (delivery.target === "parent") {
-				if (!parentAlreadyDelivered) inject(sup, message, true);
+				if (!parentAlreadyDelivered) requestAttention(sup);
 				delivered = true;
 				continue;
 			}
@@ -1532,88 +1401,85 @@ async function deliverDependencyWakes(sup: Supervisor, edges: readonly Dependenc
 	if (receiptsChanged) await persistDependencyReceipts(sup, receipts);
 }
 
-export const FM_WAKE_DELIVERY_OPTIONS = { deliverAs: "nextTurn", triggerTurn: true } as const;
+const FLEET_ATTENTION_MESSAGE = "fleet-attention-changed: Read `fm fleet` once.";
 
-function inject(
-	sup: Supervisor,
-	content: string,
-	notifyOs = false,
-	requiredMetaTasks: string[] = [],
-	afkBatch = false,
-): void {
-	if (sup.activeTurn) {
-		// Never ask OMP to schedule a continuation inside the supervisor's own
-		// active turn. Keep the message hidden and deliver it at agent_end.
-		sup.deferredWakes.push({ content, notifyOs, requiredMetaTasks, afkBatch });
+/**
+ * Request one edge for the current unresolved burst.
+ *
+ * `deferred` covers a pre-existing active turn. `delivered` covers the turn
+ * triggered by a prior edge. Events before that turn starts remain in that
+ * edge; events during it set one follow-up edge. Nothing is replayed by event.
+ */
+function requestAttention(sup: Supervisor, checkTasks: readonly string[] = [], hasDurableSource = true): void {
+	if (sup.attentionEdge === "deferred") {
+		recordAttentionSources(sup.attentionCheckTasks, sup, checkTasks, hasDurableSource, false);
 		return;
 	}
-	deliverWake(sup, content, notifyOs);
+	if (sup.attentionEdge === "delivered") {
+		if (sup.activeTurn) {
+			sup.attentionChangedDuringTurn = true;
+			recordAttentionSources(sup.attentionChangedCheckTasks, sup, checkTasks, hasDurableSource, true);
+		}
+		return;
+	}
+	sup.attentionCheckTasks.clear();
+	sup.attentionHasDurableSource = false;
+	recordAttentionSources(sup.attentionCheckTasks, sup, checkTasks, hasDurableSource, false);
+	if (sup.activeTurn) {
+		sup.attentionEdge = "deferred";
+		return;
+	}
+	deliverPendingAttentionEdge(sup);
 }
 
-function deliverWake(sup: Supervisor, content: string, notifyOs: boolean): void {
+function consumeAttentionEdge(sup: Supervisor): void {
+	if (sup.attentionEdge === "deferred") {
+		deliverPendingAttentionEdge(sup);
+		return;
+	}
+	if (sup.attentionEdge !== "delivered") return;
+	if (sup.attentionChangedDuringTurn) {
+		sup.attentionChangedDuringTurn = false;
+		sup.attentionCheckTasks = sup.attentionChangedCheckTasks;
+		sup.attentionHasDurableSource = sup.attentionChangedHasDurableSource;
+		sup.attentionChangedCheckTasks = new Set();
+		sup.attentionChangedHasDurableSource = false;
+		deliverPendingAttentionEdge(sup);
+		return;
+	}
+	sup.attentionEdge = "none";
+	sup.attentionCheckTasks.clear();
+	sup.attentionHasDurableSource = false;
+}
+
+function recordAttentionSources(
+	target: Set<string>,
+	sup: Supervisor,
+	checkTasks: readonly string[],
+	hasDurableSource: boolean,
+	changed: boolean,
+): void {
+	for (const task of checkTasks) target.add(task);
+	if (hasDurableSource) {
+		if (changed) sup.attentionChangedHasDurableSource = true;
+		else sup.attentionHasDurableSource = true;
+	}
+}
+
+function deliverPendingAttentionEdge(sup: Supervisor): void {
+	if (!sup.attentionHasDurableSource && [...sup.attentionCheckTasks].every((task) => !existsSync(join(sup.stateDir, `${task}.meta`)))) {
+		sup.attentionEdge = "none";
+		sup.attentionCheckTasks.clear();
+		return;
+	}
 	try {
 		sup.pi.sendMessage(
-			{ customType: "fm-wake", content, display: true },
-			FM_WAKE_DELIVERY_OPTIONS,
+			{ customType: "fleet-attention-changed", content: FLEET_ATTENTION_MESSAGE, display: false },
+			{ triggerTurn: true },
 		);
+		sup.attentionEdge = "delivered";
 	} catch (err) {
-		logWarn(sup, `fm-supervisor: inject failed: ${String(err)}`);
-
-		return;
+		sup.attentionEdge = "none";
+		logWarn(sup, `fm-supervisor: attention edge injection failed: ${String(err)}`);
 	}
-	if (notifyOs) notifyCaptainOs(sup, content);
-}
-
-function filterAfkBatch(content: string, missingTasks: string[]): string | undefined {
-	if (missingTasks.length === 0) return content;
-	const lines = content.split("\n");
-	const header = lines[0] ?? "";
-	const headerMatch = header.match(/^\[wake x\d+ ([^\]]+)\] afk batch - \d+ relevant event\(s\):$/);
-	if (!headerMatch) return undefined;
-	const keptLines = lines.slice(1).filter(
-		(line) => !line.startsWith("  - ") || !missingTasks.some((task) => line.startsWith(`  - ${task} `)),
-	);
-	const entryCount = keptLines.filter((line) => line.startsWith("  - ")).length;
-	if (entryCount === 0) {
-		const tail = keptLines.filter((line) => !line.startsWith("  - "));
-		return tail.length > 0 ? tail.join("\n") : undefined;
-	}
-	const nextHeader = `[wake x${entryCount} ${headerMatch[1]}] afk batch - ${entryCount} relevant event(s):`;
-	return [nextHeader, ...keptLines].join("\n");
-}
-
-function flushDeferredWakes(sup: Supervisor): void {
-	if (sup.activeTurn || sup.deferredWakes.length === 0) return;
-	const pending = sup.deferredWakes.splice(0);
-	for (const wake of pending) {
-		// A check digest can be deferred across an active turn; teardown may remove
-		// its meta before agent_end, so discard it instead of delivering stale work.
-		const missingTasks = wake.requiredMetaTasks.filter(
-			(task) => !existsSync(join(sup.stateDir, `${task}.meta`)),
-		);
-		if (missingTasks.length > 0) {
-			if (!wake.afkBatch) continue;
-			const filtered = filterAfkBatch(wake.content, missingTasks);
-			if (filtered === undefined) continue;
-			deliverWake(sup, filtered, wake.notifyOs);
-			continue;
-		}
-		deliverWake(sup, wake.content, wake.notifyOs);
-	}
-}
-
-function notifyCaptainOs(sup: Supervisor, content: string): void {
-	if (process.env.FM_CAPTAIN_OS_NOTIFY === "0" || process.platform !== "darwin") return;
-	const home = process.env.FM_HOME ?? sup.ctx.cwd;
-	if (existsSync(join(home, ".fm-secondmate-home"))) return;
-	const firstLine = content.replace(/^\[wake[^\]]*\]\s*/, "").split("\n")[0] ?? "";
-	const safe = firstLine.slice(0, 220).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-	const script = `display notification "${safe}" with title "firstmate" sound name "Ping"`;
-	void Promise.resolve(
-		sup.pi.exec("osascript", ["-e", script], {
-			timeout: sup.tunables.herdrGetTimeoutMs,
-			signal: sup.abort.signal,
-			cwd: sup.ctx.cwd,
-		}),
-	).catch(() => {});
 }

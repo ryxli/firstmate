@@ -273,6 +273,7 @@ You do not generate your own work.
 Act only on tasks the main firstmate routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
 Supervision is automatic and in-process; there is no watcher, wake-queue, beacon, or separate supervisor process.
+Relevant fleet changes coalesce into one non-visible attention edge; on that edge, read \`fm fleet\` once for the authoritative snapshot rather than expecting event payloads or per-event continuations.
 
 ${LEAN_LOOP_BLOCK}
 
@@ -409,7 +410,7 @@ The report is the only thing that survives, so anything worth keeping must be in
 5. Report status by running:
    ${reportHelper} ${statusFile} "{state}: {one short line}"
    States: working, needs-decision, blocked, done, failed.
-   Each report wakes firstmate, so report sparingly: only phase changes a supervisor
+   Each report records durable fleet attention and may coalesce into one silent attention edge, so report sparingly: only phase changes a supervisor
    would act on and the needs-decision/blocked/done/failed states. No step-by-step
    FYI progress lines; firstmate reads your pane for that.
 6. If you hit the same obstacle twice, report blocked: {why} and stop; firstmate will help.
@@ -514,7 +515,7 @@ ${rule1}
 5. Report status by running:
    ${reportHelper} ${statusFile} "{state}: {one short line}"
    States: working, needs-decision, blocked, done, failed.
-   Each report wakes firstmate, so report sparingly: only phase changes a supervisor
+   Each report records durable fleet attention and may coalesce into one silent attention edge, so report sparingly: only phase changes a supervisor
    would act on (setup done, bug reproduced, fix implemented, validation passed) and the
    needs-decision/blocked/done/failed states. No step-by-step FYI progress lines;
    firstmate reads your pane for that.
@@ -558,6 +559,7 @@ You do not generate your own work.
 Act only on tasks the main firstmate routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
 Supervision is automatic and in-process; there is no watcher, wake-queue, beacon, or separate supervisor process.
+Relevant fleet changes coalesce into one non-visible attention edge; on that edge, read \`fm fleet\` once for the authoritative snapshot rather than expecting event payloads or per-event continuations.
 
 ${LEAN_LOOP_BLOCK}
 
