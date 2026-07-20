@@ -166,6 +166,8 @@ When it is unset, the home is this repo root, which is today's behavior.
 When it is set, scripts still use their own `sbin/` from the repo they live in, but operational dirs come from `$FM_HOME`: `state/`, `data/`, `config/`, and `projects/`.
 Existing overrides remain compatible: `FM_STATE_OVERRIDE` can still point at a custom state dir, and `FM_ROOT_OVERRIDE` still behaves like the old whole-root override when `FM_HOME` is unset.
 Each secondmate gets its own persistent `FM_HOME`, so its local state, backlog, projects, and session lock are isolated from the main firstmate.
+All mate homes share this layout contract: `bin/` holds stable local executables; `config/` declarative configuration; `state/` volatile generated state; `data/` canonical durable domain knowledge and current coordination, including tool-managed task records, with `knowledge/`, `reports/`, `evidence/`, and `archive/` subdirectories; `projects/` canonical clones; `worktrees/` FM-managed worktrees; `work/` active scratch, repositories, and builds; `tmp/` disposable material; and `.lavish/` generated review output.
+Charters must reference this contract rather than duplicate it.
 
 ```
 AGENTS.md            this file (CLAUDE.md is a symlink to it)
