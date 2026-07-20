@@ -191,7 +191,7 @@ async function waitAndLaunch(ompArgs: string[], cwd: string, options: LaunchOpti
 async function legacyRun(argv: string[], home: string, contract: string): Promise<number> {
 	const skills = ensureSecondmateHomeSkills(home, { quiet: true });
 	if (skills && !skills.ok) {
-		process.stderr.write(`error: home-skills reconciliation failed: ${skills.status}\n`);
+		process.stderr.write(`error: home skills reconciliation failed: ${skills.status}\n`);
 		return 1;
 	}
 	const args = argv.slice(1);

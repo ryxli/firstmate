@@ -1019,7 +1019,7 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 			fmHome: ctx.fmHome,
 		});
 		if (!skillsResult.ok) {
-			fail(`error: home-skills sync failed during seed: ${skillsResult.status}`);
+			fail(`error: home skills sync failed during seed: ${skillsResult.status}`);
 		}
 
 		if (!existsSync(state.parentBrief)) {

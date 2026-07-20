@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Focused contracts for fm home-skills isolation.
+# Focused contracts for fm home skills isolation.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FM="$ROOT/sbin/fm"
@@ -89,7 +89,7 @@ test_effective_union_and_exclusions() {
   printf '%s\n' 'local-ext' > "$home/config/local-skills"
   printf '%s\n' 'keep: true' 'model: fixture-model' > "$home/config/omp.yml"
 
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1) \
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1) \
     || fail "sync failed: $out"
   assert_contains() { case "$1" in *"$2"*) : ;; *) fail "$3"$'\n'"$1" ;; esac; }
   assert_contains "$out" "effective=core-a,local-ext,local-x" "effective set wrong"
@@ -110,9 +110,9 @@ test_effective_union_and_exclusions() {
   ' "$home/config/omp.yml" || fail "includeSkills not exact sorted effective set"
 
   before=$(fingerprint "$home")
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null \
     || fail "idempotent sync failed"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home-skills check "$home" >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home skills check "$home" >/dev/null \
     || fail "idempotent check failed"
   after=$(fingerprint "$home")
   [ "$before" = "$after" ] || fail "idempotent sync mutated fingerprint"
@@ -130,7 +130,7 @@ test_extension_cannot_replace_native_and_requires_local_skills() {
     > "$home/.omp/extensions/competitor/skills/shared-name/SKILL.md"
   : > "$home/config/shared-skills"
   : > "$home/config/local-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "sync with native shared-name failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "sync with native shared-name failed"
   grep -q 'shared-name' "$home/config/omp.yml" || fail "native skill not included"
   # Name only from extension, not listed in local-skills
   rm -rf "$home/.omp/skills/shared-name"
@@ -145,17 +145,17 @@ test_extension_cannot_replace_native_and_requires_local_skills() {
   mkdir -p "$home/.omp/extensions/only-ext/skills/ext-only"
   write_skill "$home/.omp/extensions/only-ext/skills/ext-only" ext-only
   # Not listed -> not in effective (sync ok with empty)
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "sync without ext-only failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "sync without ext-only failed"
   grep -q 'ext-only' "$home/config/omp.yml" && fail "unlisted extension skill included"
   printf '%s\n' 'ext-only' > "$home/config/local-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "listed local-ext sync failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "listed local-ext sync failed"
   grep -q 'ext-only' "$home/config/omp.yml" || fail "listed local-ext not included"
   # Ship-linked (symlink) extension skill must not satisfy local-skills
   mkdir -p "$code/.omp/extensions/ship-pack/skills/ship-skill"
   write_skill "$code/.omp/extensions/ship-pack/skills/ship-skill" ship-skill
   ln -sfn "$code/.omp/extensions/ship-pack" "$home/.omp/extensions/ship-pack"
   printf '%s\n' 'ship-skill' > "$home/config/local-skills"
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then
     fail "accepted ship-linked extension skill as local-skills"
   fi
   case "$out" in *local-ext-missing*|*blocked*) : ;; *) fail "wrong error for ship-linked local-skills: $out" ;; esac
@@ -169,7 +169,7 @@ test_empty_effective_disables_skills() {
   make_home "$code" "$home"
   : > "$home/config/shared-skills"
   : > "$home/config/local-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "empty sync failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "empty sync failed"
   bun -e '
     const y = Bun.YAML.parse(await Bun.file(process.argv[1]).text());
     if (y.skills.enabled !== false) throw new Error("enabled");
@@ -186,10 +186,10 @@ test_remove_shared_removes_owned_link() {
   write_skill "$home/.omp/skills/local-x" local-x
   printf '%s\n' 'core-a' 'core-b' > "$home/config/shared-skills"
   : > "$home/config/local-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "initial sync failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "initial sync failed"
   [ -L "$home/.omp/skills/core-a" ] && [ -L "$home/.omp/skills/core-b" ] || fail "expected both links"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "removal sync failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "removal sync failed"
   [ -L "$home/.omp/skills/core-a" ] || fail "core-a removed incorrectly"
   [ ! -e "$home/.omp/skills/core-b" ] || fail "core-b link not removed"
   [ -d "$home/.omp/skills/local-x" ] || fail "local-x was disturbed"
@@ -203,62 +203,62 @@ test_fail_closed_zero_mutation() {
   make_home "$code" "$home"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
   : > "$home/config/local-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "baseline sync failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "baseline sync failed"
 
   # invalid glob name — fingerprint after intentional manifest edit
   printf '%s\n' 'core-*' > "$home/config/shared-skills"
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then fail "accepted glob name"; fi
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted glob name"; fi
   after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "glob name mutated state"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "rebaseline after glob failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after glob failed"
 
   # duplicate across sources (local real dir claiming shared name)
   rm -f "$home/.omp/skills/core-a"
   write_skill "$home/.omp/skills/core-a" core-a
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then fail "accepted duplicate"; fi
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted duplicate"; fi
   after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "duplicate mutated state"
   rm -rf "$home/.omp/skills/core-a"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "rebaseline after duplicate failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after duplicate failed"
 
   # missing source
   printf '%s\n' 'missing-skill' > "$home/config/shared-skills"
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then fail "accepted missing source"; fi
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted missing source"; fi
   after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "missing source mutated"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "rebaseline after missing failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after missing failed"
 
   # frontmatter mismatch
   mkdir -p "$code/.agents/skills/bad-name"
   printf -- '---\nname: other-name\ndescription: x\n---\n' > "$code/.agents/skills/bad-name/SKILL.md"
   printf '%s\n' 'bad-name' > "$home/config/shared-skills"
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then fail "accepted name mismatch"; fi
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted name mismatch"; fi
   after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "mismatch mutated"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "rebaseline after mismatch failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after mismatch failed"
 
   # foreign link
   ln -sfn /tmp/foreign-skill "$home/.omp/skills/foreign"
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then fail "accepted foreign link"; fi
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted foreign link"; fi
   after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "foreign link mutated state"
   rm -f "$home/.omp/skills/foreign"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "rebaseline after foreign failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after foreign failed"
 
   # retargeted recorded link (points away from both receipt and desired)
   ln -sfn "$code/.agents/skills/core-b" "$home/.omp/skills/core-a"
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then fail "accepted retargeted link"; fi
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted retargeted link"; fi
   after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "retarget mutated state"
   ln -sfn "$code/.agents/skills/core-a" "$home/.omp/skills/core-a"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "restore after retarget test failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "restore after retarget test failed"
 
   # correct link + missing receipt must converge (partial sync recovery)
   rm -f "$home/state/home-skills.receipt.json"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null \
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null \
     || fail "correct link with missing receipt did not self-recover"
   [ -f "$home/state/home-skills.receipt.json" ] || fail "recovery did not rewrite receipt"
   [ -L "$home/.omp/skills/core-a" ] || fail "recovery disturbed correct managed link"
@@ -266,27 +266,27 @@ test_fail_closed_zero_mutation() {
   # malformed yaml
   printf 'skills: [\n' > "$home/config/omp.yml"
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then fail "accepted malformed yaml"; fi
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted malformed yaml"; fi
   after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "malformed yaml mutated state"
   rm -f "$home/config/omp.yml"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "restore omp failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "restore omp failed"
 
   # missing shared-skills on seeded home is migration-required
   rm -f "$home/config/shared-skills"
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills check "$home" 2>&1); then
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills check "$home" 2>&1); then
     fail "check accepted seeded home without shared-skills"
   fi
   case "$out" in *migration-required*|*blocked*) : ;; *) fail "expected migration-required: $out" ;; esac
   after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "migration-required check mutated state"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
   : > "$home/config/local-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "restore after migration-required failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "restore after migration-required failed"
 
   # drift: check fails without mutation when manifest ahead of reconciled state
   printf '%s\n' 'core-a' 'core-b' > "$home/config/shared-skills"
   before=$(fingerprint "$home")
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills check "$home" 2>&1); then
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills check "$home" 2>&1); then
     fail "check accepted drift"
   fi
   case "$out" in *result=drift*|*blocked*) : ;; *) fail "expected drift: $out" ;; esac
@@ -297,7 +297,7 @@ test_fail_closed_zero_mutation() {
   rm -rf "$home/config"
   ln -s "$TMP/config-elsewhere" "$home/config"
   mkdir -p "$TMP/config-elsewhere"
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1); then fail "accepted symlinked config"; fi
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted symlinked config"; fi
   rm -f "$home/config"
   mkdir -p "$home/config"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
@@ -314,25 +314,25 @@ test_legacy_agents_handling() {
   : > "$home/config/local-skills"
 
   ln -sfn "$code/.agents" "$home/.agents"
-  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" >/dev/null || fail "canonical .agents sync failed"
+  FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "canonical .agents sync failed"
   [ ! -e "$home/.agents" ] || fail "canonical .agents not removed"
 
   mkdir -p "$home/.agents/skills/keep"
   write_skill "$home/.agents/skills/keep" keep
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1) || fail "real .agents sync failed: $out"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1) || fail "real .agents sync failed: $out"
   case "$out" in *legacy.agents=preserve-real*) : ;; *) fail "did not report preserve-real: $out" ;; esac
   [ -d "$home/.agents/skills/keep" ] || fail "real .agents removed"
 
   rm -rf "$home/.agents"
   mkdir -p "$TMP/other-agents/skills"
   ln -sfn "$TMP/other-agents" "$home/.agents"
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1) || fail "foreign .agents sync failed: $out"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1) || fail "foreign .agents sync failed: $out"
   case "$out" in *legacy.agents=preserve-foreign*) : ;; *) fail "did not report preserve-foreign: $out" ;; esac
   [ -L "$home/.agents" ] || fail "foreign .agents removed"
 
   rm -f "$home/.agents"
   ln -sfn "$TMP/missing-agents-target" "$home/.agents"
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1) || fail "broken .agents sync failed: $out"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1) || fail "broken .agents sync failed: $out"
   case "$out" in *legacy.agents=preserve-broken*) : ;; *) fail "did not report preserve-broken: $out" ;; esac
   [ -L "$home/.agents" ] || fail "broken .agents removed"
   pass "legacy .agents removal/preserve rules"
@@ -365,6 +365,63 @@ test_seed_rollback_removes_skill_artifacts() {
   pass "seed rollback removes generated skill artifacts"
 }
 
+test_forbidden_sentinel_rejected() {
+  local code="$TMP/forbid-code" home="$TMP/forbid-home" out
+  make_code "$code"
+  code=$(canonical "$code")
+  make_home "$code" "$home"
+  write_skill "$code/.agents/skills/fm-away-mode" fm-away-mode
+  printf '%s\n' 'fm-away-mode' > "$home/config/shared-skills"
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then
+    fail "accepted forbidden specialist skill fm-away-mode"
+  fi
+  case "$out" in *forbidden-skill*) : ;; *) fail "expected forbidden-skill: $out" ;; esac
+  pass "forbidden specialist sentinel fm-away-mode rejected"
+}
+
+test_reconcile_materializes_profile_and_validates() {
+  local code="$TMP/rec-code" home="$TMP/rec-home" data="$TMP/fleet-data" out before after
+  make_code "$code"
+  code=$(canonical "$code")
+  make_home "$code" "$home"
+  home=$(canonical "$home")
+  mkdir -p "$data/home-skills" "$TMP/fm-home"
+  printf '%s\n' 'core-a' > "$data/home-skills/mate1"
+  printf '%s\n' "- mate1 - test mate (home: $home; workspace: w0; name: Mate; scope: test; projects: none; added 2026-07-20)" \
+    > "$data/secondmates.md"
+  # Skip OMP smoke in unit fixture; deterministic validate still runs.
+  out=$(
+    FM_HOME_SKILLS_SMOKE=0 \
+    FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" FM_DATA_OVERRIDE="$data" FM_HOME="$TMP/fm-home" \
+      "$FM" home skills reconcile mate1 2>&1
+  ) || fail "reconcile failed: $out"
+  case "$out" in *state=validated*) : ;; *) fail "missing validated: $out" ;; esac
+  case "$out" in *state=smoke-skipped*) : ;; *) fail "missing smoke-skipped: $out" ;; esac
+  grep -q 'Generated by fm home skills reconcile' "$home/config/shared-skills" \
+    || fail "shared-skills missing generated header"
+  grep -qx 'core-a' "$home/config/shared-skills" || fail "profile not materialized"
+  [ -L "$home/.omp/skills/core-a" ] || fail "managed link missing after reconcile"
+  pass "reconcile materializes profile, syncs, validates; smoke skipped when gated off"
+
+  before=$(cat "$home/config/shared-skills")
+  printf '%s\n' \
+    "- mate1 - test mate (home: $home; workspace: w0; name: Mate; scope: test; projects: none; added 2026-07-20)" \
+    "- mate2 - missing profile (home: ${home}2; workspace: w1; name: Mate2; scope: test; projects: none; added 2026-07-20)" \
+    > "$data/secondmates.md"
+  mkdir -p "${home}2"
+  if out=$(
+    FM_HOME_SKILLS_SMOKE=0 \
+    FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" FM_DATA_OVERRIDE="$data" FM_HOME="$TMP/fm-home" \
+      "$FM" home skills reconcile --all 2>&1
+  ); then
+    fail "reconcile --all accepted missing profile"
+  fi
+  case "$out" in *blocked:preflight*) : ;; *) fail "expected preflight block: $out" ;; esac
+  after=$(cat "$home/config/shared-skills")
+  [ "$before" = "$after" ] || fail "preflight failure mutated an existing home manifest"
+  pass "reconcile --all preflight fails closed with zero writes when a profile is missing"
+}
+
 test_effective_union_and_exclusions
 test_extension_cannot_replace_native_and_requires_local_skills
 test_empty_effective_disables_skills
@@ -372,5 +429,7 @@ test_remove_shared_removes_owned_link
 test_fail_closed_zero_mutation
 test_legacy_agents_handling
 test_seed_rollback_removes_skill_artifacts
+test_forbidden_sentinel_rejected
+test_reconcile_materializes_profile_and_validates
 
 echo "# fm-home-skills focused contracts passed"

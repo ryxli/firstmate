@@ -25,7 +25,7 @@ printf 'fixture\n' > "$home/.fm-secondmate-home"
 printf '%s\n' 'core-a' > "$home/config/shared-skills"
 printf '%s\n' 'local-ext' > "$home/config/local-skills"
 
-out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home-skills sync "$home" 2>&1) \
+out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1) \
   || fail "sync failed: $out"
 case "$out" in *effective=core-a,local-ext,local-x*) : ;; *) fail "bad effective set: $out" ;; esac
 

@@ -552,7 +552,7 @@ function validateFirstmateHomeForSpawn(id: string, home: string, fmRoot: string,
 
 	const skills = ensureSecondmateHomeSkills(absHome, { quiet: true, codeRoot: fmRoot, fmHome });
 	if (skills && !skills.ok) {
-		process.stderr.write(`error: home-skills reconciliation failed for secondmate home ${home}: ${skills.status}\n`);
+		process.stderr.write(`error: home skills reconciliation failed for secondmate home ${home}: ${skills.status}\n`);
 		return { ok: false };
 	}
 

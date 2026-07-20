@@ -627,7 +627,7 @@ async function core(parsed: ParsedArgs, tracked: TrackedState): Promise<number> 
 	if (pin.cwd && isSecondmateHome(pin.cwd)) {
 		const skills = ensureSecondmateHomeSkills(pin.cwd, { quiet: true, codeRoot: fmRoot });
 		if (skills && !skills.ok) {
-			process.stderr.write(`fm reload: home-skills reconciliation failed for ${pin.cwd}: ${skills.status}; refusing /quit\n`);
+			process.stderr.write(`fm reload: home skills reconciliation failed for ${pin.cwd}: ${skills.status}; refusing /quit\n`);
 			return 1;
 		}
 	}

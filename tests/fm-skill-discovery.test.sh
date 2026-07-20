@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Discovery gate for fm-* skill corpus (candidate + disposable home configs).
-# Proves filesystem registry completeness and isolated home-skills selection.
+# Proves filesystem registry completeness and isolated home skills selection.
 # Does not restart live homes.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,7 +40,7 @@ for skill in "${DELETED[@]}"; do
 done
 pass "deleted skill IDs absent from candidate"
 
-# 3. Disposable specialist homes expose only selected shared skills via home-skills
+# 3. Disposable specialist homes expose only selected shared skills via home skills
 FM="$ROOT/sbin/fm"
 for mate in plum kodiak; do
   home="$TMP/$mate"
@@ -48,8 +48,8 @@ for mate in plum kodiak; do
   printf '%s\n' "$mate" > "$home/.fm-secondmate-home"
   printf '%s\n' 'fm-manage-project-work' > "$home/config/shared-skills"
   : > "$home/config/local-skills"
-  out=$(FM_CODE_ROOT_OVERRIDE="$ROOT" FM_ROOT_OVERRIDE="$ROOT" "$FM" home-skills sync "$home" 2>&1) \
-    || fail "$mate home-skills sync failed: $out"
+  out=$(FM_CODE_ROOT_OVERRIDE="$ROOT" FM_ROOT_OVERRIDE="$ROOT" "$FM" home skills sync "$home" 2>&1) \
+    || fail "$mate home skills sync failed: $out"
   [ -L "$home/.omp/skills/fm-manage-project-work" ] \
     || fail "$mate missing managed link for selected skill"
   [ ! -e "$home/.omp/skills/fm-operate-crew-harness" ] \
@@ -59,7 +59,7 @@ for mate in plum kodiak; do
   grep -q 'includeSkills:' "$home/config/omp.yml" || fail "$mate omp.yml missing includeSkills allowlist"
   grep -q 'fm-manage-project-work' "$home/config/omp.yml" || fail "$mate allowlist missing selected skill"
   grep -q 'fm-operate-crew-harness' "$home/config/omp.yml" && fail "$mate allowlist includes unselected skill"
-  pass "$mate disposable home-skills exposes only selected shared skills"
+  pass "$mate disposable home skills exposes only selected shared skills"
 done
 
 # 4. Precise absence error for deleted ID (filesystem level)

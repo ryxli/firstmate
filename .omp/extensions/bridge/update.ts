@@ -856,7 +856,7 @@ export async function updateFleet(options: UpdateOptions = {}): Promise<FleetUpd
 		if (isSecondmateHome(target.home)) {
 			const skills = ensureSecondmateHomeSkills(target.home, { quiet: true, fmHome: operationalHome });
 			if (skills && !skills.ok) {
-				record(targetResult(target, "failed", action, proofFor(source.revision, manifest, receipt), `home-skills: ${skills.status}`));
+				record(targetResult(target, "failed", action, proofFor(source.revision, manifest, receipt), `home skills: ${skills.status}`));
 				continue;
 			}
 		}

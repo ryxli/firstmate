@@ -206,8 +206,8 @@ make_link_home() {
   # Isolated skill exposure: empty manifests until a caller selects shared skills.
   : > "$home/config/shared-skills"
   : > "$home/config/local-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-skills sync "$home" >/dev/null \
-    || fail "home-skills sync failed while preparing link home $home"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home skills sync "$home" >/dev/null \
+    || fail "home skills sync failed while preparing link home $home"
 }
 
 make_current_home() {
@@ -330,7 +330,7 @@ test_current_layout_repairs_extension_link() {
   pass "current per-extension broken link is repaired"
 }
 # Contract: home-link never recreates a whole-catalog .agents link; selected
-# shared skills are exposed only through home-skills into .omp/skills.
+# shared skills are exposed only through `fm home skills` into .omp/skills.
 test_current_layout_repair_discovers_shared_skills() {
   require_slice_scripts
   local code="$TMP_ROOT/current-skills-code" home="$TMP_ROOT/current-skills-home" out
@@ -351,10 +351,10 @@ test_current_layout_repair_discovers_shared_skills() {
     || fail "home-link created a whole-catalog .agents link"
 
   printf '%s\n' fm-operate-crew-harness > "$home/config/shared-skills"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-skills sync "$home" >/dev/null \
-    || fail "home-skills sync failed to expose selected shared skill"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home skills sync "$home" >/dev/null \
+    || fail "home skills sync failed to expose selected shared skill"
   [ -d "$home/.omp" ] && [ ! -L "$home/.omp" ] \
-    || fail "home-skills replaced the home-owned .omp directory"
+    || fail "home skills replaced the home-owned .omp directory"
   assert_link_points "$home/.omp/extensions/test-ext.ts" "$code/.omp/extensions/test-ext.ts" \
     "current-layout extension link after skill sync"
   assert_link_points "$home/.omp/skills/fm-operate-crew-harness" "$code/.agents/skills/fm-operate-crew-harness" \
@@ -365,7 +365,7 @@ test_current_layout_repair_discovers_shared_skills() {
   [ -f "$skill_file" ] || fail "selected shared skill is not discoverable via .omp/skills"
   assert_contains "$(cat "$skill_file")" "name: fm-operate-crew-harness" \
     "synced home discovered the wrong content for selected skill"
-  pass "home-link skips .agents; home-skills exposes only selected shared skills"
+  pass "home-link skips .agents; home skills exposes only selected shared skills"
 }
 
 

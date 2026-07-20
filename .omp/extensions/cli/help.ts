@@ -18,14 +18,25 @@ export function commandHelp(command = "fm", options: { secondmate?: boolean } = 
 	const fleetUsage = "fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics|snapshot [--json] [--metrics] [--home <path>]|view [--no-open]]";
 	return {
 		command,
-		usage: home ? "fm home <check|repair> <mate|--all>" : root ? options.secondmate ? `fm ${fleetUsage}` : `fm ${fleetUsage} | home <check|repair> <mate|--all>` : `fm ${fleetUsage}`,
+		usage: home
+			? "fm home <check|repair> <mate|--all> | home skills <sync|check|reconcile> …"
+			: root
+				? options.secondmate
+					? `fm ${fleetUsage}`
+					: `fm ${fleetUsage} | home <check|repair> <mate|--all> | home skills …`
+				: `fm ${fleetUsage}`,
 		commands: home
 			? [
 				{ command: "home check <mate|--all>", description: "Check mate-home layout and shared-code links for one registered mate or every registered mate." },
 				{ command: "home repair <mate|--all>", description: "Repair mate-home layout and shared-code links for one registered mate or every registered mate." },
+				{ command: "home skills sync <id|path>", description: "Reconcile isolated OMP skills for one specialist home." },
+				{ command: "home skills check <id|path>", description: "Validate specialist skill isolation without mutation." },
+				{ command: "home skills reconcile <id|--all>", description: "Materialize shared profiles, sync, validate, and run harness-gated OMP smoke." },
 			]
 			: root
-				? options.secondmate ? fleetCommands : [...fleetCommands, { command: "home", description: "Check or repair shared-code links for registered mates." }]
+				? options.secondmate
+					? fleetCommands
+					: [...fleetCommands, { command: "home", description: "Mate-home layout, links, and specialist skill isolation." }]
 				: fleetCommands,
 	};
 }

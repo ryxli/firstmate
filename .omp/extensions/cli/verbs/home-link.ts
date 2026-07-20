@@ -307,7 +307,7 @@ async function run(argv: string[]): Promise<number> {
 		repairLink(ctx, "sbin", join(codeRoot, "sbin"));
 		statusLine(ctx, "link.sbin");
 		// Intentionally no .agents whole-catalog link. Legacy canonical .agents
-		// removal and per-skill exposure are owned by `fm home-skills`.
+		// removal and per-skill exposure are owned by `fm home skills`.
 		ctx.status = "skipped";
 		statusLine(ctx, "link..agents");
 		checkMiseToml(ctx);

@@ -43,6 +43,8 @@ export const HOME_SKILLS_RECEIPT = "home-skills.receipt.json";
 export const SHARED_SKILLS_MANIFEST = "shared-skills";
 export const LOCAL_SKILLS_MANIFEST = "local-skills";
 export const SUB_HOME_MARKER = ".fm-secondmate-home";
+/** Reserved exclusion-smoke sentinel; never admit in specialist homes. */
+export const FORBIDDEN_SPECIALIST_SKILL = "fm-away-mode";
 
 const RECEIPT_VERSION = 1;
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "");
@@ -334,6 +336,12 @@ function buildPlan(home: string, codeRoot: string, opts: HomeSkillsOptions): Pla
 	for (const n of localDirNames) claim(n, "local .omp/skills");
 	for (const n of localExtNames) claim(n, "config/local-skills");
 	const effectiveNames = [...ownership.keys()].sort();
+	if (effectiveNames.includes(FORBIDDEN_SPECIALIST_SKILL)) {
+		fail(
+			"forbidden-skill",
+			`specialist homes must not admit reserved skill ${FORBIDDEN_SPECIALIST_SKILL}`,
+		);
+	}
 
 	const receipt = readReceipt(receiptPath);
 	const removeLinks: string[] = [];
@@ -504,4 +512,34 @@ export function reconcileHomeSkills(opts: HomeSkillsOptions): HomeSkillsResult {
 
 export function syncHomeSkills(target: string, opts: Omit<HomeSkillsOptions, "mode" | "target"> = {}): HomeSkillsResult {
 	return reconcileHomeSkills({ ...opts, mode: "sync", target });
+}
+
+/** Convenience: check a home without mutation. */
+export function checkHomeSkills(
+	target: string,
+	opts: Omit<HomeSkillsOptions, "mode" | "target"> = {},
+): HomeSkillsResult {
+	return reconcileHomeSkills({ ...opts, mode: "check", target });
+}
+
+/**
+ * Validate shared profile skill names against the code catalog (no home I/O).
+ * Rejects the reserved specialist sentinel and invalid/missing sources.
+ */
+export function validateSharedProfileNames(codeRoot: string, names: string[], label = "profile"): void {
+	const seen = new Set<string>();
+	for (const name of names) {
+		assertSkillName(name, label);
+		if (name === FORBIDDEN_SPECIALIST_SKILL) {
+			fail("forbidden-skill", `${label}: reserved skill ${FORBIDDEN_SPECIALIST_SKILL} is forbidden for specialists`);
+		}
+		if (seen.has(name)) fail("duplicate-name", `${label}: duplicate skill name ${name}`);
+		seen.add(name);
+		requireSkillDir(join(codeRoot, ".agents", "skills", name), name, `${label}:${name}`);
+	}
+}
+
+/** Parse a shared-skills / profile manifest body (comments and blanks ignored). */
+export function parseSkillManifestText(text: string, path: string): string[] {
+	return parseManifest(text, path);
 }

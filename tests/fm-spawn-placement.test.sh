@@ -190,7 +190,7 @@ test_omp_secondmate_without_home_overlay_is_exact_baseline() {
   secondmate=$(make_secondmate_home absent-secondmate absent-mate)
   secondmate_abs=$(cd "$secondmate" && pwd -P)
   printf 'supervising: true\n' > "$home/config/omp.yml"
-  # No pre-seeded omp.yml: home-skills sync creates the canonical overlay before launch.
+  # No pre-seeded omp.yml: home skills sync creates the canonical overlay before launch.
 
   run_spawn "$home" "$fakebin" absent-mate "$secondmate" omp --secondmate \
     || fail "OMP secondmate spawn without a pre-seeded home overlay failed"
@@ -201,8 +201,8 @@ test_omp_secondmate_without_home_overlay_is_exact_baseline() {
   expected="$(secondmate_prefix "$secondmate_abs")omp $role_arg --config $sq_overlay --auto-approve \"\$(cat $sq_brief)\"; exec \"\${SHELL:-/bin/zsh}\" -l"
   actual=$(captured_command "$home")
   assert_equal "$expected" "$actual" "generated secondmate overlay was not injected into the OMP command"
-  [ -f "$secondmate_abs/config/omp.yml" ] || fail "home-skills did not create config/omp.yml before launch"
-  pass "secondmate launch always passes the canonical home overlay created by home-skills"
+  [ -f "$secondmate_abs/config/omp.yml" ] || fail "home skills did not create config/omp.yml before launch"
+  pass "secondmate launch always passes the canonical home overlay created by home skills"
 }
 
 test_non_omp_secondmate_is_exact_baseline() {

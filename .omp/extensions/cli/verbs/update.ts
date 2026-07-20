@@ -486,7 +486,7 @@ function processSecondmate(id: string, home: string, pane: string, ctx: Ctx): vo
 		ctx.seenHomes.add(homeReal);
 		const skills = syncHomeSkills(homeReal, { quiet: true, codeRoot: CANONICAL_ROOT, fmHome: ctx.fmHome });
 		if (!skills.ok) {
-			process.stdout.write(`secondmate ${id}: skipped: home-skills sync failed: ${skills.status}\n`);
+			process.stdout.write(`secondmate ${id}: skipped: home skills sync failed: ${skills.status}\n`);
 			return;
 		}
 		process.stdout.write(`secondmate ${id}: symlink home verified\n`);
@@ -505,7 +505,7 @@ function processSecondmate(id: string, home: string, pane: string, ctx: Ctx): vo
 	const result = updateTarget(ctx.adoptRemote, homeReal, `secondmate ${id}`, true, true, ctx.fetched);
 	const skills = syncHomeSkills(homeReal, { quiet: true, codeRoot: CANONICAL_ROOT, fmHome: ctx.fmHome });
 	if (!skills.ok) {
-		process.stdout.write(`secondmate ${id}: skipped: home-skills sync failed: ${skills.status}\n`);
+		process.stdout.write(`secondmate ${id}: skipped: home skills sync failed: ${skills.status}\n`);
 		return;
 	}
 	if ((result.status === "updated" || result.status === "adopted") && pane) {
