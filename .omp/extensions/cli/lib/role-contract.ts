@@ -5,7 +5,7 @@ import { identityValue } from "./identity";
 
 const DEFAULT_MAIN_NAME = "firstmate";
 
-export type RoleKind = "firstmate" | "secondmate" | "crew";
+export type RoleKind = "firstmate" | "secondmate" | "crew" | "unverified";
 
 export interface RoleContractInput {
 	home: string;
@@ -17,12 +17,23 @@ export interface RoleContractInput {
 
 export function activeHome(repoRoot: string): string {
 	const nearest = homeFromCwd();
-	if (nearest && isSecondmateHome(nearest)) return nearest;
+	if (nearest && roleKindForHome(nearest) !== "firstmate") return nearest;
 	return process.env.FM_HOME?.trim() || nearest || repoRoot;
 }
 
 export function isSecondmateHome(home: string): boolean {
 	return existsSync(join(home, ".fm-secondmate-home"));
+}
+
+export function roleKindForHome(home: string): Extract<RoleKind, "firstmate" | "secondmate" | "unverified"> {
+	const marked = isSecondmateHome(home);
+	const configDir = join(home, "config");
+	const configuredRole = identityValue(configDir, "role")?.trim().toLowerCase();
+	const configuredParent = identityValue(configDir, "parent")?.trim().toLowerCase();
+	const parentIsCaptain = configuredParent === "captain" || configuredParent === "cap";
+	const parentIsSupervisor = configuredParent !== undefined && !parentIsCaptain;
+	if (marked) return configuredRole === "firstmate" || parentIsCaptain ? "unverified" : "secondmate";
+	return configuredRole === "secondmate" || parentIsSupervisor ? "unverified" : "firstmate";
 }
 
 export function configuredName(home: string, fallback: string): string {
@@ -131,8 +142,31 @@ export function crewRoleContract(input: RoleContractInput): string {
 	].join("\n");
 }
 
+function unverifiedRoleContract(home: string): string {
+	const marked = isSecondmateHome(home);
+	const configDir = join(home, "config");
+	const configuredRole = identityValue(configDir, "role");
+	const configuredParent = identityValue(configDir, "parent");
+	const evidence = `secondmate marker ${marked ? "present" : "absent"}; config/identity role is ${configuredRole ?? "missing"}; parent is ${configuredParent ?? "missing"}`;
+	return [
+		"# Runtime Role Contract",
+		"priority: system/developer",
+		"You are an unverified local agent. Operate read-only until the home identity is repaired.",
+		"name: unverified",
+		"kind: unverified",
+		"reports_to: unknown",
+		"authority: read-only",
+		"scope: surface the identity conflict; do not perform firstmate or secondmate actions",
+		`identity_conflict: ${evidence}`,
+		"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
+	].join("\n");
+}
+
 export function roleContractForHome(home: string, mainHome?: string): string {
-	return isSecondmateHome(home) ? secondmateRoleContract({ home, mainHome }) : mainRoleContract({ home });
+	const kind = roleKindForHome(home);
+	if (kind === "secondmate") return secondmateRoleContract({ home, mainHome });
+	if (kind === "firstmate") return mainRoleContract({ home });
+	return unverifiedRoleContract(home);
 }
 
 export function forbiddenInSecondmate(argv: string[]): string | null {

@@ -24,7 +24,7 @@ function secondmateHome(id: string, name: string, scope: string, parent?: string
 	const home = tempHome(`fm-role-${id}-`);
 	mkdirSync(join(home, "sbin"));
 	writeFileSync(join(home, ".fm-secondmate-home"), `${id}\n`);
-	writeFileSync(join(home, "config", "identity"), `schema_version=1\nname=${name}\nrole=secondmate\n${parent ? `parent=${parent}\n` : ""}`);
+	writeFileSync(join(home, "config", "identity"), `schema_version=1\nname=${name}\nrole=${scope}\n${parent ? `parent=${parent}\n` : ""}`);
 	writeFileSync(join(home, "data", "charter.md"), `# Charter\n${name}\n\n# Routing scope\n${scope}\n\n# Project clones\nnone\n`);
 	return home;
 }
@@ -33,13 +33,14 @@ describe("runtime role contracts", () => {
 	it("generates Keel main, Kodiak secondmate, Plum secondmate, and crew contracts", () => {
 		const fallbackMain = tempHome("fm-role-main-fallback-");
 		const main = tempHome("fm-role-main-");
-		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=firstmate\n");
+		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n");
 		const kodiak = secondmateHome("kodiak", "Kodiak", "frontend and design routing", "Keel");
 		const plum = secondmateHome("plum", "Plum", "legacy evidence only", "Keel");
 		try {
 			expect(mainRoleContract({ home: fallbackMain })).toContain("name: firstmate\nkind: firstmate");
 			expect(mainRoleContract({ home: main })).toContain("You are Keel, the first mate reporting to the captain.");
 			expect(mainRoleContract({ home: main })).toContain("name: Keel\nkind: firstmate");
+			expect(roleContractForHome(main)).toContain("name: Keel\nkind: firstmate");
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("You are Kodiak, a secondmate reporting to Keel.");
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("id: kodiak\nname: Kodiak\nkind: secondmate\nreports_to: Keel");
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("routing_scope: frontend and design routing");
@@ -57,7 +58,7 @@ describe("runtime role contracts", () => {
 
 	it("updates stale generated secondmate parent when main identity is known", () => {
 		const main = tempHome("fm-role-main-");
-		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=firstmate\n");
+		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n");
 		const kodiak = secondmateHome("kodiak", "Kodiak", "frontend", "OldMain");
 		try {
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("reports_to: Keel");
@@ -65,6 +66,19 @@ describe("runtime role contracts", () => {
 		} finally {
 			rmSync(main, { recursive: true, force: true });
 			rmSync(kodiak, { recursive: true, force: true });
+		}
+	});
+
+	it("uses the structural marker when a secondmate identity has no descriptive role", () => {
+		const home = tempHome("fm-role-marker-only-");
+		writeFileSync(join(home, ".fm-secondmate-home"), "riggs\n");
+		try {
+			const contract = roleContractForHome(home);
+			expect(contract).toContain("kind: secondmate");
+			expect(contract).not.toContain("kind: firstmate");
+			expect(contract).not.toContain("kind: unverified");
+		} finally {
+			rmSync(home, { recursive: true, force: true });
 		}
 	});
 

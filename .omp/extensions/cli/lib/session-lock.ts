@@ -24,16 +24,16 @@ export function envOrUndefined(name: string): string | undefined {
 	return value && value.length > 0 ? value : undefined;
 }
 
-export function resolveState(): string {
+export function resolveState(resolvedHome?: string): string {
 	const rootOverride = envOrUndefined("FM_ROOT_OVERRIDE");
 	const fmRoot = rootOverride ?? DEFAULT_FM_ROOT;
-	const fmHome = envOrUndefined("FM_HOME") ?? rootOverride ?? fmRoot;
+	const fmHome = resolvedHome ?? envOrUndefined("FM_HOME") ?? rootOverride ?? fmRoot;
 	const stateOverride = envOrUndefined("FM_STATE_OVERRIDE");
 	return stateOverride ?? join(fmHome, "state");
 }
 
-export function resolveLockPaths(): SessionLockPaths {
-	const state = resolveState();
+export function resolveLockPaths(resolvedHome?: string): SessionLockPaths {
+	const state = resolveState(resolvedHome);
 	return { state, lockFile: join(state, ".lock"), claimDir: join(state, ".lock.claim") };
 }
 

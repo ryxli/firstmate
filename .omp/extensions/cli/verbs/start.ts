@@ -10,10 +10,10 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { lockSnapshot, removeLockIfOwner, resolveLockPaths, sleepMs, withLockClaim, writeLockOwner } from "../lib/session-lock";
+import { lockSnapshot, removeLockIfOwner, resolveLockPaths, sleepMs, withLockClaim, writeLockOwner, type SessionLockPaths } from "../lib/session-lock";
 
-import { FM_START_STATIC_CONTEXT_ENV, mainHomeStructurally, registryBlock, runStartupContext } from "../lib/startup-context";
-import { activeHome, roleContractForHome } from "../lib/role-contract";
+import { FM_START_STATIC_CONTEXT_ENV, registryBlock, runStartupContext } from "../lib/startup-context";
+import { activeHome, roleContractForHome, roleKindForHome } from "../lib/role-contract";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -24,6 +24,12 @@ interface ReservedLaunch {
 	child: ReturnType<typeof spawn>;
 	ownerPid: number;
 	gate: string;
+}
+
+interface LaunchOptions {
+	beforeLaunch?: () => Promise<boolean>;
+	launchEnv?: () => NodeJS.ProcessEnv;
+	lockHome?: string;
 }
 
 function readOptional(path: string): string | null {
@@ -108,8 +114,7 @@ function terminateChild(child: ReturnType<typeof spawn>): void {
 	}
 }
 
-function startReservedChild(ompArgs: string[], cwd: string, env: NodeJS.ProcessEnv): ReservedLaunch {
-	const paths = resolveLockPaths();
+function startReservedChild(ompArgs: string[], cwd: string, env: NodeJS.ProcessEnv, paths: SessionLockPaths): ReservedLaunch {
 	const gate = join(paths.state, `.fm-start-gate-${process.pid}-${Date.now()}`);
 	const child = spawn("/bin/sh", ["-c", "gate=$1; shift; while [ ! -e \"$gate\" ]; do sleep 0.01; done; exec omp \"$@\"", "fm-start-gate", gate, ...ompArgs], {
 		cwd,
@@ -146,8 +151,7 @@ function startReservedChild(ompArgs: string[], cwd: string, env: NodeJS.ProcessE
 	return { child, ownerPid: child.pid, gate };
 }
 
-async function waitForReservedChild(launch: ReservedLaunch): Promise<number> {
-	const paths = resolveLockPaths();
+async function waitForReservedChild(launch: ReservedLaunch, paths: SessionLockPaths): Promise<number> {
 	const status = await waitForChild(launch.child);
 	try {
 		removeLockIfOwner(paths, launch.ownerPid);
@@ -162,8 +166,8 @@ async function waitForReservedChild(launch: ReservedLaunch): Promise<number> {
 	return status;
 }
 
-async function waitAndLaunch(ompArgs: string[], cwd: string, beforeLaunch?: () => Promise<boolean>, launchEnv?: () => NodeJS.ProcessEnv): Promise<number> {
-	const paths = resolveLockPaths();
+async function waitAndLaunch(ompArgs: string[], cwd: string, options: LaunchOptions = {}): Promise<number> {
+	const paths = resolveLockPaths(options.lockHome);
 	const deadlineMs = Date.now() + envMs("FM_START_LOCK_WAIT_TIMEOUT_SECS", DEFAULT_LOCK_WAIT_TIMEOUT_MS);
 	let announced = false;
 	for (;;) {
@@ -185,11 +189,11 @@ async function waitAndLaunch(ompArgs: string[], cwd: string, beforeLaunch?: () =
 			const launched = await withLockClaim(paths, deadlineMs, async () => {
 				const claimedSnapshot = lockSnapshot(paths);
 				if (claimedSnapshot.state === "live") return undefined;
-				if (beforeLaunch && !await beforeLaunch()) return false;
-				return startReservedChild(ompArgs, cwd, launchEnv ? launchEnv() : childEnv());
+				if (options.beforeLaunch && !await options.beforeLaunch()) return false;
+				return startReservedChild(ompArgs, cwd, options.launchEnv ? options.launchEnv() : childEnv(), paths);
 			});
 			if (launched === false) return 1;
-			if (launched !== undefined) return await waitForReservedChild(launched);
+			if (launched !== undefined) return await waitForReservedChild(launched, paths);
 		} catch (error) {
 			process.stderr.write(`fm start: ${(error as Error).message}; no omp process launched\n`);
 			return 1;
@@ -197,18 +201,22 @@ async function waitAndLaunch(ompArgs: string[], cwd: string, beforeLaunch?: () =
 	}
 }
 
-async function legacyRun(argv: string[], home: string): Promise<number> {
+async function legacyRun(argv: string[], home: string, contract: string): Promise<number> {
 	const args = argv.slice(1);
-	const contract = roleContractForHome(home);
 	const context = secondmateContextBlock(home);
 	const ompArgs = [`--append-system-prompt=${contract}`, `--append-system-prompt=${context}`, ...(args.length > 0 ? args : [secondmateKickoff(contract)])];
-	return await waitAndLaunch(ompArgs, home);
+	return await waitAndLaunch(ompArgs, home, {
+		launchEnv: () => childEnv({ FM_HOME: home }),
+		lockHome: home,
+	});
 }
 
 async function run(argv: string[]): Promise<number> {
 	const args = argv.slice(1);
 	const home = activeHome(REPO_ROOT);
-	if (!mainHomeStructurally(home)) return legacyRun(argv, home);
+	const roleKind = roleKindForHome(home);
+	const roleContract = roleContractForHome(home);
+	if (roleKind !== "firstmate") return legacyRun(argv, home, roleContract);
 
 	let staticFleet = "";
 	let preflightDone = false;
@@ -228,12 +236,15 @@ async function run(argv: string[]): Promise<number> {
 		preflightDone = true;
 		return true;
 	};
-	const ompArgs = [`--append-system-prompt=${roleContractForHome(home)}`, `--append-system-prompt=${mainPreloadBlock(home)}`, ...args];
-	return await waitAndLaunch(ompArgs, home, async () => {
-		const ok = await beforeLaunch();
-		if (!ok) return false;
-		return true;
-	}, () => childEnv({ [FM_START_STATIC_CONTEXT_ENV]: staticFleet }));
+	const ompArgs = [`--append-system-prompt=${roleContract}`, `--append-system-prompt=${mainPreloadBlock(home)}`, ...args];
+	return await waitAndLaunch(ompArgs, home, {
+		beforeLaunch: async () => {
+			const ok = await beforeLaunch();
+			if (!ok) return false;
+			return true;
+		},
+		launchEnv: () => childEnv({ [FM_START_STATIC_CONTEXT_ENV]: staticFleet }),
+	});
 }
 
 export default {

@@ -21,6 +21,7 @@ printf '%s' "\${FM_SUPERVISED_SUCCESSOR:-}" > "$FM_START_TEST_OUTPUT.marker"
 printf '%s' "$#" > "$FM_START_TEST_OUTPUT.argc"
 printf '%s' "$$" > "$FM_START_TEST_OUTPUT.pid"
 printf '%s' "$lock" > "$FM_START_TEST_OUTPUT.lock"
+printf '%s' "\${FM_HOME:-}" > "$FM_START_TEST_OUTPUT.home"
 printf '%s' "\${FM_START_STATIC_CONTEXT:-}" > "$FM_START_TEST_OUTPUT.static"
 i=0
 for arg in "$@"; do
@@ -68,6 +69,7 @@ interface LaunchResult {
 	argc: string;
 	pid?: string;
 	lock?: string;
+	home?: string;
 	staticContext?: string;
 	args: string[];
 }
@@ -177,12 +179,12 @@ esac
 function fmEnv(fx: Fixture, home: string | undefined, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
-		...extra,
 		PATH: `${fx.bin}:${process.env.PATH ?? ""}`,
 		FM_STATE_OVERRIDE: fx.state,
 		FM_START_FM_BIN: fx.fmHelper,
 		FM_START_TEST_COMMAND_LOG: fx.commandLog,
 		FM_START_TEST_OUTPUT: fx.output,
+		...extra,
 	};
 	if (home === undefined) delete env.FM_HOME;
 	else env.FM_HOME = home;
@@ -234,6 +236,7 @@ function readLaunch(output: string): LaunchResult {
 		argc: String(argc),
 		pid: maybeRead(`${output}.pid`),
 		lock: maybeRead(`${output}.lock`),
+		home: maybeRead(`${output}.home`),
 		staticContext: maybeRead(`${output}.static`),
 		args,
 	};
@@ -271,6 +274,18 @@ describe("fm start launch root", () => {
 });
 
 describe("fm start main preflight", () => {
+	it("recognizes the production descriptive main role", async () => {
+		const fx = fixture();
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n");
+
+		const run = await runFm(fx, fx.home);
+
+		expect(run.status).toBe(0);
+		expect(readLaunch(fx.output).rolePrompt).toContain("kind: firstmate");
+		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json"]);
+	});
+
 	it("runs deterministic startup commands before OMP launch", async () => {
 		const fx = fixture();
 		const run = await runFm(fx, fx.home);
@@ -383,6 +398,7 @@ describe("fm start prompt", () => {
 		expect(run.status).toBe(0);
 		const result = readLaunch(fx.output);
 		expect(result.marker).toBe("");
+		expect(result.home).toBe("");
 		expect(result.argc).toBe("2");
 		expect(result.kickoff).toBeUndefined();
 		expect(result.rolePrompt.startsWith("--append-system-prompt=")).toBe(true);
@@ -417,7 +433,7 @@ describe("fm start prompt", () => {
 		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
 		mkdirSync(join(fx.home, "config"), { recursive: true });
 		mkdirSync(join(fx.home, "data"), { recursive: true });
-		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=secondmate\nparent=Keel\n");
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=Keel\n");
 		writeFileSync(join(fx.home, "data", "charter.md"), "# Charter\nRiggs\n\n# Routing scope\nfrontend routing\n");
 		writeFileSync(join(fx.home, "data", "cap.md"), "Cap prefs\n");
 		const run = await runFm(fx, undefined, {}, [], fx.home);
@@ -438,6 +454,96 @@ describe("fm start prompt", () => {
 		expect(result.appendSystemPrompt).not.toContain("Firstmate recovery");
 		expect(result.appendSystemPrompt).not.toContain("Run `sbin/fm bootstrap`");
 		expect(result.appendSystemPrompt).not.toContain("Run `fm home`");
+	});
+
+	it("propagates a structurally resolved secondmate home to OMP and its session lock", async () => {
+		const fx = fixture();
+		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
+		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=Keel\n");
+
+		const run = await runFm(fx, undefined, { FM_STATE_OVERRIDE: "" }, [], fx.home);
+
+		expect(run.status).toBe(0);
+		const result = readLaunch(fx.output);
+		expect(result.home).toBe(realpathSync(fx.home));
+		expect(result.lock).toBe(result.pid);
+		expect(existsSync(join(fx.home, "state", ".lock"))).toBe(false);
+	});
+
+	it("uses an ambient secondmate FM_HOME when starting elsewhere", async () => {
+		const fx = fixture();
+		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
+		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=Keel\n");
+
+		const run = await runFm(fx, fx.home, { FM_STATE_OVERRIDE: "" }, [], fx.temp);
+
+		expect(run.status).toBe(0);
+		const result = readLaunch(fx.output);
+		expect(result.home).toBe(fx.home);
+		expect(result.rolePrompt).toContain("kind: secondmate");
+		expect(result.rolePrompt).not.toContain("kind: firstmate");
+	});
+
+	it("fails read-only when a production secondmate identity lacks its structural marker", async () => {
+		const fx = fixture();
+		const ambientMain = join(fx.temp, "main");
+		mkdirSync(join(ambientMain, "state"), { recursive: true });
+		writeFileSync(join(ambientMain, "AGENTS.md"), "# main\n");
+		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=Keel\n");
+
+		const run = await runFm(fx, ambientMain, { FM_STATE_OVERRIDE: "" }, [], fx.home);
+
+		expect(run.status).toBe(0);
+		const result = readLaunch(fx.output);
+		expect(commandLog(fx)).toEqual([]);
+		expect(result.rolePrompt).toContain("kind: unverified");
+		expect(result.rolePrompt).toContain("authority: read-only");
+		expect(result.rolePrompt).toContain("parent is Keel");
+		expect(result.rolePrompt).not.toContain("kind: firstmate");
+		expect(result.home).toBe(realpathSync(fx.home));
+	});
+
+	it("fails read-only when marker and configured identity role disagree", async () => {
+		const fx = fixture();
+		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
+		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=firstmate\nparent=Keel\n");
+
+		const run = await runFm(fx, undefined, { FM_STATE_OVERRIDE: "" }, [], fx.home);
+
+		expect(run.status).toBe(0);
+		const result = readLaunch(fx.output);
+		expect(commandLog(fx)).toEqual([]);
+		expect(result.rolePrompt).toContain("kind: unverified");
+		expect(result.rolePrompt).toContain("authority: read-only");
+		expect(result.rolePrompt).not.toContain("kind: firstmate");
+		expect(result.rolePrompt).not.toContain("kind: secondmate");
+	});
+
+	it("fails read-only when a secondmate marker conflicts with parent=captain", async () => {
+		const fx = fixture();
+		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
+		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=captain\n");
+
+		const run = await runFm(fx, undefined, { FM_STATE_OVERRIDE: "" }, [], fx.home);
+
+		expect(run.status).toBe(0);
+		const result = readLaunch(fx.output);
+		expect(commandLog(fx)).toEqual([]);
+		expect(result.rolePrompt).toContain("kind: unverified");
+		expect(result.rolePrompt).toContain("authority: read-only");
+		expect(result.rolePrompt).toContain("parent is captain");
+		expect(result.rolePrompt).not.toContain("kind: firstmate");
+		expect(result.rolePrompt).not.toContain("kind: secondmate");
 	});
 });
 
