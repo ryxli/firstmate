@@ -1140,6 +1140,7 @@ async function run(argv: string[]): Promise<number> {
 export default {
 	name: "tasks",
 	describe: "Manage the backlog and live fleet tasks.",
-	surface: "captain",
+	surface: "captain" as const,
+	help: { format: "document" as const, document: "fm tasks" },
 	run,
 };

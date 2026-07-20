@@ -15,5 +15,6 @@ async function run(argv: string[]): Promise<number> {
 export default {
 	name: "task",
 	describe: "Alias for `tasks` (add/list/show/start/done/reopen/update/block/unblock/hold/unhold/ready/mv/prune/render/fleet).",
+	help: { format: "document" as const, document: "fm tasks" },
 	run,
 };

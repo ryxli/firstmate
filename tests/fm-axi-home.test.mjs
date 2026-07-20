@@ -88,9 +88,10 @@ PLUM_ONLY = "kept"
 
   const rootHelp = toon(run(["--help"]), "root help");
   assert(rootHelp.command === "fm", `root help command was ${JSON.stringify(rootHelp.command)}`);
-  assert(rootHelp.commands.some(command => command.command === "home"), "root help omitted home command");
-  assert(String(rootHelp.usage).includes("home <check|repair> <mate|--all>"), "root help omitted exact home grammar");
-  console.log("ok - root help is TOON and documents home grammar");
+  const setupGroup = (rootHelp.groups || []).find(group => group.name === "Setup");
+  assert(setupGroup?.commands?.some(command => command.command === "home"), "root help omitted home in Setup group");
+  assert(Array.isArray(rootHelp.workflow) && rootHelp.workflow.length > 0, "root help omitted Cap-facing workflow");
+  console.log("ok - root help is TOON Cap-facing workflow guide");
 
   const homeHelp = toon(run(["home", "--help"]), "home help");
   assert(homeHelp.command === "fm home", `home help command was ${JSON.stringify(homeHelp.command)}`);

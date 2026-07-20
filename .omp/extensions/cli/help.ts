@@ -1,11 +1,84 @@
-// Captain-facing help: opinionated workflow guide for root `fm --help`,
-// plus nested `fm fleet --help` / `fm home --help`.
+// Cap-facing help: opinionated workflow guide for root `fm --help`,
+// nested fleet/home/tasks documents, and central top-level verb help rendering.
 // Full verb inventory remains `fm toolbelt` (discovery-driven).
+//
+// Invariant: emitTopLevelVerbHelp renders only passive HelpSpec / pure builders.
+// It must never call verb.run or other operational verb code.
+
+import { output } from "./common";
 
 type HelpCommand = { command: string; description: string };
 
 function cmd(command: string, description: string): HelpCommand {
 	return { command, description };
+}
+
+const SEND_DESCRIBE =
+	"Inject operator-style input into a visible pane or invoke narrow pane controls. Not agent messaging.";
+
+const PEER_BUS_NOTE =
+	"Normal agent communication uses the peer bus. `fm send` operates the visible operator-input surface.";
+
+export type HelpSpec =
+	| {
+			format?: "toon";
+			usage: string;
+			description?: string;
+			commands?: HelpCommand[];
+			notes?: string[];
+			help?: string[];
+	  }
+	| {
+			format: "text";
+			body: string;
+	  }
+	| {
+			format: "document";
+			document: "fm fleet" | "fm home" | "fm tasks";
+	  };
+
+export type HelpableVerb = {
+	name: string;
+	describe: string;
+	usage?: string;
+	help?: HelpSpec;
+};
+
+const TASKS_SUBCOMMANDS = [
+	"add",
+	"list",
+	"show",
+	"start",
+	"done",
+	"reopen",
+	"update",
+	"block",
+	"unblock",
+	"hold",
+	"unhold",
+	"ready",
+	"mv",
+	"prune",
+	"render",
+	"fleet",
+	"artifact",
+] as const;
+
+/** Pure tasks top-level help; `invokedCommand` is the registry name (`tasks` or alias `task`). */
+export function tasksHelpDocument(invokedCommand: string): Record<string, unknown> {
+	return {
+		command: invokedCommand,
+		usage: `fm ${invokedCommand} [--fleet] [add|list|show|start|done|reopen|update|block|unblock|hold|unhold|ready|mv|prune|render|fleet|artifact]`,
+		description: "Manage the backlog and live fleet tasks.",
+		commands: TASKS_SUBCOMMANDS.map(name => ({
+			command: name,
+			description: `See \`fm ${invokedCommand} ${name} --help\`.`,
+		})),
+		notes:
+			invokedCommand === "task"
+				? ["`task` is an alias of `tasks`; subcommands are identical."]
+				: undefined,
+	};
 }
 
 export function commandHelp(command = "fm"): Record<string, unknown> {
@@ -16,7 +89,7 @@ export function commandHelp(command = "fm"): Record<string, unknown> {
 			workflow: [
 				cmd("fm spawn …", "Dispatch a worker."),
 				cmd("fm peek <mate>", "Inspect current progress."),
-				cmd("fm send <mate> …", "Steer or control the worker."),
+				cmd("fm send <mate> …", SEND_DESCRIBE),
 				cmd("fm accept <task>", "Approve the candidate."),
 				cmd("fm finish <task>", "Integrate and clean up."),
 			],
@@ -34,7 +107,7 @@ export function commandHelp(command = "fm"): Record<string, unknown> {
 					commands: [
 						cmd("panes", "List herdr panes and agent status."),
 						cmd("peek", "Show a bounded tail of a mate's pane output."),
-						cmd("send", "Steer or control a visible pane."),
+						cmd("send", SEND_DESCRIBE),
 						cmd("revise", "Record a pre-accept correction; keep the workspace open."),
 					],
 				},
@@ -70,6 +143,7 @@ export function commandHelp(command = "fm"): Record<string, unknown> {
 				"`fm health` is a quick local pulse; `fm fleet check` is the resting gate (includes omp-subagents).",
 				"`fm finish` integrates and lands an accepted task; `fm teardown` removes worktree/pane after work is done (or retires a secondmate home).",
 				"`fm home` checks/repairs mate homes; `fm home seed` provisions a new secondmate home.",
+				PEER_BUS_NOTE,
 			],
 			help: [
 				"More: `fm tasks --help`, `fm fleet --help`, `fm home --help`.",
@@ -120,10 +194,53 @@ export function commandHelp(command = "fm"): Record<string, unknown> {
 		};
 	}
 
+	if (command === "fm tasks") {
+		return tasksHelpDocument("tasks");
+	}
+
 	return {
 		command,
 		usage: "fm <command> …",
 		commands: [],
-		help: ["Run `fm --help` for the captain workflow guide."],
+		help: ["Run `fm --help` for the Cap-facing workflow guide."],
 	};
 }
+
+/** Render top-level verb help to stdout only. Never invokes operational verb code. */
+export function emitTopLevelVerbHelp(verb: HelpableVerb): number {
+	const spec = verb.help;
+	if (!spec) {
+		output({
+			command: verb.name,
+			description: verb.describe,
+			usage: verb.usage ?? `fm ${verb.name} …`,
+		});
+		return 0;
+	}
+	if (spec.format === "text") {
+		const body = spec.body.endsWith("\n") ? spec.body : `${spec.body}\n`;
+		process.stdout.write(body);
+		return 0;
+	}
+	if (spec.format === "document") {
+		if (spec.document === "fm tasks") {
+			output(tasksHelpDocument(verb.name));
+			return 0;
+		}
+		output(commandHelp(spec.document));
+		return 0;
+	}
+	const doc: Record<string, unknown> = {
+		command: verb.name,
+		usage: spec.usage,
+		description: spec.description ?? verb.describe,
+	};
+	if (spec.commands?.length) doc.commands = spec.commands;
+	if (spec.notes?.length) doc.notes = spec.notes;
+	if (spec.help?.length) doc.help = spec.help;
+	output(doc);
+	return 0;
+}
+
+export const SEND_HELP_DESCRIBE = SEND_DESCRIBE;
+export const SEND_PEER_BUS_NOTE = PEER_BUS_NOTE;

@@ -1,47 +1,21 @@
 #!/usr/bin/env -S BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 bun
 // fm - canonical TOON-native agent CLI entry point.
 //
-// Dispatches to verb modules auto-discovered from .omp/extensions/cli/verbs/*.ts.
+// Dispatches to verb modules auto-discovered via lib/verb-registry.ts.
 // Each verb module is one file exporting a default { name, describe, run(argv) }.
-// Adding a verb requires adding exactly one file here: there is no separate
-// registry to edit.
+// Adding a verb requires adding exactly one file: there is no separate registry.
 //
-// Root `fm --help` is the captain workflow guide (help.ts), not a verb dump.
+// Root `fm --help` is the Cap-facing workflow guide (help.ts), not a verb dump.
+// Bare `fm <verb> --help|-h` is intercepted here and rendered from passive HelpSpec
+// before run() - help never invokes operational verb code.
 // Full inventory: `fm toolbelt`. Nested detail: `fm fleet|home|tasks --help`.
 // `help` is accepted as a synonym for `--help`.
 
-import { readdirSync } from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { didYouMean, output, validationError } from "../.omp/extensions/cli/common";
-import { commandHelp } from "../.omp/extensions/cli/help";
+import { commandHelp, emitTopLevelVerbHelp } from "../.omp/extensions/cli/help";
 import { activeHome, forbiddenInSecondmate, isSecondmateHome } from "../.omp/extensions/cli/lib/role-contract";
-
-interface Verb {
-	name: string;
-	describe: string;
-	surface?: "captain" | "internal";
-	run(argv: string[]): number | Promise<number>;
-}
-
-const VERBS_DIR = fileURLToPath(new URL("../.omp/extensions/cli/verbs/", import.meta.url));
-
-async function loadVerbs(): Promise<Verb[]> {
-	let entries: string[] = [];
-	try {
-		entries = readdirSync(VERBS_DIR).filter(name => name.endsWith(".ts")).sort();
-	} catch {
-		entries = [];
-	}
-	const verbs: Verb[] = [];
-	for (const entry of entries) {
-		const mod = await import(pathToFileURL(`${VERBS_DIR}${entry}`).href);
-		const verb = mod.default;
-		if (verb && typeof verb.name === "string" && typeof verb.describe === "string" && typeof verb.run === "function") {
-			verbs.push(verb as Verb);
-		}
-	}
-	return verbs.sort((a, b) => a.name.localeCompare(b.name));
-}
+import { loadVerbs } from "../.omp/extensions/cli/lib/verb-registry";
 
 async function main(): Promise<number> {
 	const argv = process.argv.slice(2);
@@ -76,6 +50,9 @@ async function main(): Promise<number> {
 	if (!verb) {
 		const suggestions = didYouMean(verbs.map(candidate => candidate.name), argv[0]);
 		return validationError(`Unknown command: ${argv[0]}`, suggestions.length > 0 ? [`Did you mean: ${suggestions.join(", ")}?`] : ["Run `fm --help` for available commands."]);
+	}
+	if (argv.length === 2 && (argv[1] === "--help" || argv[1] === "-h")) {
+		return emitTopLevelVerbHelp(verb);
 	}
 	return await verb.run(argv);
 }

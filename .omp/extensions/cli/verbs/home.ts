@@ -186,6 +186,7 @@ async function run(argv: string[]): Promise<number> {
 export default {
 	name: "home",
 	describe: "Check or repair mate-home layout and skills.",
-	surface: "captain",
+	surface: "captain" as const,
+	help: { format: "document" as const, document: "fm home" },
 	run,
 };

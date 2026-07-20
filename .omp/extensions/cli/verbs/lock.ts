@@ -75,5 +75,6 @@ async function run(argv: string[]): Promise<number> {
 export default {
 	name: "lock",
 	describe: "Acquire, release, or report the per-home firstmate session lock.",
+	help: { format: "text" as const, body: USAGE },
 	run,
 };

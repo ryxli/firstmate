@@ -1000,6 +1000,26 @@ async function run(argv: string[]): Promise<number> {
 export default {
 	name: "spawn",
 	describe: "Spawn a crewmate or secondmate.",
-	surface: "captain",
+	surface: "captain" as const,
+	help: {
+		usage:
+			"fm spawn <task-id> <project-dir> [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>] [--crew-model=<model>]\n" +
+			"fm spawn <task-id> [<firstmate-home>] [harness|launch-command] --secondmate [--workspace=<id>] [--tab=<id>]",
+		description: "Spawn a crewmate in a git worktree, or a secondmate in its isolated firstmate home.",
+		commands: [
+			{
+				command: "spawn <task-id> <project-dir> …",
+				description: "Crewmate/task spawn into a project worktree (optional --scout).",
+			},
+			{
+				command: "spawn <task-id> … --secondmate",
+				description: "Secondmate spawn into a provisioned firstmate home.",
+			},
+		],
+		notes: [
+			"Batch form: fm spawn id=repo … for multiple crewmate tasks.",
+			"`--help` / `-h` are never task ids or paths.",
+		],
+	},
 	run,
 };

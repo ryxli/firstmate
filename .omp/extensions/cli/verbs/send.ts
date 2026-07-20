@@ -254,9 +254,19 @@ async function run(argv: string[]): Promise<number> {
 	return 0;
 }
 
+const SEND_DESCRIBE =
+	"Inject operator-style input into a visible pane or invoke narrow pane controls. Not agent messaging.";
+
 export default {
 	name: "send",
-	describe: "Steer or control a visible pane.",
-	surface: "captain",
+	describe: SEND_DESCRIBE,
+	surface: "captain" as const,
+	help: {
+		usage: "fm send <pane> [--steer] <text...>\n       fm send <pane> [--steer] --key <key>\n       fm send <pane> [--steer] --interrupt|--exit",
+		description: SEND_DESCRIBE,
+		notes: [
+			"Normal agent communication uses the peer bus. `fm send` operates the visible operator-input surface.",
+		],
+	},
 	run,
 };
