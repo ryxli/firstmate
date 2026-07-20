@@ -41,7 +41,7 @@ import {
 	type Task,
 	type TaskState,
 } from "../lib/backlog-store";
-import { actionableFleetView, collectSnapshot, findTask, normalizeTaskState, rankedTasks } from "../../bridge/collect";
+import { collectSnapshot, findTask, normalizeTaskState, rankedTasks } from "../../bridge/collect";
 import type { FleetSnapshot, TaskRow } from "../../bridge/fleet";
 import { didYouMean } from "../common";
 import {
@@ -873,21 +873,15 @@ async function cmdFleet(rest: string[]): Promise<number> {
 		return 0;
 	}
 	let state: TaskRow["state"] | undefined;
-	const full = args.includes("--full");
-	const filtered = args.filter(a => a !== "--full");
-	if (filtered.length === 2) {
-		if (filtered[0] !== "--state") return errorOut(`unexpected argument: ${filtered[0]}`, "VALIDATION_ERROR", ["Use `--state` to filter tasks."]);
-		state = normalizeTaskState(filtered[1]);
-		if (!state) return errorOut(`invalid task state: ${filtered[1]}`, "VALIDATION_ERROR", ["Choose in-flight, queued, or done."]);
-	} else if (filtered.length !== 0) {
-		return errorOut("invalid fleet arguments", "VALIDATION_ERROR", ["Use `fm tasks fleet [--state <in-flight|queued|done>] [--full]` or `fm tasks fleet get <id>`."]);
+	if (args.length === 2) {
+		if (args[0] !== "--state") return errorOut(`unexpected argument: ${args[0]}`, "VALIDATION_ERROR", ["Use `--state` to filter tasks."]);
+		state = normalizeTaskState(args[1]);
+		if (!state) return errorOut(`invalid task state: ${args[1]}`, "VALIDATION_ERROR", ["Choose in-flight, queued, or done."]);
+	} else if (args.length !== 0) {
+		return errorOut("invalid fleet arguments", "VALIDATION_ERROR", ["Use `fm tasks fleet [--state <in-flight|queued|done>]` or `fm tasks fleet get <id>`."]);
 	}
 	const snapshot = await collectSnapshot();
-	if (!state && !full) {
-		process.stdout.write(`${toon({ command: "tasks fleet", result: actionableFleetView(snapshot) })}\n`);
-	} else {
-		process.stdout.write(`${toon({ command: "tasks fleet", result: rankedTasks(snapshot, state, { full }) })}\n`);
-	}
+	process.stdout.write(`${toon({ command: "tasks fleet", result: rankedTasks(snapshot, state) })}\n`);
 	return 0;
 }
 
