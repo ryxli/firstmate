@@ -28,9 +28,10 @@ Nudge updated secondmates to re-read and observe pane state.
 
 ## Optional local infrastructure
 
-After the fleet update, read `## Personal infrastructure update set` in local `data/cap.md`.
-Each bullet is one extra checkout; missing section means no optional targets.
+After the fleet update, read local `data/update-targets.md` when present.
+Each bullet is one extra checkout; missing file means no optional targets.
 Never touch `firstmate/projects/`.
+Do not preload this file into always-on context.
 
 For each optional checkout the script does not cover:
 

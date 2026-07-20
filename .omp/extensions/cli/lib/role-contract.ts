@@ -1,9 +1,41 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homeFromCwd } from "./root";
-import { identityValue } from "./identity";
+import { assertIdentityDisplayName, identityValue } from "./identity";
 
 const DEFAULT_MAIN_NAME = "firstmate";
+
+export { IDENTITY_DISPLAY_NAME_MAX_BYTES, IdentityNameOversizeError, assertIdentityDisplayName } from "./identity";
+
+/**
+ * UTF-8 byte ceiling for main and unverified Runtime Role Contracts only.
+ * Secondmate and crew contracts are not under this bound (routing_scope / brief can be larger).
+ */
+export const MAIN_UNVERIFIED_ROLE_CONTRACT_MAX_BYTES = 581;
+
+export class RoleContractOversizeError extends Error {
+	readonly actualBytes: number;
+	readonly maxBytes: number;
+
+	constructor(actualBytes: number, maxBytes: number) {
+		super(`main/unverified runtime role contract exceeds UTF-8 byte limit: ${actualBytes} > ${maxBytes}`);
+		this.name = "RoleContractOversizeError";
+		this.actualBytes = actualBytes;
+		this.maxBytes = maxBytes;
+	}
+}
+
+function enforceMainUnverifiedRoleContractCeiling(contract: string): string {
+	const actualBytes = Buffer.byteLength(contract, "utf8");
+	if (actualBytes > MAIN_UNVERIFIED_ROLE_CONTRACT_MAX_BYTES) {
+		throw new RoleContractOversizeError(actualBytes, MAIN_UNVERIFIED_ROLE_CONTRACT_MAX_BYTES);
+	}
+	return contract;
+}
+
+function fieldPresence(value: string | null): "set" | "missing" {
+	return value === null || value.length === 0 ? "missing" : "set";
+}
 
 export type RoleKind = "firstmate" | "secondmate" | "crew" | "unverified";
 
@@ -37,11 +69,17 @@ export function roleKindForHome(home: string): Extract<RoleKind, "firstmate" | "
 }
 
 export function configuredName(home: string, fallback: string): string {
-	return identityValue(join(home, "config"), "name") ?? fallback;
+	const identityPath = join(home, "config", "identity");
+	const name = identityValue(join(home, "config"), "name") ?? fallback;
+	assertIdentityDisplayName(name, "name", identityPath);
+	return name;
 }
 
 export function configuredParent(home: string, fallback: string): string {
-	return identityValue(join(home, "config"), "parent") ?? fallback;
+	const identityPath = join(home, "config", "identity");
+	const parent = identityValue(join(home, "config"), "parent") ?? fallback;
+	assertIdentityDisplayName(parent, "parent", identityPath);
+	return parent;
 }
 
 function markerId(home: string): string {
@@ -79,32 +117,39 @@ export function ensureSecondmateParentIdentity(home: string, parentName: string,
 		text = readFileSync(identityFile, "utf8");
 	} catch {
 		const id = markerId(home);
-		writeFileSync(identityFile, `schema_version=1\nname=${title(id)}\nrole=secondmate\nparent=${parentName}\n`);
+		const name = title(id);
+		assertIdentityDisplayName(name, "name", identityFile);
+		assertIdentityDisplayName(parentName, "parent", identityFile);
+		writeFileSync(identityFile, `schema_version=1\nname=${name}\nrole=secondmate\nparent=${parentName}\n`);
 		return;
 	}
 	if (/^\s*parent\s*=/m.test(text)) {
 		if (!updateExisting) return;
+		assertIdentityDisplayName(parentName, "parent", identityFile);
 		const updated = text.replace(/^\s*parent\s*=.*$/m, `parent=${parentName}`);
 		if (updated !== text) writeFileSync(identityFile, updated);
 		return;
 	}
+	assertIdentityDisplayName(parentName, "parent", identityFile);
 	const suffix = text.endsWith("\n") ? "" : "\n";
 	writeFileSync(identityFile, `${text}${suffix}parent=${parentName}\n`);
 }
 
 export function mainRoleContract(input: RoleContractInput): string {
 	const name = configuredName(input.home, DEFAULT_MAIN_NAME);
-	return [
-		"# Runtime Role Contract",
-		"priority: system/developer",
-		`You are ${name}, the first mate reporting to the captain.`,
-		`name: ${name}`,
-		"kind: firstmate",
-		"reports_to: captain",
-		"authority: fleet-wide supervisor, direct captain interface, fleet-policy owner",
-		"scope: all registered homes, direct reports, fleet routing, and shared firstmate policy",
-		"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
-	].join("\n");
+	return enforceMainUnverifiedRoleContractCeiling(
+		[
+			"# Runtime Role Contract",
+			"priority: system/developer",
+			`You are ${name}, the first mate reporting to the captain.`,
+			`name: ${name}`,
+			"kind: firstmate",
+			"reports_to: captain",
+			"authority: fleet-wide supervisor, direct captain interface, fleet-policy owner",
+			"scope: all registered homes, direct reports, fleet routing, and shared firstmate policy",
+			"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
+		].join("\n"),
+	);
 }
 
 export function secondmateRoleContract(input: RoleContractInput): string {
@@ -146,20 +191,22 @@ function unverifiedRoleContract(home: string): string {
 	const marked = isSecondmateHome(home);
 	const configDir = join(home, "config");
 	const configuredRole = identityValue(configDir, "role");
-	const configuredParent = identityValue(configDir, "parent");
-	const evidence = `secondmate marker ${marked ? "present" : "absent"}; config/identity role is ${configuredRole ?? "missing"}; parent is ${configuredParent ?? "missing"}`;
-	return [
-		"# Runtime Role Contract",
-		"priority: system/developer",
-		"You are an unverified local agent. Operate read-only until the home identity is repaired.",
-		"name: unverified",
-		"kind: unverified",
-		"reports_to: unknown",
-		"authority: read-only",
-		"scope: surface the identity conflict; do not perform firstmate or secondmate actions",
-		`identity_conflict: ${evidence}`,
-		"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
-	].join("\n");
+	const configuredParentValue = identityValue(configDir, "parent");
+	const evidence = `secondmate marker ${marked ? "present" : "absent"}; config/identity role is ${fieldPresence(configuredRole)}; parent is ${fieldPresence(configuredParentValue)}`;
+	return enforceMainUnverifiedRoleContractCeiling(
+		[
+			"# Runtime Role Contract",
+			"priority: system/developer",
+			"You are an unverified local agent. Operate read-only until the home identity is repaired.",
+			"name: unverified",
+			"kind: unverified",
+			"reports_to: unknown",
+			"authority: read-only",
+			"scope: surface the identity conflict; do not perform firstmate or secondmate actions",
+			`identity_conflict: ${evidence}`,
+			"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
+		].join("\n"),
+	);
 }
 
 export function roleContractForHome(home: string, mainHome?: string): string {

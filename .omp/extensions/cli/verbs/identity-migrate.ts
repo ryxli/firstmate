@@ -38,6 +38,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { assertIdentityDisplayName } from "../lib/identity";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "");
 const SCHEMA_VERSION = "1";
@@ -151,6 +152,25 @@ function collectAllEntries(reg: string): Array<[string, string, string]> {
 
 // Emit one STATUS line: "OK\t<id>\t<home>" or "UNRESOLVED\t<id>\t<home>\t<reason>".
 // Does not modify any files.
+function validateIdentityDisplayFields(identityPath: string, content: string): string | null {
+	const existingName = trimTrailing(extractFieldValue(content, "name") ?? "");
+	if (existingName.length === 0) return "identity-no-name";
+	try {
+		assertIdentityDisplayName(existingName, "name", identityPath);
+	} catch (error) {
+		return (error as Error).message;
+	}
+	const existingParent = trimTrailing(extractFieldValue(content, "parent") ?? "");
+	if (existingParent.length > 0) {
+		try {
+			assertIdentityDisplayName(existingParent, "parent", identityPath);
+		} catch (error) {
+			return (error as Error).message;
+		}
+	}
+	return null;
+}
+
 function checkHome(id: string, home: string): string {
 	const markerPath = `${home}/.fm-secondmate-home`;
 	const identityPath = `${home}/config/identity`;
@@ -160,9 +180,12 @@ function checkHome(id: string, home: string): string {
 	const markerId = readFileSync(markerPath, "utf8").replace(/\s/g, "");
 	if (markerId !== id) return `UNRESOLVED\t${id}\t${home}\tmarker-mismatch:${markerId}`;
 	if (!existsSync(identityPath)) return `UNRESOLVED\t${id}\t${home}\tno-identity`;
-	const sv = trimTrailing(extractFieldValue(readFileSync(identityPath, "utf8"), "schema_version") ?? "");
-	if (sv === SCHEMA_VERSION) return `OK\t${id}\t${home}`;
-	return `UNRESOLVED\t${id}\t${home}\tunversioned`;
+	const content = readFileSync(identityPath, "utf8");
+	const sv = trimTrailing(extractFieldValue(content, "schema_version") ?? "");
+	if (sv !== SCHEMA_VERSION) return `UNRESOLVED\t${id}\t${home}\tunversioned`;
+	const fieldError = validateIdentityDisplayFields(identityPath, content);
+	if (fieldError !== null) return `UNRESOLVED\t${id}\t${home}\t${fieldError}`;
+	return `OK\t${id}\t${home}`;
 }
 
 // Emit one STATUS line to stdout (or stderr for CONFLICT/ERROR).
@@ -191,13 +214,18 @@ function migrateHome(id: string, home: string, srcReg: string, dryRun: boolean):
 		const content = readFileSync(identityPath, "utf8");
 		const sv = trimTrailing(extractFieldValue(content, "schema_version") ?? "");
 		if (sv === SCHEMA_VERSION) {
+			const fieldError = validateIdentityDisplayFields(identityPath, content);
+			if (fieldError !== null) {
+				process.stderr.write(`CONFLICT\t${id}\t${home}\t${fieldError}\n`);
+				return false;
+			}
 			process.stdout.write(`ALREADY_VERSIONED\t${id}\t${home}\n`);
 			return true;
 		}
 		// Require name= - an identity file without it cannot be safely migrated.
-		const existingName = trimTrailing(extractFieldValue(content, "name") ?? "");
-		if (existingName.length === 0) {
-			process.stderr.write(`CONFLICT\t${id}\t${home}\tidentity-no-name\n`);
+		const fieldError = validateIdentityDisplayFields(identityPath, content);
+		if (fieldError !== null) {
+			process.stderr.write(`CONFLICT\t${id}\t${home}\t${fieldError}\n`);
 			return false;
 		}
 		if (dryRun) {
@@ -217,6 +245,12 @@ function migrateHome(id: string, home: string, srcReg: string, dryRun: boolean):
 	// Marker-only home: create identity from marker + registry role hint.
 	const name = capitalizeId(id);
 	const role = registryRoleForId(id, srcReg) ?? "";
+	try {
+		assertIdentityDisplayName(name, "name", identityPath);
+	} catch (error) {
+		process.stderr.write(`CONFLICT\t${id}\t${home}\t${(error as Error).message}\n`);
+		return false;
+	}
 	if (dryRun) {
 		process.stdout.write(`WOULD_CREATE\t${id}\t${home}\tname=${name}\n`);
 		return true;

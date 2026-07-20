@@ -25,6 +25,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMateMiseToml } from "../lib/mise-home";
+import { checkMateHomeLayout, repairMateHomeLayout } from "../lib/mate-home-layout";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const SUB_HOME_MARKER = ".fm-secondmate-home";
@@ -70,11 +71,6 @@ function normalizePath(path: string): string | null {
 	} catch {
 		return null;
 	}
-}
-
-function pathIsDescendant(root: string, path: string): boolean {
-	if (root === path) return false;
-	return path.startsWith(`${root}/`);
 }
 
 function resolveLinkTarget(link: string): string | null {
@@ -305,26 +301,29 @@ function checkMiseToml(ctx: Ctx): void {
 	else ctx.status = result.status;
 }
 
-function checkOperationalDir(ctx: Ctx, name: string): void {
-	const dir = join(ctx.homePath, name);
-	if (!existsSync(dir)) {
-		setBlock(ctx, "missing");
+function checkMateLayout(ctx: Ctx): void {
+	const layoutKey = (rel: string) => `layout.${rel.replace(/\//g, ".")}`;
+	if (ctx.mode === "repair") {
+		const repaired = repairMateHomeLayout(ctx.homePath);
+		for (const rel of repaired.created) {
+			process.stdout.write(`${layoutKey(rel)}=repaired\n`);
+		}
+		for (const issue of repaired.issues) {
+			setBlock(ctx, issue.code);
+			process.stdout.write(`${layoutKey(issue.rel)}=blocked:${issue.code}\n`);
+		}
+		ctx.status = repaired.ok ? (repaired.created.length > 0 ? "repaired" : "ok") : ctx.status;
+		statusLine(ctx, "layout");
 		return;
 	}
-	if (!isDirectoryFollow(dir)) {
-		setBlock(ctx, "not-directory");
-		return;
+
+	const checked = checkMateHomeLayout(ctx.homePath);
+	for (const issue of checked.issues) {
+		setBlock(ctx, issue.code);
+		process.stdout.write(`${layoutKey(issue.rel)}=blocked:${issue.code}\n`);
 	}
-	const absDir = normalizeExistingDir(dir);
-	if (absDir === null) {
-		setBlock(ctx, "unresolved");
-		return;
-	}
-	if (pathIsDescendant(ctx.homePath, absDir)) {
-		ctx.status = "ok";
-	} else {
-		setBlock(ctx, "escapes-home");
-	}
+	if (checked.ok) ctx.status = "ok";
+	statusLine(ctx, "layout");
 }
 
 async function run(argv: string[]): Promise<number> {
@@ -374,10 +373,7 @@ async function run(argv: string[]): Promise<number> {
 		statusLine(ctx, "legacy.bin");
 		statusLine(ctx, "marker");
 
-		for (const op of ["data", "state", "config", "projects"]) {
-			checkOperationalDir(ctx, op);
-			statusLine(ctx, `operational.${op}`);
-		}
+		checkMateLayout(ctx);
 
 		repairLink(ctx, "AGENTS.md", join(codeRoot, "AGENTS.md"));
 		statusLine(ctx, "link.AGENTS.md");

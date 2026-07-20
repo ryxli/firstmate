@@ -12,8 +12,8 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { lockSnapshot, removeLockIfOwner, resolveLockPaths, sleepMs, withLockClaim, writeLockOwner, type SessionLockPaths } from "../lib/session-lock";
 
-import { FM_START_STATIC_CONTEXT_ENV, registryBlock, runStartupContext } from "../lib/startup-context";
-import { activeHome, roleContractForHome, roleKindForHome } from "../lib/role-contract";
+import { FM_START_STATIC_CONTEXT_ENV, CaptainContextOversizeError, mainPreloadBlock, runStartupContext } from "../lib/startup-context";
+import { activeHome, IdentityNameOversizeError, RoleContractOversizeError, roleContractForHome, roleKindForHome } from "../lib/role-contract";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -52,20 +52,6 @@ function secondmateContextBlock(home: string): string {
 	if (cap) parts.push("## Local cap context", cap);
 	const backlog = readOptional(join(home, "data", "backlog.md"));
 	if (backlog) parts.push("## Local backlog", backlog);
-	return parts.join("\n\n");
-}
-
-function mainPreloadBlock(home: string): string {
-	const parts = [
-		"# Startup preflight",
-		"`fm start` already ran bootstrap, identity migration/check, home link check/repair when needed, Lavish recovery, and one fleet snapshot before launching this OMP process.",
-		"Bootstrap and recovery procedure bodies are not preloaded in this default context.",
-		"The static fleet representation is delivered as one visible `fm-start-static` session-start message. Treat it as static as of its `As of` line, and refresh live state with `fm fleet` before acting on later changes.",
-	];
-	const registries = registryBlock(home, REPO_ROOT);
-	if (registries.length > 0) {
-		parts.push("# Preloaded fleet registries", "Stable desired context loaded at session launch. Live state is owned by the static fleet representation above until refreshed.", ...registries);
-	}
 	return parts.join("\n\n");
 }
 
@@ -215,8 +201,37 @@ async function run(argv: string[]): Promise<number> {
 	const args = argv.slice(1);
 	const home = activeHome(REPO_ROOT);
 	const roleKind = roleKindForHome(home);
-	const roleContract = roleContractForHome(home);
-	if (roleKind !== "firstmate") return legacyRun(argv, home, roleContract);
+
+	let roleContract: string;
+	let preload: string;
+	try {
+		roleContract = roleContractForHome(home);
+		if (roleKind !== "firstmate") {
+			return await legacyRun(argv, home, roleContract);
+		}
+		preload = mainPreloadBlock(home);
+	} catch (error) {
+		if (error instanceof CaptainContextOversizeError) {
+			process.stderr.write(
+				`fm start: ${error.path} is ${error.actualBytes} UTF-8 bytes; allowed ${error.maxBytes}. Shrink data/cap.md; OMP was not launched.\n`,
+			);
+			return 1;
+		}
+		if (error instanceof IdentityNameOversizeError) {
+			process.stderr.write(
+				`fm start: identity ${error.field} is ${error.actualBytes} UTF-8 bytes; allowed ${error.maxBytes}${error.path ? ` (${error.path})` : ""}. OMP was not launched.\n`,
+			);
+			return 1;
+		}
+		if (error instanceof RoleContractOversizeError) {
+			process.stderr.write(
+				`fm start: main/unverified runtime role contract is ${error.actualBytes} UTF-8 bytes; allowed ${error.maxBytes}. OMP was not launched.\n`,
+			);
+			return 1;
+		}
+		process.stderr.write(`fm start: ${(error as Error).message}; OMP was not launched.\n`);
+		return 1;
+	}
 
 	let staticFleet = "";
 	let preflightDone = false;
@@ -236,7 +251,7 @@ async function run(argv: string[]): Promise<number> {
 		preflightDone = true;
 		return true;
 	};
-	const ompArgs = [`--append-system-prompt=${roleContract}`, `--append-system-prompt=${mainPreloadBlock(home)}`, ...args];
+	const ompArgs = [`--append-system-prompt=${roleContract}`, `--append-system-prompt=${preload}`, ...args];
 	return await waitAndLaunch(ompArgs, home, {
 		beforeLaunch: async () => {
 			const ok = await beforeLaunch();

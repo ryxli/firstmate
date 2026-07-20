@@ -2,8 +2,9 @@
 # Contract checks for the tracked fm-update-firstmate skill.
 #
 # The shared procedure must update the generic firstmate fleet first, then read
-# an optional local target list from data/cap.md. The list is intentionally
-# local and untracked: a missing section means there are no extra repositories.
+# an optional local target list from data/update-targets.md. The list is
+# intentionally local and untracked: a missing file means there are no extra
+# repositories.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,19 +30,13 @@ assert_not_contains() {
 }
 
 read_optional_targets() {
-  local cap=$1 line in_set=0
+  local targets=$1 line
+  [ -f "$targets" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "## Personal infrastructure update set" ]; then
-      in_set=1
-      continue
-    fi
-    if [ "$in_set" -eq 1 ] && [[ "$line" == '## '* ]]; then
-      break
-    fi
-    if [ "$in_set" -eq 1 ] && [[ "$line" == '- '* ]]; then
+    if [[ "$line" == '- '* ]]; then
       printf '%s\n' "${line#- }"
     fi
-  done < "$cap"
+  done < "$targets"
 }
 
 test_generic_skill_source() {
@@ -51,10 +46,14 @@ test_generic_skill_source() {
 
   assert_contains "$before_targets" 'sbin/fm update' \
     "generic fleet update precedes optional local targets"
-  assert_contains "$source" '## Personal infrastructure update set' \
-    "skill documents the local target contract"
-  assert_contains "$source" 'missing section means no optional targets' \
+  assert_contains "$source" 'data/update-targets.md' \
+    "skill documents the local update-targets file contract"
+  assert_contains "$source" 'missing file means no optional targets' \
     "skill defines the absent-target behavior"
+  assert_not_contains "$source" '## Personal infrastructure update set' \
+    "skill must not teach the retired cap.md section"
+  assert_not_contains "$source" 'data/cap.md' \
+    "skill must not read optional targets from data/cap.md"
 
   local forbidden
   for forbidden in '/Users/' 'chezmoi' 'dotfiles' 'oh-my-pi' 'lavish-axi' 'linear-axi'; do
@@ -65,37 +64,27 @@ test_generic_skill_source() {
 }
 
 test_configured_local_targets() {
-  local cap out expected
-  cap="$TMP_ROOT/configured-cap.md"
-  cat > "$cap" <<'EOF'
-## Preferences
-- Keep updates safe.
+  local targets out expected
+  targets="$TMP_ROOT/update-targets.md"
+  cat > "$targets" <<'EOF'
+# Optional local infrastructure update targets
+# Consumed by skill://fm-update-firstmate after fleet update. Not preloaded.
 
-## Personal infrastructure update set
 - /tmp/private-tooling-a
 - /tmp/private-tooling-b
-
-## Communication
-- Be concise.
 EOF
 
-  out=$(read_optional_targets "$cap")
+  out=$(read_optional_targets "$targets")
   expected=$'/tmp/private-tooling-a\n/tmp/private-tooling-b'
   [ "$out" = "$expected" ] || fail "configured local targets were not read exactly"
-  pass "configured local targets are selected from the documented section"
+  pass "configured local targets are selected from data/update-targets.md"
 }
 
 test_absent_local_targets() {
-  local cap out
-  cap="$TMP_ROOT/absent-cap.md"
-  cat > "$cap" <<'EOF'
-## Preferences
-- Keep updates safe.
-EOF
-
-  out=$(read_optional_targets "$cap")
-  [ -z "$out" ] || fail "missing local target section must select no repositories"
-  pass "absent local target section selects no optional repositories"
+  local out
+  out=$(read_optional_targets "$TMP_ROOT/missing-update-targets.md")
+  [ -z "$out" ] || fail "missing local target file must select no repositories"
+  pass "absent local target file selects no optional repositories"
 }
 
 test_generic_skill_source

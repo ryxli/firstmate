@@ -20,8 +20,8 @@ export function commandHelp(command = "fm", options: { secondmate?: boolean } = 
 		usage: home ? "fm home <check|repair> <mate|--all>" : root ? options.secondmate ? `fm ${fleetUsage}` : `fm ${fleetUsage} | home <check|repair> <mate|--all>` : `fm ${fleetUsage}`,
 		commands: home
 			? [
-				{ command: "home check <mate|--all>", description: "Check shared-code links for one registered mate or every registered mate." },
-				{ command: "home repair <mate|--all>", description: "Repair shared-code links for one registered mate or every registered mate." },
+				{ command: "home check <mate|--all>", description: "Check mate-home layout and shared-code links for one registered mate or every registered mate." },
+				{ command: "home repair <mate|--all>", description: "Repair mate-home layout and shared-code links for one registered mate or every registered mate." },
 			]
 			: root
 				? options.secondmate ? fleetCommands : [...fleetCommands, { command: "home", description: "Check or repair shared-code links for registered mates." }]

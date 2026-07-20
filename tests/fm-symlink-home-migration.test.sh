@@ -427,8 +427,9 @@ test_home_link_repairs_shared_code_without_moving_operational_dirs() {
   pass "fm-home-link repairs shared-code links, keeps operational dirs local, and refuses conflicts"
 }
 
-# Contract: repair removes only the obsolete broken legacy bin link and leaves
-# a user-owned non-empty bin file untouched.
+# Contract: repair removes only the obsolete broken legacy bin link (then layout
+# recreates bin/ as a local directory). A user-owned regular file at bin/
+# blocks layout repair without modification.
 test_home_link_removes_broken_legacy_bin_without_clobbering_user_file() {
   require_slice_scripts
   local code broken_home user_home out
@@ -439,6 +440,7 @@ test_home_link_removes_broken_legacy_bin_without_clobbering_user_file() {
   code=$(canonical "$code")
 
   make_link_home "$code" "$broken_home" brokenbin
+  rm -rf "$broken_home/bin"
   ln -s "$TMP_ROOT/missing-bin-target" "$broken_home/bin"
   if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$broken_home" --check >/dev/null 2>&1; then
     fail "fm-home-link --check accepted an obsolete broken bin link"
@@ -446,6 +448,7 @@ test_home_link_removes_broken_legacy_bin_without_clobbering_user_file() {
   FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$broken_home" --repair >/dev/null \
     || fail "fm-home-link --repair failed to remove obsolete broken bin link"
   [ ! -L "$broken_home/bin" ] || fail "repair left obsolete broken bin symlink"
+  [ -d "$broken_home/bin" ] || fail "repair did not recreate bin/ as a local directory"
   if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$broken_home" --check >/dev/null 2>&1; then
     :
   else
@@ -453,9 +456,11 @@ test_home_link_removes_broken_legacy_bin_without_clobbering_user_file() {
   fi
 
   make_link_home "$code" "$user_home" userbin
+  rm -rf "$user_home/bin"
   printf 'user-owned bin content\n' > "$user_home/bin"
-  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$user_home" --repair 2>&1) \
-    || fail "fm-home-link --repair rejected a user-owned bin file: $out"
+  if FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$user_home" --repair >/dev/null 2>&1; then
+    fail "fm-home-link --repair accepted a conflicting regular file at bin/"
+  fi
   [ -f "$user_home/bin" ] || fail "repair removed the user-owned bin file"
   [ "$(cat "$user_home/bin")" = 'user-owned bin content' ] \
     || fail "repair changed the user-owned bin file"

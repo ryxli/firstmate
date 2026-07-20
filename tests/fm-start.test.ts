@@ -325,7 +325,7 @@ describe("fm start main preflight", () => {
 		const result = readLaunch(fx.output);
 		expect(result.staticContext).toContain("fleet snapshot exit 1");
 		expect(result.staticContext).toContain("FIRSTMATE START");
-		expect(result.appendSystemPrompt).toContain("The static fleet representation is delivered as one visible `fm-start-static` session-start message");
+		expect(result.appendSystemPrompt).toContain("`fm start` completed deterministic startup checks before launch.");
 		expect(result.appendSystemPrompt).not.toContain("fleet snapshot exit 1");
 	});
 });
@@ -407,6 +407,12 @@ describe("fm start prompt", () => {
 		expect(run.stdout).toBe("");
 		expect(result.staticContext).toContain("FIRSTMATE START");
 		expect(result.staticContext).toContain("Refresh: fm fleet");
+		expect(result.appendSystemPrompt).toContain("`fm start` completed deterministic startup checks before launch.");
+		expect(result.appendSystemPrompt).toContain("use `fm fleet` for current operational state");
+		expect(result.appendSystemPrompt).not.toContain("# Preloaded fleet registries");
+		expect(result.appendSystemPrompt).not.toContain("## data/projects.md");
+		expect(result.appendSystemPrompt).not.toContain("## data/secondmates.md");
+		expect(result.appendSystemPrompt).not.toContain("The static fleet representation is delivered as one visible `fm-start-static` session-start message");
 		expect(result.appendSystemPrompt).not.toContain(result.staticContext);
 		expect(result.appendSystemPrompt).not.toContain("FM_SUPERVISED_SUCCESSOR");
 		expect(result.appendSystemPrompt).not.toContain("skill://fm-diagnose-startup-fault");
@@ -505,7 +511,8 @@ describe("fm start prompt", () => {
 		expect(commandLog(fx)).toEqual([]);
 		expect(result.rolePrompt).toContain("kind: unverified");
 		expect(result.rolePrompt).toContain("authority: read-only");
-		expect(result.rolePrompt).toContain("parent is Keel");
+		expect(result.rolePrompt).toContain("parent is set");
+		expect(result.rolePrompt).not.toContain("parent is Keel");
 		expect(result.rolePrompt).not.toContain("kind: firstmate");
 		expect(result.home).toBe(realpathSync(fx.home));
 	});
@@ -542,9 +549,55 @@ describe("fm start prompt", () => {
 		expect(commandLog(fx)).toEqual([]);
 		expect(result.rolePrompt).toContain("kind: unverified");
 		expect(result.rolePrompt).toContain("authority: read-only");
-		expect(result.rolePrompt).toContain("parent is captain");
+		expect(result.rolePrompt).toContain("parent is set");
+		expect(result.rolePrompt).not.toContain("parent is captain");
 		expect(result.rolePrompt).not.toContain("kind: firstmate");
 		expect(result.rolePrompt).not.toContain("kind: secondmate");
+	});
+});
+
+describe("fm start admission failures", () => {
+	it("refuses oversized data/cap.md before OMP with no lock left behind", async () => {
+		const fx = fixture();
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		mkdirSync(join(fx.home, "data"), { recursive: true });
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Keel\nrole=firstmate\nparent=captain\n");
+		const { CAPTAIN_CONTEXT_MAX_BYTES } = await import("../.omp/extensions/cli/lib/startup-context");
+		const prefix = "# Captain preferences\n\n";
+		const pad = "x".repeat(CAPTAIN_CONTEXT_MAX_BYTES - Buffer.byteLength(prefix, "utf8"));
+		writeFileSync(join(fx.home, "data", "cap.md"), `${prefix}${pad}`);
+
+		const run = await runFm(fx, fx.home);
+		expect(run.status).toBe(1);
+		expect(run.stderr).toContain("data/cap.md");
+		expect(run.stderr).toMatch(/\d+ UTF-8 bytes/);
+		expect(run.stderr).toContain(`allowed ${CAPTAIN_CONTEXT_MAX_BYTES}`);
+		expect(run.stderr).toContain("OMP was not launched");
+		expect(existsSync(`${fx.output}.pid`)).toBe(false);
+		expect(existsSync(join(fx.state, ".lock"))).toBe(false);
+		expect(existsSync(join(fx.state, ".lock.claim"))).toBe(false);
+		expect(commandLog(fx)).toEqual([]);
+	});
+
+	it("refuses oversized identity name before OMP with no lock left behind", async () => {
+		const fx = fixture();
+		mkdirSync(join(fx.home, "config"), { recursive: true });
+		mkdirSync(join(fx.home, "data"), { recursive: true });
+		const { IDENTITY_DISPLAY_NAME_MAX_BYTES } = await import("../.omp/extensions/cli/lib/identity");
+		const over = "A".repeat(IDENTITY_DISPLAY_NAME_MAX_BYTES + 1);
+		writeFileSync(join(fx.home, "config", "identity"), `schema_version=1\nname=${over}\nrole=firstmate\nparent=captain\n`);
+		writeFileSync(join(fx.home, "data", "cap.md"), "# Captain preferences\nok\n");
+
+		const run = await runFm(fx, fx.home);
+		expect(run.status).toBe(1);
+		expect(run.stderr).toContain("identity name");
+		expect(run.stderr).toContain(`${IDENTITY_DISPLAY_NAME_MAX_BYTES + 1} UTF-8 bytes`);
+		expect(run.stderr).toContain(`allowed ${IDENTITY_DISPLAY_NAME_MAX_BYTES}`);
+		expect(run.stderr).toContain("OMP was not launched");
+		expect(existsSync(`${fx.output}.pid`)).toBe(false);
+		expect(existsSync(join(fx.state, ".lock"))).toBe(false);
+		expect(existsSync(join(fx.state, ".lock.claim"))).toBe(false);
+		expect(commandLog(fx)).toEqual([]);
 	});
 });
 

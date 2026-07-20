@@ -246,6 +246,43 @@ test_migrate_already_versioned_is_idempotent() {
 }
 
 # -------------------------------------------------------------------------
+# check/migrate: already-versioned oversize name fails closed
+# -------------------------------------------------------------------------
+test_already_versioned_oversize_name_fails() {
+  local home="$TMP_ROOT/mig-oversize-home"
+  local reg="$TMP_ROOT/mig-oversize/secondmates.md"
+  mkdir -p "$(dirname "$reg")"
+  make_home "$home"
+  write_marker "$home" ledger
+  local over
+  over=$(printf 'A%.0s' {1..65})
+  printf 'schema_version=1\nname=%s\nrole=Cost analyst\n' "$over" > "$home/config/identity"
+  make_registry "$reg" "ledger:$home:Cost analyst"
+
+  local out rc
+  set +e
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE check 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "check exited 0 for oversize already-versioned name"
+  printf '%s\n' "$out" | grep -F "UNRESOLVED" | grep -F "ledger" >/dev/null \
+    || fail "check did not UNRESOLVED oversize already-versioned name"
+  printf '%s\n' "$out" | grep -F "UTF-8 byte limit" >/dev/null \
+    || fail "check did not report UTF-8 byte limit for oversize name"
+
+  set +e
+  out=$(FM_DATA_OVERRIDE="$(dirname "$reg")" MIGRATE migrate 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "migrate exited 0 for oversize already-versioned name"
+  printf '%s\n' "$out" | grep -F "CONFLICT" | grep -F "ledger" >/dev/null \
+    || fail "migrate did not CONFLICT oversize already-versioned name"
+  printf '%s\n' "$out" | grep -F "ALREADY_VERSIONED" >/dev/null \
+    && fail "migrate must not ALREADY_VERSIONED an oversize name"
+  pass "already-versioned oversize name fails check and migrate"
+}
+
+# -------------------------------------------------------------------------
 # migrate: marker-registry id mismatch -> CONFLICT on stderr, exit 1
 # -------------------------------------------------------------------------
 test_migrate_refuses_marker_mismatch() {
@@ -393,6 +430,7 @@ test_migrate_unversioned_adds_schema_version
 test_migrate_dry_run_does_not_write
 test_migrate_marker_only_creates_identity
 test_migrate_already_versioned_is_idempotent
+test_already_versioned_oversize_name_fails
 test_migrate_refuses_marker_mismatch
 test_check_empty_registry_exits_0
 test_check_recurses_nested_registry

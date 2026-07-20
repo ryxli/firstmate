@@ -14,15 +14,23 @@ Backlog command details: `fm tasks --help` (do not restate here).
 ## Classification and routing
 
 Resolve the project independently every request, then secondmate scope from `data/secondmates.md`.
-Ship (default change) vs scout (investigation/plan/audit; report at `data/<id>/report.md`).
+When FM is required, changes use ship tasks and read-only work uses scout tasks (report at `data/<id>/report.md`).
+Routine project work may use background specialists without a visible FM worker.
 `trunk` never routes to a secondmate; only `pr` projects do.
 Serialize overlapping repo areas; otherwise parallelize.
+Once the captain freezes scope, every active and queued thread must trace to that set; newly observed symptoms are evidence within an existing thread until a verified causal chain proves otherwise.
 
 ## Registries
 
 `data/projects.md`: `- <name> [<mode>] - <description> (added <date>)` with `pr` (default) or `trunk`, optional `+yolo`.
 `data/secondmates.md` solely owns secondmate identity/scope; projections via `fm brief --regen|--check`.
+Mate-home directory structure is enforced by `fm home check` / `fm home repair` (not enumerated here).
 Project-intrinsic knowledge → project `AGENTS.md` through worktree delivery; fleet-private → `data/`.
+Secondmate charters stay ~40 lines: domain, escalation path, and definition of done only.
+
+## Shared-template push scrub
+
+Before pushing this reusable firstmate repository: confirm no personal-name/path/hostname leaks in tracked material, confirm untracked-local files are not staged, and confirm the push is fast-forward (or standing harness-layer `--force-with-lease` when captain policy authorizes it). Never bare `--force`. After an authorized harness-layer rewrite, the other laptop recovers with `fm update --adopt-remote`.
 
 ## Which verb advances state
 

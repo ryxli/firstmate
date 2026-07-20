@@ -19,6 +19,38 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+/** Validated maximum UTF-8 byte length for identity display names (`name=`). */
+export const IDENTITY_DISPLAY_NAME_MAX_BYTES = 64;
+
+export class IdentityNameOversizeError extends Error {
+	readonly field: string;
+	readonly actualBytes: number;
+	readonly maxBytes: number;
+	readonly path?: string;
+
+	constructor(field: string, actualBytes: number, maxBytes: number, path?: string) {
+		const where = path ? ` (${path})` : "";
+		super(`identity ${field} exceeds UTF-8 byte limit: ${actualBytes} > ${maxBytes}${where}`);
+		this.name = "IdentityNameOversizeError";
+		this.field = field;
+		this.actualBytes = actualBytes;
+		this.maxBytes = maxBytes;
+		this.path = path;
+	}
+}
+
+export function utf8ByteLength(value: string): number {
+	return Buffer.byteLength(value, "utf8");
+}
+
+/** Fail closed when a display name exceeds IDENTITY_DISPLAY_NAME_MAX_BYTES (UTF-8 bytes). */
+export function assertIdentityDisplayName(name: string, field = "name", path?: string): void {
+	const actualBytes = utf8ByteLength(name);
+	if (actualBytes > IDENTITY_DISPLAY_NAME_MAX_BYTES) {
+		throw new IdentityNameOversizeError(field, actualBytes, IDENTITY_DISPLAY_NAME_MAX_BYTES, path);
+	}
+}
+
 // identityValue(configDir, key): the value of `key=` from <configDir>/identity,
 // or null when the file or key is absent. Mirrors the bash implementation's
 // `sed -n "s/^[[:space:]]*key[[:space:]]*=[[:space:]]*//p" | head -1` followed

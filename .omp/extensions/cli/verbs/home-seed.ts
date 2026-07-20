@@ -42,9 +42,10 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureMateHomeLayout } from "../lib/mate-home-layout";
 import { ensureMateMiseToml } from "../lib/mise-home";
 import { linkShipExtensions } from "../lib/ship-ext";
-import { identityValue } from "../lib/identity";
+import { identityValue, assertIdentityDisplayName } from "../lib/identity";
 import { parseSecondmateRegistryLine } from "../lib/secondmate-registry";
 
 // Canonical repo root, resolved from this module's own physical location
@@ -614,6 +615,8 @@ function writeSeedIdentity(ctx: Ctx, home: string, id: string, role: string): vo
 			if (value === "1") return;
 		}
 	}
+	assertIdentityDisplayName(name, "name", identityFile);
+	assertIdentityDisplayName(parent, "parent", identityFile);
 	writeFileSync(identityFile, `schema_version=1\nname=${name}\nrole=${role}\nparent=${parent}\n`);
 }
 
@@ -939,10 +942,11 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 		state.home = home;
 		validateRegistryHomeText(home);
 		validateHomeAssignment(ctx, id, home);
-		mkdirSync(join(home, "data"), { recursive: true });
-		mkdirSync(join(home, "state"), { recursive: true });
-		mkdirSync(join(home, "config"), { recursive: true });
-		mkdirSync(join(home, "projects"), { recursive: true });
+		const layout = ensureMateHomeLayout(home);
+		if (!layout.ok) {
+			const first = layout.issues[0];
+			fail(`error: mate-home layout blocked at ${first?.rel ?? home}: ${first?.detail ?? "unknown"}`);
+		}
 		validateOperationalDirs(ctx, home);
 		validateSeedLeafFiles(ctx, home);
 
