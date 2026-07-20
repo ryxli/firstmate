@@ -226,7 +226,7 @@ test_fm_home_parameterization() {
 
   FM_HOME="$home_one" FM_SECONDMATE_CHARTER='ops domain' "$ROOT/sbin/fm" brief task-c --secondmate app >/dev/null \
     || fail "secondmate brief scaffold failed under FM_HOME"
-  brief="$home_one/data/task-c/brief.md"
+  brief="$home_one/data/mates/task-c/brief.md"
   grep -F "through the fleet peer bus" "$brief" >/dev/null || fail "secondmate brief did not use peer-bus escalation"
 
   printf 'project=x\n' > "$home_one/state/task-a.meta"
@@ -664,7 +664,7 @@ EOF
   [ ! -e "$subhome" ] || fail "failed seed left the newly created secondmate home behind"
   [ ! -e "$subhome/.fm-secondmate-home" ] || fail "failed seed left a subhome marker"
   [ ! -e "$subhome/projects/alpha" ] || fail "failed seed left a previously cloned project"
-  [ ! -e "$home/data/rollback/brief.md" ] || fail "failed seed left a generated charter brief"
+  [ ! -e "$home/data/mates/rollback/brief.md" ] || fail "failed seed left a generated charter brief"
   if [ -f "$home/data/secondmates.md" ] && grep -F -- '- rollback ' "$home/data/secondmates.md" >/dev/null; then
     fail "failed seed left a registry route"
   fi
@@ -687,7 +687,7 @@ test_home_seed_refuses_missing_filled_charter() {
   grep -F 'no filled secondmate charter brief' "$err" >/dev/null \
     || fail "seed did not explain missing filled charter refusal"
   [ ! -e "$subhome" ] || fail "missing charter seed left a generated subhome"
-  [ ! -e "$home/data/design/brief.md" ] || fail "missing charter seed generated a placeholder charter"
+  [ ! -e "$home/data/mates/design/brief.md" ] || fail "missing charter seed generated a placeholder charter"
   pass "home seeding refuses direct seed without filled charter text"
 }
 
@@ -1117,7 +1117,8 @@ test_secondmate_spawn_records_home_meta() {
   subhome_abs=$(cd "$subhome" && pwd -P)
   printf 'spawn-sub\n' > "$subhome/.fm-secondmate-home"
   printf '%s\n' '- spawn-sub - spawn domain (home: '"$subhome"'; workspace: wT; scope: spawn domain; projects: alpha, beta; added 2026-06-22)' > "$home/data/secondmates.md"
-  printf 'stale parent charter\n' > "$home/data/spawn-sub/brief.md"
+  mkdir -p "$home/data/mates/spawn-sub"
+  printf 'stale parent charter\n' > "$home/data/mates/spawn-sub/brief.md"
   printf 'current persistent charter\n' > "$subhome/data/charter.md"
   fakebin=$(make_fake_herdr "$TMP_ROOT/spawn-fake")
   log="$TMP_ROOT/spawn-fake/herdr.log"
@@ -1137,7 +1138,7 @@ test_secondmate_spawn_records_home_meta() {
   grep -F 'FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE=' "$log" >/dev/null || fail "secondmate launch did not clear operational overrides"
   grep -F 'FM_CONFIG_OVERRIDE=' "$log" >/dev/null || fail "secondmate launch did not clear config override"
   grep -F "$subhome_abs/data/charter.md" "$log" >/dev/null || fail "secondmate launch did not use persistent charter"
-  grep -F "$home/data/spawn-sub/brief.md" "$log" >/dev/null && fail "secondmate launch used stale parent brief"
+  grep -F "$home/data/mates/spawn-sub/brief.md" "$log" >/dev/null && fail "secondmate launch used stale parent brief"
   # shellcheck disable=SC2016 # literal shell text searched with grep -F; no expansion intended
   grep -F '; exec "${SHELL:-/bin/zsh}" -l' "$log" >/dev/null || fail "secondmate launch did not leave an interactive shell after agent exit"
   grep -F 'notify=' "$log" >/dev/null && fail "secondmate codex launch should not install parent turn-end notify"
@@ -2063,7 +2064,7 @@ test_secondmate_charter_brief_is_idle_by_default() {
   home="$TMP_ROOT/idle-charter-home"
   mkdir -p "$home/data" "$home/state"
   scaffold_secondmate_charter "$home" idle-sm 'feature work for alpha' alpha
-  brief="$home/data/idle-sm/brief.md"
+  brief="$home/data/mates/idle-sm/brief.md"
   [ -f "$brief" ] || fail "secondmate charter brief was not scaffolded"
   # Idle contract: waits for routed work, never self-initiates.
   grep -F 'go idle and wait silently for the main firstmate' "$brief" >/dev/null \

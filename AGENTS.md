@@ -183,11 +183,12 @@ Each mate home has a real local bin/ for that mate's personal tools; ship tools 
 config/crew-harness  crewmate harness override; LOCAL, gitignored; absent or "default" = same as firstmate
 data/                personal fleet records; LOCAL, gitignored as a whole
   backlog.md         task queue, dependencies, history
-  cap.md         cap's curated personal preferences and working style - approval posture, communication style, release habits; LOCAL, gitignored; compact rewrite-and-prune counterpart to shared AGENTS.md; canonical harness-portable home, even if harness memory mirrors it as a recall cache
-  projects.md        thin fleet navigation registry: one line per project with name, delivery mode, optional "+yolo", and a one-line description; firstmate-private, not a project knowledge dump (full format in `skill://firstmate-task-lifecycle`)
-  secondmates.md      secondmate routing table: one line per persistent domain supervisor (scope, project clone list, home path); the only hand-edited home for a secondmate's identity and scope - validation and projection mechanics in `skill://firstmate-task-lifecycle`
-  <id>/brief.md      per-task crewmate brief, or per-secondmate charter brief when kind=secondmate
+  cap.md             canonical local, portable captain preferences
+  projects.md        project registry: mode, optional +yolo, description (format in lifecycle skill)
+  secondmates.md     routing registry and sole hand-edited owner of secondmate identity/scope
+  <id>/brief.md      per-task crewmate brief
   <id>/report.md     scout task deliverable, written by the crewmate; survives teardown
+  mates/<id>/brief.md generated registered-secondmate projection
 projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by crewmates: "<state>: <note>" lines

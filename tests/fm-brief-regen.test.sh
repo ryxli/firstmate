@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verifies `fm brief` --regen/--check make data/secondmates.md the only
-# hand-edited home for secondmate identity/scope: data/<id>/brief.md and
+# hand-edited home for secondmate identity/scope: data/mates/<id>/brief.md and
 # <home>/data/charter.md are generated projections of the registry line plus
 # the tracked template, with exactly one mate-owned section preserved
 # verbatim across regenerations.
@@ -34,7 +34,7 @@ run() {
     "${BRIEF[@]}" "$@"
 }
 
-BRIEF_PATH="$HOME_DIR/data/plum/brief.md"
+BRIEF_PATH="$HOME_DIR/data/mates/plum/brief.md"
 CHARTER_PATH="$MATE_HOME/data/charter.md"
 
 # (a) generation fills registry fields and resolves the escalation name from a
@@ -114,7 +114,7 @@ cat >> "$HOME_DIR/data/secondmates.md" <<EOF
 EOF
 mkdir -p "$TMP/mates/fresh/data"
 run --regen fresh >/dev/null || fail "fm brief --regen fresh failed"
-grep -qF '(no mate-owned notes yet)' "$HOME_DIR/data/fresh/brief.md" \
+grep -qF '(no mate-owned notes yet)' "$HOME_DIR/data/mates/fresh/brief.md" \
   || fail "fresh secondmate brief did not scaffold the empty mate-owned placeholder"
 grep -qF '(no mate-owned notes yet)' "$TMP/mates/fresh/data/charter.md" \
   || fail "fresh secondmate charter did not scaffold the empty mate-owned placeholder"

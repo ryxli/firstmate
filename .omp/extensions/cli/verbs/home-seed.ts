@@ -910,7 +910,7 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 		createdExtLinksFile: join(backupDir, "created-ext-links"),
 		extDstExisted: false,
 		parentRegExisted: false,
-		parentBrief: join(ctx.data, id, "brief.md"),
+		parentBrief: join(ctx.data, "mates", id, "brief.md"),
 		parentBriefCreated: false,
 		parentBriefDirCreated: false,
 		subRegExisted: false,

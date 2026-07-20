@@ -54,7 +54,7 @@ function mainPreloadBlock(home: string): string {
 		"# Startup preflight",
 		"`fm start` already ran bootstrap, identity migration/check, home link check/repair when needed, Lavish recovery, and one fleet snapshot before launching this OMP process.",
 		"Bootstrap and recovery procedure bodies are not preloaded in this default context.",
-		"The static fleet representation is delivered as one visible `fm-start-static` session-start message. Treat it as static as of its embedded `static_as_of` timestamp, and refresh live state explicitly before acting on later changes.",
+		"The static fleet representation is delivered as one visible `fm-start-static` session-start message. Treat it as static as of its `As of` line, and refresh live state with `fm fleet` before acting on later changes.",
 	];
 	const registries = registryBlock(home, REPO_ROOT);
 	if (registries.length > 0) {

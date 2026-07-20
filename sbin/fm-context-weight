@@ -269,14 +269,15 @@ function collectContext(): ContextFile[] {
 
 	addFile(files, seen, join(dataRoot, "cap.md"), "data/cap.md");
 	addFile(files, seen, join(dataRoot, "charter.md"), "data/charter.md");
-	if (existsSync(dataRoot)) {
-		for (const entry of readdirSync(dataRoot, { withFileTypes: true })) {
+	const matesRoot = join(dataRoot, "mates");
+	if (existsSync(matesRoot)) {
+		for (const entry of readdirSync(matesRoot, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;
-			const briefPath = join(dataRoot, entry.name, "brief.md");
+			const briefPath = join(matesRoot, entry.name, "brief.md");
 			if (!existsSync(briefPath)) continue;
 			const text = readFileSync(briefPath, "utf8");
 			if (!/^You are a secondmate:/m.test(text)) continue;
-			addFile(files, seen, briefPath, `data/${entry.name}/brief.md`);
+			addFile(files, seen, briefPath, `data/mates/${entry.name}/brief.md`);
 		}
 	}
 

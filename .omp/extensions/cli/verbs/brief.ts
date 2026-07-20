@@ -32,7 +32,7 @@
 // Usage: fm brief --regen <id>
 //        fm brief --check <id>
 //   --regen and --check make data/secondmates.md the only hand-edited home for a
-//   secondmate's identity/scope: both data/<id>/brief.md and <home>/data/charter.md
+//   secondmate's identity/scope: both data/mates/<id>/brief.md and <home>/data/charter.md
 //   are generated projections of the registry line for <id> plus a tracked
 //   template. --regen writes both projections; --check regenerates in memory and
 //   exits nonzero, naming any projection whose current content differs from what
@@ -100,7 +100,7 @@ Use the axi-family CLIs - gh-axi, chrome-devtools-axi, lavish-axi - for GitHub, 
 
 // --- secondmate charter regeneration -----------------------------------------
 // data/secondmates.md is the only hand-edited home for secondmate identity and
-// scope; data/<id>/brief.md and <home>/data/charter.md are both generated
+// scope; data/mates/<id>/brief.md and <home>/data/charter.md are both generated
 // projections of the registry line for <id> plus the template below; never
 // hand-edit them outside the one mate-owned section each carries.
 
@@ -329,7 +329,7 @@ function cmdRegenOrCheck(mode: "regen" | "check", id: string, paths: Paths): num
 		return 1;
 	}
 	const fields = secondmateParseFields(line);
-	const briefPath = joinPath(paths.data, id, "brief.md");
+	const briefPath = joinPath(paths.data, "mates", id, "brief.md");
 	const charterPath = joinPath(fields.home, "data", "charter.md");
 
 	const briefPrior = extractMateOwned(briefPath);
@@ -596,12 +596,15 @@ async function run(argv: string[]): Promise<number> {
 	if (pos.length < 1) return usage(1);
 	const id = pos[0];
 
-	const briefPath = joinPath(paths.data, id, "brief.md");
+	const briefPath =
+		kind === "secondmate"
+			? joinPath(paths.data, "mates", id, "brief.md")
+			: joinPath(paths.data, id, "brief.md");
 	if (existsSync(briefPath)) {
 		process.stderr.write(`error: ${briefPath} already exists\n`);
 		return 1;
 	}
-	mkdirSync(joinPath(paths.data, id), { recursive: true });
+	mkdirSync(dirname(briefPath), { recursive: true });
 
 	const statusFile = shellQuote(joinPath(paths.state, `${id}.status`));
 	const reportHelper = `${shellQuote(joinPath(paths.fmRoot, "sbin", "fm"))} report`;

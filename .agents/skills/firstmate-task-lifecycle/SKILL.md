@@ -25,7 +25,7 @@ Projects live under `projects/`. Registry `data/projects.md`:
 
 Modes: `pr` (default) or `trunk`; optional `+yolo`. Only `trunk|pr` are valid - stale names warn and fall back to `pr` off. Do not dump knowledge here; project-intrinsic facts go in the project's `AGENTS.md` via crewmate delivery.
 
-Secondmates: `data/secondmates.md` is the only hand-edited identity/scope home. Projections: `fm brief --regen|--check <id>`. Seed with `fm home-seed`. Secondmates may list `pr` projects only; `trunk` stays with main. Idle-by-default: reconcile own work, then wait. On create, `fm tasks mv ... --to <id>` for in-scope queued items (not trunk, not in-flight).
+Secondmates: `data/secondmates.md` solely owns identity/scope. Projections: `data/mates/<id>/brief.md` and `<home>/data/charter.md`; manage with `fm brief --regen|--check <id>`. Seed via `fm home-seed`. Only `pr` projects route to secondmates; `trunk` stays with main. Idle-by-default. On create, move eligible queued work with `fm tasks mv ... --to <id>`.
 
 **Project memory.** Project-intrinsic → project `AGENTS.md` through worktree delivery (`fm ensure-agents-md` when needed). Fleet/cap-private → `data/`. Firstmate never hand-writes project clones.
 

@@ -308,9 +308,10 @@ describe("fm start main preflight", () => {
 		const run = await runFm(fx, fx.home, { FM_START_TEST_SCENARIO: "fleet-degraded" });
 		expect(run.status).toBe(0);
 		const result = readLaunch(fx.output);
-		expect(result.staticContext).toContain('"fleet_status": "degraded-exit-1"');
+		expect(result.staticContext).toContain("fleet snapshot exit 1");
+		expect(result.staticContext).toContain("FIRSTMATE START");
 		expect(result.appendSystemPrompt).toContain("The static fleet representation is delivered as one visible `fm-start-static` session-start message");
-		expect(result.appendSystemPrompt).not.toContain('"fleet_status": "degraded-exit-1"');
+		expect(result.appendSystemPrompt).not.toContain("fleet snapshot exit 1");
 	});
 });
 
@@ -388,7 +389,8 @@ describe("fm start prompt", () => {
 		expect(result.appendSystemPrompt.startsWith("--append-system-prompt=")).toBe(true);
 		expect(result.rolePrompt).toContain("kind: firstmate");
 		expect(run.stdout).toBe("");
-		expect(result.staticContext).toContain('"schema": "fm-start-static/1"');
+		expect(result.staticContext).toContain("FIRSTMATE START");
+		expect(result.staticContext).toContain("Refresh: fm fleet");
 		expect(result.appendSystemPrompt).not.toContain(result.staticContext);
 		expect(result.appendSystemPrompt).not.toContain("FM_SUPERVISED_SUCCESSOR");
 		expect(result.appendSystemPrompt).not.toContain("skill://firstmate-bootstrap");
