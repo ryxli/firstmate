@@ -145,6 +145,9 @@ describe("canonical FleetSnapshot collector", () => {
 			expect(missingAgent.activation?.state).toBe("fresh");
 			expect(missingAgent.topology).toMatchObject({ state: "incomplete", present: 0, missing: 0, incomplete: 1 });
 			expect(missingAgent.health?.state).toBe("degraded");
+			const startupSnapshot = await collectSnapshot("2026-07-13T00:00:01.500Z", undefined, { startingMain: true });
+			expect(startupSnapshot.topology).toMatchObject({ state: "complete", present: 1, missing: 0, incomplete: 0 });
+			expect(startupSnapshot.health?.state).toBe("healthy");
 
 			writeFileSync(fixture.panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: fixture.home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "session-1", agent: "omp" }] } }));
 			writeFileSync(join(fixture.home, "AGENTS.md"), "changed manifest\n");

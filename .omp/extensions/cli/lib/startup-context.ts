@@ -588,9 +588,9 @@ export async function runStartupContext(options: StartupContextOptions): Promise
 	const lavish = run(["lavish-open", "--recover"]);
 	if (lavish.status !== 0) return { ok: false, failure: failure("lavish-open --recover", lavish, "lavish recovery failed"), diagnostics };
 
-	const fleet = run(["fleet", "snapshot", "--json"]);
+	const fleet = run(["fleet", "snapshot", "--json", "--starting-main"]);
 	const snapshot = parseFleetSnapshot(fleet);
-	if (!snapshot) return { ok: false, failure: failure("fleet snapshot --json", fleet, "fleet snapshot did not return parseable JSON"), diagnostics };
+	if (!snapshot) return { ok: false, failure: failure("fleet snapshot --json --starting-main", fleet, "fleet snapshot did not return parseable JSON"), diagnostics };
 
 	return {
 		ok: true,

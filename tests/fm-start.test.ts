@@ -161,7 +161,7 @@ case "$*" in
     printf 'repaired\n'; exit 0 ;;
   "lavish-open --recover")
     printf 'recovered: 0 steward(s)\n'; exit 0 ;;
-  "fleet snapshot --json")
+  "fleet snapshot --json --starting-main")
     cat <<JSON
 {"schema":"fleet-snapshot/1","generatedAt":"2026-07-18T00:00:00.000Z","home":"\${FM_HOME:-$PWD}","health":{"state":"healthy","herdr":"ok","homes":2,"missingHomes":0,"livePanes":1},"activation":{"state":"fresh","total":2,"fresh":2,"stale":0,"unknown":0},"identity":{"state":"bound","bound":2,"mismatch":0,"unknown":0},"topology":{"state":"complete","present":2,"missing":0,"incomplete":0,"reason":"ok"},"mates":[{"name":"main","role":"firstmate","herdrStatus":"idle","load":1},{"name":"riggs","role":"secondmate","herdrStatus":"working","load":2}],"agents":[{"key":"main/task-1","id":"task-1","owner":"main","kind":"crew","status":"working","liveStatus":"working","pane":"%1","project":"alpha","topology":{"home":"\${FM_HOME:-$PWD}","pane":"%1"}}],"pending":[{"key":"main/task-2","cls":"CAP-BLOCKED","clsRank":4,"home":"\${FM_HOME:-$PWD}","id":"task-2","reason":"needs decision"}],"attention":[{"key":"main/task-2","cls":"CAP-BLOCKED","clsRank":4,"home":"\${FM_HOME:-$PWD}","id":"task-2","reason":"needs decision"}],"tasks":[{"key":"main/task-1","id":"task-1","state":"inflight","owner":"main","project":"alpha","workerState":"working","note":"doing work"},{"key":"main/task-3","id":"task-3","state":"queued","owner":"main","project":"beta","note":"ready"},{"key":"main/task-4","id":"task-4","state":"done","owner":"main","project":"gamma","note":"PR ready","pr":"https://github.com/acme/repo/pull/4","merged":false}],"otherLivePanes":[{"name":"stray","status":"idle","cwd":"/tmp/stray"}],"notes":["fixture note"]}
 JSON
@@ -294,14 +294,14 @@ describe("fm start main preflight", () => {
 
 		expect(run.status).toBe(0);
 		expect(readLaunch(fx.output).rolePrompt).toContain("kind: firstmate");
-		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json"]);
+		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json --starting-main"]);
 	});
 
 	it("runs deterministic startup commands before OMP launch", async () => {
 		const fx = fixture();
 		const run = await runFm(fx, fx.home);
 		expect(run.status).toBe(0);
-		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json"]);
+		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json --starting-main"]);
 		expect(readLaunch(fx.output).pid).toBeDefined();
 	});
 
@@ -309,14 +309,14 @@ describe("fm start main preflight", () => {
 		const fx = fixture();
 		const run = await runFm(fx, fx.home, { FM_START_TEST_SCENARIO: "identity-home-repair" });
 		expect(run.status).toBe(0);
-		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "identity-migrate migrate", "identity-migrate check", "home check --all", "home repair --all", "home check --all", "lavish-open --recover", "fleet snapshot --json"]);
+		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "identity-migrate migrate", "identity-migrate check", "home check --all", "home repair --all", "home check --all", "lavish-open --recover", "fleet snapshot --json --starting-main"]);
 	});
 
 	it("migrates missing identity files but fails closed on unsafe identity states", async () => {
 		const fx = fixture();
 		const run = await runFm(fx, fx.home, { FM_START_TEST_SCENARIO: "identity-no-identity" });
 		expect(run.status).toBe(0);
-		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "identity-migrate migrate", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json"]);
+		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "identity-migrate migrate", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json --starting-main"]);
 	});
 
 	it("stops before OMP on hard bootstrap failure", async () => {

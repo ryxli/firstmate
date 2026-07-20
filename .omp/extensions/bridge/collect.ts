@@ -45,6 +45,7 @@ export interface CollectOptions {
 	includeMetrics?: boolean;
 	statsFile?: string;
 	maxLivePanes?: number;
+	startingMain?: boolean;
 }
 
 const DEFAULT_MAX_LIVE_PANES = 200;
@@ -471,12 +472,12 @@ function paneForHome(home: string, homes: ParsedHome[], panes: HerdrAgent[]): He
 	return resolveHomePane(parsed, homes, byPane, panes);
 }
 
-function topologyForFleet(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null, herdrOk: boolean): TopologySummary {
+function topologyForFleet(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null, herdrOk: boolean, startingMain = false): TopologySummary {
 	const summary: TopologySummary = { state: "unknown", present: 0, missing: 0, incomplete: 0, reason: "herdr-unavailable" };
 	for (const home of homePaths) {
 		const pane = paneForHome(home, homes, panes);
 		if (!pane) summary.missing += 1;
-		else if (pane.agent !== "omp") summary.incomplete += 1;
+		else if (pane.agent !== "omp" && !(startingMain && main && canonicalPath(home) === canonicalPath(main))) summary.incomplete += 1;
 		else summary.present += 1;
 	}
 	if (!herdrOk) return summary;
@@ -970,7 +971,7 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 	const activationCheck = activationFor(homePaths, live.panes, homes, main, notes);
 	base.activation = activationCheck.activation;
 	base.identity = activationCheck.identity;
-	base.topology = topologyForFleet(homePaths, live.panes, homes, main, live.ok);
+	base.topology = topologyForFleet(homePaths, live.panes, homes, main, live.ok, options.startingMain);
 	const missingHomes = notes.filter(note => note.startsWith("secondmate home not found:")).length;
 	const boundedDegradation = notes.some(note => note.includes("limit reached") || note.startsWith("activation manifest degraded"));
 	base.health = {

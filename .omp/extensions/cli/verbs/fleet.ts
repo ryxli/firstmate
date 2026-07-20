@@ -111,10 +111,12 @@ async function run(argv: string[]): Promise<number> {
 			let includeMetrics = false;
 			let home: string | undefined;
 			let statsFile: string | undefined;
+			let startingMain = false;
 			for (let index = 0; index < rest.length; index += 1) {
 				const arg = rest[index];
 				if (arg === "--json") asJson = true;
 				else if (arg === "--metrics") includeMetrics = true;
+				else if (arg === "--starting-main") startingMain = true;
 				else if (arg === "--home") {
 					const value = rest[index + 1];
 					if (!value || value.startsWith("-")) return validationError("--home requires a value", ["Provide a firstmate home path after --home."]);
@@ -126,13 +128,13 @@ async function run(argv: string[]): Promise<number> {
 					statsFile = value;
 					index += 1;
 				} else if (arg === "--help" || arg === "-h") {
-					output({ command: "fleet snapshot", usage: "fm fleet snapshot [--json] [--metrics] [--home <path>] [--stats-file <path>]", description: "Raw FleetSnapshot for visual consumers; --json emits raw JSON, otherwise TOON." });
+					output({ command: "fleet snapshot", usage: "fm fleet snapshot [--json] [--metrics] [--starting-main] [--home <path>] [--stats-file <path>]", description: "Raw FleetSnapshot for visual consumers; --starting-main treats the launching firstmate pane as OMP." });
 					return 0;
 				} else {
-					return validationError(`Unexpected argument: ${arg}`, ["Use `fm fleet snapshot [--json] [--metrics] [--home <path>] [--stats-file <path>]`."]);
+					return validationError(`Unexpected argument: ${arg}`, ["Use `fm fleet snapshot [--json] [--metrics] [--starting-main] [--home <path>] [--stats-file <path>]`."]);
 				}
 			}
-			const snapshot = await collectSnapshot(new Date().toISOString(), home, { includeMetrics, statsFile });
+			const snapshot = await collectSnapshot(new Date().toISOString(), home, { includeMetrics, statsFile, startingMain });
 			if (asJson) {
 				process.stdout.write(`${JSON.stringify(snapshot)}\n`);
 				return 0;
