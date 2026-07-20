@@ -132,6 +132,27 @@ function writeAtomic(path: string, value: unknown): void {
 	renameSync(tmp, path);
 }
 
+/** Read-only artifact load: never migrates legacy state into data/artifacts/. */
+export function readArtifactPure(taskId: string, dataDir = resolveDataDir()): ArtifactRecord | null {
+	const durable = artifactPath(taskId, dataDir);
+	if (existsSync(durable)) {
+		try {
+			return JSON.parse(readFileSync(durable, "utf8")) as ArtifactRecord;
+		} catch {
+			return null;
+		}
+	}
+	const legacy = legacyArtifactPath(taskId);
+	if (existsSync(legacy)) {
+		try {
+			return JSON.parse(readFileSync(legacy, "utf8")) as ArtifactRecord;
+		} catch {
+			return null;
+		}
+	}
+	return null;
+}
+
 export function loadArtifact(taskId: string, dataDir = resolveDataDir()): ArtifactRecord | null {
 	const durable = artifactPath(taskId, dataDir);
 	if (existsSync(durable)) return JSON.parse(readFileSync(durable, "utf8")) as ArtifactRecord;
@@ -165,6 +186,36 @@ function syncAttentionIndex(dataDir = resolveDataDir()): void {
 	);
 }
 
+/** Pure listing: durable + legacy reads only; never migrates. */
+export function listArtifactsPure(dataDir = resolveDataDir(), stateDir?: string): ArtifactRecord[] {
+	const dir = join(dataDir, "artifacts");
+	const out: ArtifactRecord[] = [];
+	if (existsSync(dir)) {
+		for (const name of readdirSync(dir)) {
+			if (!name.endsWith(".json")) continue;
+			try {
+				out.push(JSON.parse(readFileSync(join(dir, name), "utf8")) as ArtifactRecord);
+			} catch {
+				/* skip */
+			}
+		}
+	}
+	const legacyState = stateDir ?? (dataDir.endsWith("/data") ? join(dirname(dataDir), "state") : resolveStateDir());
+	if (existsSync(legacyState)) {
+		for (const name of readdirSync(legacyState)) {
+			if (!name.endsWith(".artifact.json")) continue;
+			const taskId = name.replace(/\.artifact\.json$/, "");
+			if (out.some(r => r.taskId === taskId)) continue;
+			try {
+				out.push(JSON.parse(readFileSync(join(legacyState, name), "utf8")) as ArtifactRecord);
+			} catch {
+				/* skip */
+			}
+		}
+	}
+	return out;
+}
+
 function listArtifactRecords(dataDir = resolveDataDir()): ArtifactRecord[] {
 	const dir = join(dataDir, "artifacts");
 	const out: ArtifactRecord[] = [];
@@ -178,7 +229,7 @@ function listArtifactRecords(dataDir = resolveDataDir()): ArtifactRecord[] {
 			}
 		}
 	}
-	// legacy scan once
+	// legacy scan once (may migrate via loadArtifact)
 	const stateDir = resolveStateDir();
 	if (existsSync(stateDir)) {
 		for (const name of readdirSync(stateDir)) {
@@ -198,6 +249,22 @@ function listArtifactRecords(dataDir = resolveDataDir()): ArtifactRecord[] {
 
 export function isLanded(record: ArtifactRecord): boolean {
 	return record.reviewState === "accepted" && record.delivery?.state === "landed";
+}
+
+/**
+ * Read-only dependency satisfaction. Never migrates artifacts or rewrites attention.
+ * Use on fleet check / any transitively read-only path.
+ */
+export function dependencySatisfiedPure(taskId: string, dataDir = resolveDataDir(), seen = new Set<string>()): boolean {
+	if (seen.has(taskId)) return false;
+	seen.add(taskId);
+	const r = readArtifactPure(taskId, dataDir);
+	if (!r) return false;
+	if (isLanded(r)) return true;
+	if (r.reviewState === "superseded" && r.provenance?.supersededBy) {
+		return dependencySatisfiedPure(r.provenance.supersededBy, dataDir, seen);
+	}
+	return false;
 }
 
 /** Dependency satisfied: landed, or a declared successor chain that eventually landed. */

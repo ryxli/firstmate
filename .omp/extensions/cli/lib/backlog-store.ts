@@ -20,10 +20,10 @@
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { dependencySatisfied } from "./artifact";
+import { dependencySatisfied, dependencySatisfiedPure } from "./artifact";
 
 export type TaskState = "inflight" | "queued" | "done";
-export const HOLD_KINDS = ["captain", "external", "load", "parked", "future"] as const;
+export const HOLD_KINDS = ["cap", "external", "load", "parked", "future"] as const;
 export type HoldKind = (typeof HOLD_KINDS)[number];
 
 export interface Dep {
@@ -105,7 +105,7 @@ const TAIL_KIND = /\s*\(kind:\s*([^()]+)\)\s*$/;
 const TAIL_PRIORITY = /\s*\(priority:\s*([0-4])\)\s*$/;
 const TAIL_SINCE = /\s*\(since\s+(\d{4}-\d{2}-\d{2})\)\s*$/;
 const TAIL_HOLD_UNTIL = /\s*\(hold-until:\s*(\d{4}-\d{2}-\d{2})\)\s*$/;
-const TAIL_HOLD_KIND = new RegExp(`\\s*\\(hold-kind:\\s*(${HOLD_KINDS.join("|")})\\)\\s*$`);
+const TAIL_HOLD_KIND = new RegExp(`\\s*\\(hold-kind:\\s*(${[...HOLD_KINDS, "captain"].join("|")})\\)\\s*$`);
 const TAIL_HOLD = /\s*\(hold:\s*([^()]+)\)\s*$/;
 const TAIL_CLOSED = /\s*\((merged|reported|done)\s+(\d{4}-\d{2}-\d{2})\)\s*$/;
 
@@ -180,7 +180,7 @@ function extractTags(rest: string): ExtractedTags {
 		}
 		m = title.match(TAIL_HOLD_KIND);
 		if (m) {
-			holdKind ??= m[1] as HoldKind;
+			holdKind ??= (m[1] === "captain" ? "cap" : m[1]) as HoldKind;
 			title = title.slice(0, m.index);
 			stripped = true;
 			continue;
@@ -633,6 +633,88 @@ export class BacklogStore {
 		if (this.findAll(entry.task.id).length > 0) throw new StoreError(`task id already exists in destination: ${entry.task.id}`, "CONFLICT");
 		this.insertEntryAtTop(entry);
 	}
+
+	/** Done entries with raw source preserved (for durable fleet clean archive). */
+	listDoneEntries(): TaskEntry[] {
+		const section = this.sectionFor("done");
+		return section.entries.filter((e): e is TaskEntry => e.kind === "task");
+	}
+}
+
+/** Durable archive identity: home/owner + task id + terminal identity. */
+export function doneArchiveIdentity(owner: string, task: Task): string {
+	const terminal = `done:${task.closed ?? ""}:${task.proof ?? ""}`;
+	return `${owner}/${task.id}/${terminal}`;
+}
+
+export function archiveIdentitiesInFile(archivePath: string): Set<string> {
+	const out = new Set<string>();
+	if (!existsSync(archivePath)) return out;
+	for (const line of readFileSync(archivePath, "utf8").split(/\r?\n/)) {
+		const m = line.match(/^<!--\s*fm-archive-id:\s*(.+?)\s*-->$/);
+		if (m) out.add(m[1].trim());
+	}
+	return out;
+}
+
+export interface ArchiveDoneResult {
+	archivedIds: string[];
+	skippedIds: string[];
+	identities: string[];
+}
+
+/**
+ * Archive all Done entries into done-archive.md with durable identity dedup.
+ * Preserves raw entry lines (bodies, proof, deps in source form).
+ *
+ * Ordering inside this helper:
+ * 1) upsert archive file for new identities
+ * 2) remove Done sources from the in-memory store (caller save() persists)
+ * Already-archived identities are skipped in the file and still removed from Done
+ * so reruns converge without duplicates.
+ */
+export function archiveAllDoneEntries(
+	store: BacklogStore,
+	opts: { owner: string; archivePath: string },
+): ArchiveDoneResult {
+	const existing = archiveIdentitiesInFile(opts.archivePath);
+	const done = store.listDoneEntries();
+	const archivedIds: string[] = [];
+	const skippedIds: string[] = [];
+	const identities: string[] = [];
+	const blocks: string[] = [];
+	const removeIds: string[] = [];
+
+	for (const entry of done) {
+		const id = doneArchiveIdentity(opts.owner, entry.task);
+		removeIds.push(entry.task.id);
+		if (existing.has(id)) {
+			skippedIds.push(entry.task.id);
+			continue;
+		}
+		const raw =
+			entry.dirty || entry.raw.length === 0
+				? [
+						`- [x] ${entry.task.id} - ${entry.task.title}${entry.task.proof ? ` - ${entry.task.proof}` : ""}${
+							entry.task.closed ? ` (${entry.task.closed})` : ""
+						}`,
+					]
+				: entry.raw;
+		blocks.push(`<!-- fm-archive-id: ${id} -->`, ...raw, "");
+		identities.push(id);
+		archivedIds.push(entry.task.id);
+		existing.add(id);
+	}
+
+	if (blocks.length > 0) {
+		const prior = existsSync(opts.archivePath) ? readFileSync(opts.archivePath, "utf8") : "";
+		const prefix = prior && !prior.endsWith("\n") ? `${prior}\n` : prior;
+		atomicWrite(opts.archivePath, `${prefix}${blocks.join("\n").replace(/\n+$/, "\n")}`);
+	}
+	for (const taskId of removeIds) {
+		if (store.findAll(taskId).some(f => f.task.state === "done")) store.extractEntry(taskId);
+	}
+	return { archivedIds, skippedIds, identities };
 }
 
 // ---------------------------------------------------------------------------
@@ -640,25 +722,32 @@ export class BacklogStore {
 // blocked/ready/held are computed here, not stored).
 // ---------------------------------------------------------------------------
 
-function isResolvedDep(id: string, doneIds: Set<string>): boolean {
-	return doneIds.has(id) || dependencySatisfied(id);
+function isResolvedDep(id: string, doneIds: Set<string>, dataDir?: string, pure = false): boolean {
+	if (doneIds.has(id)) return true;
+	if (pure) {
+		if (!dataDir) return false;
+		return dependencySatisfiedPure(id, dataDir);
+	}
+	return dependencySatisfied(id, dataDir);
 }
 
 /** Ids blocked by an unresolved `blocked-by` edge. Done section + Artifact terminals. */
-export function blockedIds(tasks: Task[]): Set<string> {
+export function blockedIds(tasks: Task[], opts?: { dataDir?: string; pure?: boolean }): Set<string> {
 	const doneIds = new Set(tasks.filter(t => t.state === "done").map(t => t.id));
 	const blocked = new Set<string>();
+	const pure = opts?.pure === true;
+	const dataDir = opts?.dataDir;
 	for (const task of tasks) {
 		if (task.state === "done") continue;
-		if (task.deps.some(dep => !isResolvedDep(dep.id, doneIds))) blocked.add(task.id);
+		if (task.deps.some(dep => !isResolvedDep(dep.id, doneIds, dataDir, pure))) blocked.add(task.id);
 	}
 	return blocked;
 }
 
 /** Unresolved blocker ids for one task (subset of its deps not yet Done/Artifact-terminal). */
-export function unresolvedBlockers(task: Task, tasks: Task[]): string[] {
+export function unresolvedBlockers(task: Task, tasks: Task[], opts?: { dataDir?: string; pure?: boolean }): string[] {
 	const doneIds = new Set(tasks.filter(t => t.state === "done").map(t => t.id));
-	return task.deps.map(d => d.id).filter(id => !isResolvedDep(id, doneIds));
+	return task.deps.map(d => d.id).filter(id => !isResolvedDep(id, doneIds, opts?.dataDir, opts?.pure === true));
 }
 
 export function isHoldActive(task: Task, today = todayLocal()): boolean {

@@ -90,13 +90,14 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, unwatchFile, watchFile } from "node:fs";
+import { existsSync, readFileSync, unwatchFile, watchFile } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { capabilityForHome, readCapabilityRegistry, readSourceRevision } from "./bridge/update";
 import { sourceRootForHome } from "./bridge/collect";
 import { connect, type Socket } from "node:net";
+import { resolveHome as resolveIdentityHome, resolveIdentity } from "./fm-identity/identity";
 
 import { dependencyDeliveries, parseDependencyEdge, prioritizeDependencyEdges, validateBlockedReport, type DependencyEdge } from "./dependency-handoff";
 
@@ -284,6 +285,8 @@ export interface ActivationReceipt {
 	session_id?: string;
 	session_path?: string;
 	pane_id: string;
+	/** Named-mate routing id (keel/fran/…); joins herdr agent name + OMP session title. */
+	fleet_id?: string;
 	started_at: string;
 	manifest_sha256: string;
 	manifest: ActivationManifestEntry[];
@@ -400,6 +403,29 @@ function activationReceiptPath(ctx: ExtensionContext): string {
 	return join(statePath, ACTIVATION_RECEIPT_NAME);
 }
 
+function resolveFleetId(operationalHome: string): string | undefined {
+	try {
+		const home = resolveIdentityHome({ FM_HOME: operationalHome, cwd: operationalHome });
+		const markerPath = join(home, ".fm-secondmate-home");
+		const identityPath = join(home, "config", "identity");
+		let markerText: string | null = null;
+		let identityText: string | null = null;
+		try {
+			markerText = readFileSync(markerPath, "utf8");
+		} catch {
+			/* absent */
+		}
+		try {
+			identityText = readFileSync(identityPath, "utf8");
+		} catch {
+			/* absent */
+		}
+		return resolveIdentity(home, { markerText, identityText })?.id;
+	} catch {
+		return undefined;
+	}
+}
+
 async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 	const identity = sessionIdentity(sup.ctx);
 	const paneId = await currentPaneId(sup.pi);
@@ -413,10 +439,12 @@ async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 	const source = readSourceRevision(sourceHome);
 	const capability = capabilityForHome(readCapabilityRegistry(sourceHome).registry, operationalHome);
 	const observedProbe = { activation: manifest.length > 0 ? "ok" : "unknown" };
+	const fleetId = resolveFleetId(operationalHome);
 	const receipt: ActivationReceipt = {
 		schema: "firstmate.activation-receipt/v1",
 		...identity,
 		pane_id: paneId,
+		...(fleetId ? { fleet_id: fleetId } : {}),
 		started_at: new Date().toISOString(),
 		manifest_sha256: manifestDigest(manifest),
 		manifest,

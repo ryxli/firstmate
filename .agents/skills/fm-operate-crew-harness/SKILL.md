@@ -9,6 +9,14 @@ description: >-
 # fm-operate-crew-harness
 
 This skill controls visible pane-backed workers only.
+
+Channel hierarchy:
+- OMP Task/Hub for bounded research/implementation/review
+- peer bus (`peer_send`) for firstmate ↔ secondmate and mate ↔ mate handoffs
+- whiteboard for durable lane state
+- `fm send` for visible-pane steering/control only (not mate communication)
+- `fm fleet stop` for persistent registered mate session exit
+
 Routine firstmate and secondmate execution defaults to OMP subagents; persistent mate communication defaults to the peer bus.
 
 Crewmates default to the same harness as firstmate.
@@ -80,8 +88,9 @@ Always autonomous. Brief must be one positional arg. Project trust may appear on
 2. If the brief already answers the blocker, send one corrective line with `fm send <pane> --steer <text>`.
 3. `fm send <pane> --interrupt`, then one corrective `--steer` line.
 4. Use `fm send <pane> --exit` when the adapter supports it; otherwise use its documented explicit exit path, then relaunch the same brief with a progress note.
-5. Text delivery is atomic and fail-closed; never retry blindly.
-6. Second relaunch fails → backlog `failed`, escalate with evidence.
+5. Send terminals: `delivered=0` (idle submit), `queued=76` (accepted while working), `composer-blocked=75`, `failed=1`. Text never claims model-level `consumed`.
+6. Never auto-retry `queued=76` or any send; retry can duplicate one logical instruction.
+7. Second relaunch fails → backlog `failed`, escalate with evidence.
 
 ## includeSkills warning
 

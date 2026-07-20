@@ -15,6 +15,10 @@
 //                             active omp<->herdr state reporter, so working/
 //                             idle/blocked status keeps flowing untouched.
 //   3. pi.setLabel          -> sets the in-session omp label.
+//   4. ctx.setSessionName   -> sets OMP session title to the same mate id
+//                             (fleet_id), so session lists join herdr/fleet
+//                             without a fourth namespace. UUID stays the
+//                             opaque resume key.
 //
 // Ordinary task crewmates (no config/identity in cwd/FM_HOME) and headless /
 // subagent sessions are no-ops.
@@ -95,6 +99,12 @@ export default function (pi: ExtensionAPI) {
 		propagated = true;
 
 		pi.setLabel?.(plan.label);
+		// fleet_id glue: same slug as herdr agent.rename / meta agent_slot.
+		try {
+			await ctx?.setSessionName?.(plan.identity.id);
+		} catch {
+			// Best-effort; title is join glue, not authority.
+		}
 		try {
 			for (const request of plan.requests) {
 				await sendRequest(request);

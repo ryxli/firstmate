@@ -91,11 +91,280 @@ export function metaSet(metaPath: string, key: string, value: string): void {
 
 // herdrPaneId(target): the pane_id from `herdr agent get <target>`, or "" on
 // any failure or no match.
-export function herdrPaneId(target: string): string {
+export type AgentSlotRead =
+	| { presence: "present"; paneId: string; status: string }
+	| { presence: "absent" }
+	| { presence: "error"; reason: string };
+
+/** Tri-state agent slot → pane binding. Only explicit not-found is absence. */
+export function readAgentSlot(target: string): AgentSlotRead {
 	const res = spawnSync("herdr", ["agent", "get", target], { encoding: "utf8" });
-	if (res.error || typeof res.stdout !== "string") return "";
-	const m = res.stdout.match(/"pane_id":"([^"]*)"/);
-	return m ? m[1] : "";
+	const text = typeof res.stdout === "string" ? res.stdout : "";
+	if (res.error || (res.status ?? 1) !== 0) {
+		if (isExplicitNotFound(text)) return { presence: "absent" };
+		return { presence: "error", reason: res.error?.message || `herdr agent get rc=${res.status ?? 1}` };
+	}
+	if (text.includes('"error"')) {
+		if (isExplicitNotFound(text)) return { presence: "absent" };
+		return { presence: "error", reason: jsonGet(text, "error", "message") || "herdr agent get error" };
+	}
+	const paneId = text.match(/"pane_id":"([^"]*)"/)?.[1] ?? "";
+	if (!paneId) {
+		// Successful get without a pane_id is malformed, not absence.
+		return { presence: "error", reason: "agent get succeeded without pane_id" };
+	}
+	const status = text.match(/"agent_status":"([^"]*)"/)?.[1] ?? "";
+	return { presence: "present", paneId, status };
+}
+
+export function herdrPaneId(target: string): string {
+	const slot = readAgentSlot(target);
+	return slot.presence === "present" ? slot.paneId : "";
+}
+
+export type LivePaneClass = "live-agent" | "shell" | "absent" | "stale-binding" | "unknown" | "error";
+
+/** Tri-state Herdr observation: only explicit not-found is absence. */
+export type HerdrPresence = "present" | "absent" | "error";
+
+export interface PaneSnapshot {
+	paneId: string;
+	agentStatus: string;
+	sessionId: string;
+	sessionAgent: string;
+	revision: string;
+	presence: HerdrPresence;
+	/** @deprecated use presence === "present" */
+	present: boolean;
+	errorCode?: string;
+	errorMessage?: string;
+}
+
+function isExplicitNotFound(text: string): boolean {
+	if (!text.includes('"error"') && !/not found/i.test(text)) return false;
+	try {
+		const parsed = JSON.parse(text) as { error?: string | { code?: string; message?: string } };
+		if (typeof parsed.error === "string") return /not found/i.test(parsed.error);
+		const code = String(parsed.error?.code ?? "").toLowerCase();
+		const message = String(parsed.error?.message ?? "").toLowerCase();
+		return (
+			code.includes("not_found") ||
+			code.includes("pane_not_found") ||
+			code.includes("agent_not_found") ||
+			message.includes("not found")
+		);
+	} catch {
+		return /pane_not_found|not found/i.test(text);
+	}
+}
+
+/** Read-only pane get snapshot. Never writes metadata. Tri-state presence. */
+export function readPaneSnapshot(pane: string): PaneSnapshot {
+	const res = spawnSync("herdr", ["pane", "get", pane], { encoding: "utf8" });
+	const text = res.stdout ?? "";
+	if (res.error || (res.status ?? 1) !== 0) {
+		if (isExplicitNotFound(text)) {
+			return { paneId: pane, agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "absent", present: false };
+		}
+		return {
+			paneId: pane,
+			agentStatus: "",
+			sessionId: "",
+			sessionAgent: "",
+			revision: "",
+			presence: "error",
+			present: false,
+			errorMessage: res.error?.message || `herdr pane get rc=${res.status ?? 1}`,
+		};
+	}
+	if (!text) {
+		return { paneId: pane, agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "error", present: false, errorMessage: "empty pane get" };
+	}
+	if (text.includes('"error"')) {
+		if (isExplicitNotFound(text)) {
+			return { paneId: pane, agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "absent", present: false };
+		}
+		return {
+			paneId: pane,
+			agentStatus: "",
+			sessionId: "",
+			sessionAgent: "",
+			revision: "",
+			presence: "error",
+			present: false,
+			errorCode: jsonGet(text, "error", "code"),
+			errorMessage: jsonGet(text, "error", "message") || "herdr pane get error",
+		};
+	}
+	return {
+		paneId: jsonGet(text, "result", "pane", "pane_id") || pane,
+		agentStatus: jsonGet(text, "result", "pane", "agent_status"),
+		sessionId: jsonGet(text, "result", "pane", "agent_session", "value"),
+		sessionAgent: jsonGet(text, "result", "pane", "agent_session", "agent"),
+		revision: jsonGet(text, "result", "pane", "revision"),
+		presence: "present",
+		present: true,
+	};
+}
+
+export type AgentStatusRead =
+	| { presence: "present"; status: string }
+	| { presence: "absent" }
+	| { presence: "error"; reason: string };
+
+/** Tri-state agent status. Empty/missing fields on a successful get are not absence. */
+export function readHerdrAgentStatus(target: string): AgentStatusRead {
+	const res = spawnSync("herdr", ["agent", "get", target], { encoding: "utf8" });
+	const text = res.stdout ?? "";
+	if (res.error || (res.status ?? 1) !== 0) {
+		if (isExplicitNotFound(text)) return { presence: "absent" };
+		return { presence: "error", reason: res.error?.message || `herdr agent get rc=${res.status ?? 1}` };
+	}
+	if (text.includes('"error"')) {
+		if (isExplicitNotFound(text)) return { presence: "absent" };
+		return { presence: "error", reason: jsonGet(text, "error", "message") || "herdr agent get error" };
+	}
+	const m = text.match(/"agent_status":"([^"]*)"/);
+	return { presence: "present", status: m?.[1] ?? "" };
+}
+
+export type PaneReadResult =
+	| { presence: "present"; lines: string[] }
+	| { presence: "absent" }
+	| { presence: "error"; reason: string };
+
+/** Tri-state visible pane read for composer inspection. */
+export function readPaneVisible(pane: string): PaneReadResult {
+	const res = spawnSync("herdr", ["pane", "read", pane, "--lines", "3", "--source", "visible"], { encoding: "utf8" });
+	const text = res.stdout ?? "";
+	if (res.error || (res.status ?? 1) !== 0) {
+		if (isExplicitNotFound(text)) return { presence: "absent" };
+		return { presence: "error", reason: res.error?.message || `herdr pane read rc=${res.status ?? 1}` };
+	}
+	return { presence: "present", lines: text.split(/\r?\n/).filter(line => !/^[ \t]*$/.test(line)) };
+}
+
+export interface InspectLivePaneResult {
+	class: LivePaneClass;
+	slot: string;
+	livePane: string;
+	recordedPane: string;
+	snapshot: PaneSnapshot | null;
+	reason?: string;
+}
+
+/**
+ * Read-only mate/slot classification. Never writes meta and never treats a
+ * stale recorded pane as proof of the mate's live session without slot match.
+ */
+function classifyPresentPane(pane: string, slot: string, recordedPane: string, snap: PaneSnapshot): InspectLivePaneResult {
+	if (snap.presence === "error") {
+		return { class: "error", slot, livePane: pane, recordedPane, snapshot: snap, reason: snap.errorMessage || "pane read error" };
+	}
+	if (snap.presence === "absent") {
+		return { class: "absent", slot, livePane: pane, recordedPane, snapshot: snap };
+	}
+	if (snap.sessionId || snap.agentStatus === "working" || snap.agentStatus === "idle" || snap.agentStatus === "blocked" || snap.agentStatus === "done") {
+		return { class: "live-agent", slot, livePane: pane, recordedPane, snapshot: snap };
+	}
+	const verdict = herdrPaneAgentProcessVerdict(pane);
+	if (verdict === "shell") return { class: "shell", slot, livePane: pane, recordedPane, snapshot: snap };
+	if (verdict === "agent") return { class: "live-agent", slot, livePane: pane, recordedPane, snapshot: snap };
+	if (verdict === "err") {
+		return { class: "error", slot, livePane: pane, recordedPane, snapshot: snap, reason: "process-info error" };
+	}
+	return { class: "unknown", slot, livePane: pane, recordedPane, snapshot: snap };
+}
+
+export function inspectLivePane(target: string, state: string): InspectLivePaneResult {
+	if (target.includes(":")) {
+		const snap = readPaneSnapshot(target);
+		return classifyPresentPane(target, target, target, snap);
+	}
+
+	if (!target.startsWith("fm-")) {
+		const slotRead = readAgentSlot(target);
+		if (slotRead.presence === "error") {
+			return { class: "error", slot: target, livePane: "", recordedPane: "", snapshot: null, reason: slotRead.reason };
+		}
+		if (slotRead.presence === "absent") {
+			return { class: "absent", slot: target, livePane: "", recordedPane: "", snapshot: null, reason: "no agent slot" };
+		}
+		return inspectLivePane(slotRead.paneId, state);
+	}
+
+	const canonicalSlot = target;
+	const metaPath = state ? join(state, `${target.slice("fm-".length)}.meta`) : "";
+	const hasMeta = Boolean(metaPath && existsSync(metaPath));
+	const slot = hasMeta ? metaValue(metaPath, "agent_slot") || canonicalSlot : canonicalSlot;
+	const recordedPane = hasMeta ? metaValue(metaPath, "pane") : "";
+
+	// Prefer configured agent_slot; fall back to fm-<id> only for discovery.
+	// inspect.slot is whichever name actually bound — never require both later.
+	const slotRead = readAgentSlot(slot);
+	const canonicalRead = slot === canonicalSlot ? slotRead : readAgentSlot(canonicalSlot);
+	const liveRead =
+		slotRead.presence === "present"
+			? slotRead
+			: canonicalRead.presence === "present"
+				? canonicalRead
+				: slotRead.presence === "error"
+					? slotRead
+					: canonicalRead;
+	const resolvedSlot =
+		slotRead.presence === "present" ? slot : canonicalRead.presence === "present" ? canonicalSlot : slot;
+
+	if (liveRead.presence === "error") {
+		return {
+			class: "error",
+			slot: resolvedSlot,
+			livePane: "",
+			recordedPane,
+			snapshot: null,
+			reason: hasMeta ? liveRead.reason : `missing meta; ${liveRead.reason}`,
+		};
+	}
+	if (liveRead.presence === "absent") {
+		if (recordedPane) {
+			const snap = readPaneSnapshot(recordedPane);
+			if (snap.presence === "error") {
+				return {
+					class: "error",
+					slot: resolvedSlot,
+					livePane: "",
+					recordedPane,
+					snapshot: snap,
+					reason: snap.errorMessage || "recorded pane read error",
+				};
+			}
+			if (snap.presence === "present") {
+				return {
+					class: "stale-binding",
+					slot: resolvedSlot,
+					livePane: "",
+					recordedPane,
+					snapshot: snap,
+					reason: "recorded pane exists but agent slot is unbound",
+				};
+			}
+		}
+		if (!hasMeta && !state) {
+			return { class: "error", slot: canonicalSlot, livePane: "", recordedPane: "", snapshot: null, reason: "state dir required" };
+		}
+		return { class: "absent", slot: resolvedSlot, livePane: "", recordedPane, snapshot: null };
+	}
+
+	const snap = readPaneSnapshot(liveRead.paneId);
+	return classifyPresentPane(liveRead.paneId, resolvedSlot, recordedPane, snap);
+}
+
+/** Explicit binding refresh for a snapshotted stop target after live slot validation. */
+export function refreshPaneBinding(target: string, state: string, livePane: string): void {
+	if (!target.startsWith("fm-") || !state || !livePane) return;
+	const metaPath = join(state, `${target.slice("fm-".length)}.meta`);
+	if (!existsSync(metaPath)) return;
+	const pane = metaValue(metaPath, "pane");
+	if (pane !== livePane) metaSet(metaPath, "pane", livePane);
 }
 
 // resolveLivePane(target, state): resolve durable targets (fm-<id>) through
@@ -240,25 +509,34 @@ export async function herdrReapHuskSlot(slot: string): Promise<boolean> {
 	return false;
 }
 
-// paneInputPending: true (pending) if the pane's visible content shows real
-// unsubmitted text a human typed into the composer. An idle composer, a bare
-// prompt glyph, or a busy footer is NOT pending. With herdr we read the raw
-// visible text; no ANSI SGR stripping needed because herdr pane read returns
-// plain text by default. Note: --lines is not honored by --source visible
-// (herdr always returns the full visible viewport for that source), so this
-// scans the whole visible tail rather than relying on a short window.
+// Composer observation: pending draft vs clear vs observation error.
+// Observation errors must not masquerade as composer-blocked.
 const OMP_COMPOSER_HEADER_RE = /^╭── .+(?: ──|▶────)╮$/;
 const OMP_EMPTY_COMPOSER_BOTTOM_RE = /^╰─( +)─╯$/;
 
-export function paneInputPending(pane: string): boolean {
+export type ComposerObservation =
+	| { state: "pending" }
+	| { state: "clear" }
+	| { state: "error"; reason: string };
+
+/**
+ * Tri-state composer inspection. Errors are distinct from a human draft.
+ * Note: --lines is not honored by --source visible (herdr returns the full
+ * visible viewport), so this scans the whole visible tail.
+ */
+export function observeComposer(pane: string): ComposerObservation {
 	// If the agent is mid-turn, the visible last line is agent output, never
 	// unsubmitted human text. Defer to the busy check so a working pane is
 	// never misread as holding pending input.
-	if (paneIsBusy(pane)) return false;
+	const status = readHerdrAgentStatus(pane);
+	if (status.presence === "error") return { state: "error", reason: status.reason };
+	if (status.presence === "present" && status.status === "working") return { state: "clear" };
 
-	const res = spawnSync("herdr", ["pane", "read", pane, "--lines", "3", "--source", "visible"], { encoding: "utf8" });
-	const raw = (res.stdout ?? "").split(/\r?\n/).filter(line => !/^[ \t]*$/.test(line));
-	if (raw.length === 0) return false;
+	const read = readPaneVisible(pane);
+	if (read.presence === "error") return { state: "error", reason: read.reason };
+	if (read.presence === "absent") return { state: "clear" };
+	const raw = read.lines;
+	if (raw.length === 0) return { state: "clear" };
 
 	// OMP renders its status inside the composer's rounded top border. When
 	// empty, the exact final compositor is that header immediately followed by
@@ -271,7 +549,7 @@ export function paneInputPending(pane: string): boolean {
 		OMP_COMPOSER_HEADER_RE.test(raw[raw.length - 2]) &&
 		OMP_EMPTY_COMPOSER_BOTTOM_RE.test(raw[raw.length - 1])
 	) {
-		return false;
+		return { state: "clear" };
 	}
 
 	let found = false;
@@ -313,16 +591,23 @@ export function paneInputPending(pane: string): boolean {
 		found = true;
 		result = stripped;
 	}
-	if (!found) return false;
+	if (!found) return { state: "clear" };
 	// Bare prompt glyph = empty composer.
-	if (result === ">" || result === "❯" || result === "$" || result === "%" || result === "#") return false;
+	if (result === ">" || result === "❯" || result === "$" || result === "%" || result === "#") {
+		return { state: "clear" };
+	}
 	// Custom idle-compositor override (after border stripping), e.g. for custom prompt patterns.
 	const idleRe = process.env.FM_COMPOSER_IDLE_RE;
 	if (idleRe) {
-		if (new RegExp(idleRe).test(result)) return false;
+		if (new RegExp(idleRe).test(result)) return { state: "clear" };
 	}
 	// A busy footer on the cursor line is not pending input.
 	const busyRe = process.env.FM_BUSY_REGEX || "esc (to )?interrupt|Working\\.\\.\\.";
-	if (new RegExp(busyRe, "i").test(result)) return false;
-	return true;
+	if (new RegExp(busyRe, "i").test(result)) return { state: "clear" };
+	return { state: "pending" };
+}
+
+/** True only when a human draft is observed. Observation errors are not pending. */
+export function paneInputPending(pane: string): boolean {
+	return observeComposer(pane).state === "pending";
 }

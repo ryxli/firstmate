@@ -160,12 +160,19 @@ async function run(argv: string[]): Promise<number> {
 		const msg =
 			`Lavish feedback (${n} item(s)) on ${file} - read ${feedback}, apply the changes, then acknowledge in-browser with: ` +
 			`${SBIN_DIR}/fm lavish-reply "${file}" "<message>" (do NOT run 'lavish-axi poll' yourself - the steward owns it)`;
-		const res = spawnSync(FM_CLI, ["send", relay, msg], { encoding: "utf8" });
+		const res = spawnSync(FM_CLI, ["send", relay, "--steer", msg], { encoding: "utf8" });
 		logRaw(`${res.stdout ?? ""}${res.stderr ?? ""}`);
-		if (!res.error && res.status === 0) {
+		const rc = res.status ?? 1;
+		// queued=76: Herdr accepted steering while the pane was already working.
+		// Log honestly and never auto-retry (retry can duplicate instructions).
+		if (!res.error && rc === 0) {
 			log_(`relayed feedback to pane ${relay} (${n} items)`);
+		} else if (!res.error && rc === 76) {
+			log_(`relayed feedback to pane ${relay} queued=76 (accepted, not yet consumed; not retrying; ${n} items)`);
+		} else if (!res.error && rc === 75) {
+			log_(`WARN relay to pane ${relay} composer-blocked=75 (feedback is recorded at ${feedback})`);
 		} else {
-			log_(`WARN relay to pane ${relay} failed (feedback is recorded at ${feedback})`);
+			log_(`WARN relay to pane ${relay} failed rc=${rc} (feedback is recorded at ${feedback})`);
 		}
 	}
 

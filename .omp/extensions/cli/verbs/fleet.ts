@@ -1,5 +1,6 @@
-// fm verb: fleet - compact activation, health, attention, task, and agent overview.
-// Migrated verbatim (behavior-preserving) out of the former sbin/fm monolith.
+// fm verb: fleet - overview plus persistent-mate lifecycle (stop/clean/check).
+// Mutating commands (stop/clean/update) require controller/firstmate home.
+// Read-only commands discover the controller via resolveFleetControllerHome.
 
 import {
 	actionableFleetView,
@@ -13,39 +14,67 @@ import type { TaskRow } from "../../bridge/fleet";
 import { updateFleet } from "../../bridge/update";
 import { ambiguous, missing, operationalError, output, validationError } from "../common";
 import { commandHelp } from "../help";
+import { requireControllerMutationAuthority, resolveFleetControllerHome } from "../lib/fleet-authority";
+import { fleetCheck, fleetClean, fleetStop } from "../lib/fleet-lifecycle";
 import { runFleetView } from "../lib/fleet-view";
+
+const MUTATING = new Set(["stop", "clean", "update"]);
+
+function refuseAuth(reason: string): number {
+	process.stderr.write(`error: fleet authority: ${reason}\n`);
+	process.stdout.write("result=failed reason=authority\n");
+	return 1;
+}
 
 async function run(argv: string[]): Promise<number> {
 	if (argv.length === 1 || (argv.length === 2 && argv[1] === "--full")) {
+		const auth = resolveFleetControllerHome();
+		if (!auth.ok) return refuseAuth(auth.reason);
+		const saved = process.env.FM_HOME;
+		process.env.FM_HOME = auth.controllerHome;
 		try {
-			const snapshot = await collectSnapshot();
+			const snapshot = await collectSnapshot(undefined, auth.controllerHome);
 			const full = argv[1] === "--full";
 			output({ command: "fleet", result: full ? snapshot : actionableFleetView(snapshot) });
 			return 0;
 		} catch (error) {
 			return operationalError("fleet", error);
+		} finally {
+			if (saved !== undefined) process.env.FM_HOME = saved;
+			else delete process.env.FM_HOME;
 		}
 	}
 	if (argv[1] === "--help" || argv[1] === "-h") {
 		output(commandHelp("fm fleet"));
 		return 0;
 	}
+	// Removed transitional alias: use `fm fleet check`.
 	if (argv[1] === "--check") {
-		if (argv.length !== 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Use `fm fleet --check` without additional arguments."]);
-		try {
-			const snapshot = await collectSnapshot();
-			output({ command: "fleet", result: snapshot });
-			return snapshot.activation?.state === "fresh" && snapshot.health?.state === "healthy" ? 0 : 1;
-		} catch (error) {
-			return operationalError("fleet --check", error);
-		}
+		return validationError("Unknown flag --check", ["Use `fm fleet check` (no alias)."]);
 	}
 
 	const command = argv[1];
-	if (command === "fleet") return validationError(`Unexpected argument: ${argv.slice(1).join(" ")}`, ["Run `fm fleet --help` for available commands."]);
-	try {
-		if (command === "view") return runFleetView(argv.slice(1));
-		if (command === "update") {
+	if (!command) {
+		return validationError("Missing fleet command", ["Run `fm fleet --help` for available commands."]);
+	}
+
+	if (MUTATING.has(command)) {
+		const auth = requireControllerMutationAuthority();
+		if (!auth.ok) return refuseAuth(auth.reason);
+		const saved = process.env.FM_HOME;
+		process.env.FM_HOME = auth.controllerHome;
+		try {
+			if (command === "stop") {
+				const sel = argv[2];
+				if (!sel || argv.length !== 3) {
+					return validationError("Usage: fm fleet stop <mate|--all>", ["Provide one mate id or --all."]);
+				}
+				return await fleetStop(auth.controllerHome, sel);
+			}
+			if (command === "clean") {
+				if (argv.length !== 2) return validationError("Usage: fm fleet clean", ["No flags; resting only when active scope is empty."]);
+				return await fleetClean(auth.controllerHome);
+			}
 			if (argv.length === 3 && (argv[2] === "--help" || argv[2] === "-h")) {
 				output({ command: "fleet update", usage: "fm fleet update", description: "Selectively fast-forward registered homes and prove live-session reloads." });
 				return 0;
@@ -55,7 +84,25 @@ async function run(argv: string[]): Promise<number> {
 			output({ command: "fleet update", result: update });
 			if (update.results.some(target => target.status === "failed")) return 1;
 			return update.results.some(target => target.status === "pending") ? 1 : 0;
+		} catch (error) {
+			return operationalError(`fleet ${command}`, error);
+		} finally {
+			if (saved !== undefined) process.env.FM_HOME = saved;
+			else delete process.env.FM_HOME;
 		}
+	}
+
+	const readAuth = resolveFleetControllerHome();
+	if (!readAuth.ok) return refuseAuth(readAuth.reason);
+	const saved = process.env.FM_HOME;
+	process.env.FM_HOME = readAuth.controllerHome;
+
+	try {
+		if (command === "check") {
+			if (argv.length !== 2) return validationError("Usage: fm fleet check", ["No additional arguments."]);
+			return await fleetCheck(readAuth.controllerHome);
+		}
+		if (command === "view") return runFleetView(argv.slice(1));
 		if (command === "tasks") {
 			let state: TaskRow["state"] | undefined;
 			if (argv.length === 3 && (argv[2] === "--help" || argv[2] === "-h")) {
@@ -70,7 +117,7 @@ async function run(argv: string[]): Promise<number> {
 				state = normalizeTaskState(argv[3]);
 				if (!state) return validationError(`Invalid task state: ${argv[3]}`, ["Choose in-flight, queued, or done."]);
 			}
-			const snapshot = await collectSnapshot();
+			const snapshot = await collectSnapshot(undefined, readAuth.controllerHome);
 			output({ command: "fleet tasks", result: rankedTasks(snapshot, state) });
 			return 0;
 		}
@@ -81,7 +128,7 @@ async function run(argv: string[]): Promise<number> {
 				return 0;
 			}
 			if (argv.length !== 4 || argv[2] !== "get" || !argv[3]) return validationError(`Usage: fm fleet ${command} get <id>`, ["Provide one canonical owner-qualified key or a unique bare id."]);
-			const snapshot = await collectSnapshot();
+			const snapshot = await collectSnapshot(undefined, readAuth.controllerHome);
 			if (command === "task") {
 				const found = findTask(snapshot, argv[3]);
 				if (found.candidates.length > 1) return ambiguous("task", argv[3], found.candidates);
@@ -101,7 +148,7 @@ async function run(argv: string[]): Promise<number> {
 				output({ command: "fleet metrics", usage: "fm fleet metrics", description: "Optional cost and productivity metrics." });
 			}
 			if (argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Use `fm fleet metrics` without arguments."]);
-			const snapshot = await collectSnapshot(new Date().toISOString(), undefined, { includeMetrics: true });
+			const snapshot = await collectSnapshot(new Date().toISOString(), readAuth.controllerHome, { includeMetrics: true });
 			output({ command: "fleet metrics", result: snapshot.metrics ?? null });
 			return 0;
 		}
@@ -134,7 +181,7 @@ async function run(argv: string[]): Promise<number> {
 					return validationError(`Unexpected argument: ${arg}`, ["Use `fm fleet snapshot [--json] [--metrics] [--starting-main] [--home <path>] [--stats-file <path>]`."]);
 				}
 			}
-			const snapshot = await collectSnapshot(new Date().toISOString(), home, { includeMetrics, statsFile, startingMain });
+			const snapshot = await collectSnapshot(new Date().toISOString(), home ?? readAuth.controllerHome, { includeMetrics, statsFile, startingMain });
 			if (asJson) {
 				process.stdout.write(`${JSON.stringify(snapshot)}\n`);
 				return 0;
@@ -142,20 +189,17 @@ async function run(argv: string[]): Promise<number> {
 			output({ command: "fleet snapshot", result: snapshot });
 			return 0;
 		}
-		if (!["fleet", "update", "tasks", "task", "agent", "metrics", "snapshot", "view"].includes(command)) {
-			return validationError(`Unknown fleet command: ${command}`, ["Run `fm fleet --help` for available commands."]);
-		}
-		if (command !== "fleet" || argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Run `fm fleet --help` for available commands."]);
-		const snapshot = await collectSnapshot();
-		output({ command: "fleet", result: snapshot });
-		return 0;
+		return validationError(`Unknown fleet command: ${command}`, ["Run `fm fleet --help` for available commands."]);
 	} catch (error) {
 		return operationalError(`fleet ${command}`, error);
+	} finally {
+		if (saved !== undefined) process.env.FM_HOME = saved;
+		else delete process.env.FM_HOME;
 	}
 }
 
 export default {
 	name: "fleet",
-	describe: "Compact activation, health, attention, task, and agent overview.",
+	describe: "Fleet overview and persistent-mate lifecycle (stop/clean/check).",
 	run,
 };

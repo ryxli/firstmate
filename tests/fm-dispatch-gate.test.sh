@@ -198,18 +198,18 @@ test_steer_bypasses_focus_lock() {
 }
 
 # -----------------------------------------------------------------------
-# 8. Freeze does not affect raw pane IDs for --key sends combined with --steer
+# 8. Control modes skip dispatch freeze even without --steer
 # -----------------------------------------------------------------------
-test_steer_key_send_bypasses_freeze() {
+test_key_send_bypasses_freeze_without_steer() {
   local dir state fakebin err
-  dir=$(make_gate_case steer-key)
+  dir=$(make_gate_case key-freeze)
   state="$dir/state"; fakebin="$dir/fakebin"; err="$dir/err"
   printf 'frozen\n' > "$state/.dispatch-freeze"
   PATH="$fakebin:$PATH" \
     FM_STATE_OVERRIDE="$state" \
-    "$ROOT/sbin/fm" send w1:p1 --steer --key Escape >/dev/null 2>"$err" \
-    || fail "--steer --key send blocked by freeze: $(cat "$err")"
-  pass "--steer --key send bypasses freeze"
+    "$ROOT/sbin/fm" send w1:p1 --key Escape >/dev/null 2>"$err" \
+    || fail "--key send blocked by freeze without --steer: $(cat "$err")"
+  pass "--key send bypasses freeze without --steer"
 }
 
 # -----------------------------------------------------------------------
@@ -222,4 +222,4 @@ test_override_env_bypasses_freeze
 test_focus_lock_blocks_send
 test_focus_lock_absent_allows_send
 test_steer_bypasses_focus_lock
-test_steer_key_send_bypasses_freeze
+test_key_send_bypasses_freeze_without_steer

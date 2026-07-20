@@ -72,7 +72,7 @@ test_send_submits_once() {
   fb=$(make_fake_herdr "$dir")
 
   PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
-    FM_FAKE_AGENT_STATUS="unknown" FM_FAKE_PANE_LINES="" \
+    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="" \
     "$ROOT/sbin/fm" send fm-task "atomic work" \
     || fail "fm-send rejected a successful atomic submission"
 
@@ -239,7 +239,7 @@ test_sequential_sends_do_not_amplify() {
   i=1
   while [ "$i" -le 20 ]; do
     PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
-      FM_FAKE_AGENT_STATUS="unknown" FM_FAKE_PANE_LINES="" \
+      FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="" \
       "$ROOT/sbin/fm" send fm-task "instruction $i" \
       || fail "sequential send $i failed"
     i=$((i + 1))
