@@ -1,6 +1,6 @@
 // Native markdown backlog engine shared by the `tasks`/`task` verb.
 //
-// Grammar (see AGENTS.md section 6/10 references and skill://firstmate-task-lifecycle §10):
+// Grammar (see AGENTS.md section 5 and skill://fm-manage-project-work):
 //   ## In flight / ## Queued / ## Done   (any other header is passthrough/raw)
 //   - [ ] <id> - <title>[ blocked-by: <id>[ - <reason>]]* [ (repo: <r>)] [ (kind: <k>)]
 //         [ (priority: <0-4>)] [ (since <date>)] [ (hold: <reason>)] [ (hold-kind: <k>)]

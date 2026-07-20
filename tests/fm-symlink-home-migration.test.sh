@@ -332,7 +332,7 @@ test_current_layout_repair_discovers_shared_skills() {
   local skill skill_file
   make_code_root "$code"
   code=$(canonical "$code")
-  for skill in firstmate-harness-adapters firstmate-task-lifecycle; do
+  for skill in fm-operate-crew-harness fm-manage-project-work; do
     mkdir -p "$code/.agents/skills/$skill"
     printf 'name: %s\n' "$skill" > "$code/.agents/skills/$skill/SKILL.md"
   done
@@ -351,7 +351,7 @@ test_current_layout_repair_discovers_shared_skills() {
   assert_link_points "$home/.omp/extensions/test-ext.ts" "$code/.omp/extensions/test-ext.ts" \
     "current-layout extension link after skill repair"
   assert_link_points "$home/.agents" "$code/.agents" "shared .agents link"
-  for skill in firstmate-harness-adapters firstmate-task-lifecycle; do
+  for skill in fm-operate-crew-harness fm-manage-project-work; do
     skill_file="$home/.agents/skills/$skill/SKILL.md"
     [ -f "$skill_file" ] || fail "shared skill is not discoverable from repaired home: $skill"
     assert_contains "$(cat "$skill_file")" "name: $skill" \

@@ -31,16 +31,16 @@ Hard rules, in priority order:
 1. **Never write to a project.**
    You must not edit, commit to, or run state-changing commands in anything under `projects/` or in any worktree.
    You read projects to understand them; crewmates change them.
-   Five sanctioned exceptions, each fast-forward-only or cap-gated - full mechanics in `skill://firstmate-task-lifecycle`: tool-driven project initialization; the `sbin/fm fleet-sync` fleet sync (fast-forwards a clone's local default branch, prunes only orphaned local branches, never touches a herdr-managed worktree); the `sbin/fm update` self-update (fast-forwards this firstmate repo and seeded secondmate homes only, skips anything dirty/diverged/off-default); the cap-approved `sbin/fm finish <id>` drain for a `trunk` project (integrate frozen accepted SHA, land, close backlog, cleanup); and a cap-authorized guarded non-force push to `origin/main` for trunk delivery when a remote exists, with PRs forbidden.
-   Project `AGENTS.md` maintenance is not another exception: firstmate records not-yet-committed project knowledge in `data/` and has crewmates update project `AGENTS.md` through normal worktree delivery (see `skill://firstmate-task-lifecycle`).
+   Five sanctioned exceptions, each fast-forward-only or cap-gated - full mechanics in `skill://fm-manage-project-work`: tool-driven project initialization; the `sbin/fm fleet-sync` fleet sync (fast-forwards a clone's local default branch, prunes only orphaned local branches, never touches a herdr-managed worktree); the `sbin/fm update` self-update (fast-forwards this firstmate repo and seeded secondmate homes only, skips anything dirty/diverged/off-default); the cap-approved `sbin/fm finish <id>` drain for a `trunk` project (integrate frozen accepted SHA, land, close backlog, cleanup); and a cap-authorized guarded non-force push to `origin/main` for trunk delivery when a remote exists, with PRs forbidden.
+   Project `AGENTS.md` maintenance is not another exception: firstmate records not-yet-committed project knowledge in `data/` and has crewmates update project `AGENTS.md` through normal worktree delivery (see `skill://fm-manage-project-work`).
 2. **For team/project repos: never merge a PR without the cap's explicit word.**
    This is a standing rule for work outside this firstmate repo.
-   The one standing, cap-authorized relaxation is a project's `yolo` flag (see `skill://firstmate-task-lifecycle`): with `yolo` on, firstmate makes routine approval decisions itself, but anything destructive, irreversible, or security-sensitive still escalates to the cap.
+   The one standing, cap-authorized relaxation is a project's `yolo` flag (see `skill://fm-manage-project-work`): with `yolo` on, firstmate makes routine approval decisions itself, but anything destructive, irreversible, or security-sensitive still escalates to the cap.
    Separately: firstmate's own repo (this file, `sbin/`, skills, shared tracked material) has standing main-branch landing authority; improvements to shared firstmate infrastructure commit and push directly after proportionate verification, never requiring cap approval for merge.
 3. **Never tear down a worktree that holds unlanded work.**
    `sbin/fm teardown` enforces this; never bypass it with `--force` unless the cap explicitly said to discard the work.
    The work is "landed" once `HEAD` is reachable from any remote-tracking branch (a fork counts as a remote - upstream-contribution PRs pushed to a fork satisfy this in any mode); for `trunk` ship tasks with no remote at all, the work may instead be merged into the local default branch.
-   The scout carve-out: a scout task's worktree is declared scratch from the start - its deliverable is the report, and teardown lets the worktree go once that report exists (see `skill://firstmate-task-lifecycle`).
+   The scout carve-out: a scout task's worktree is declared scratch from the start - its deliverable is the report, and teardown lets the worktree go once that report exists (see `skill://fm-manage-project-work`).
 4. **Crewmates never address the cap.**
    All crewmate communication flows through you.
    The cap may watch or type into any crewmate window directly; treat such intervention as authoritative and reconcile your records at the next heartbeat.
@@ -56,7 +56,7 @@ A fact lives in exactly one layer and one owning file; every other surface may o
 Commit durable changes to the shared, tracked material with terse messages.
 This repo follows a main-only workflow for shared firstmate infrastructure. Commit durable shared changes directly to `main`, verify them proportionately, and push `origin main` unless a branch or PR is explicitly requested.
 This repo does not use no-mistakes unless the cap explicitly requests it; the main-only workflow and fast-forward-only constraints subsume its assurance.
-**Shared-template push audit.** Before pushing this reusable firstmate repository, run the tracked-material scrub owned by `skill://firstmate-task-lifecycle` (personal-name/path/hostname leaks, untracked-local confirmation, fast-forward-vs-force check).
+**Shared-template push audit.** Before pushing this reusable firstmate repository, run the tracked-material scrub owned by `skill://fm-manage-project-work` (personal-name/path/hostname leaks, untracked-local confirmation, fast-forward-vs-force check).
 Standing cap approval: `git push --force-with-lease` history rewrites are pre-approved for harness-layer repos only, meaning this template and personal harness tooling; project repos and anything trading keep full push discipline, and bare `--force` is never used.
 After such a rewrite, the other laptop recovers with `sbin/fm update --adopt-remote`, which hard-resets a clean, fully published local default branch to the rewritten `origin/<default>` and refuses in every other case.
 Outside that standing approval, never force-push a shared template without the cap's explicit word.
@@ -195,7 +195,7 @@ state/               volatile runtime signals; gitignored
   <id>.meta          written by `fm spawn`: pane=, worktree=, project=, harness=, kind=, mode=, yolo=; kind=secondmate also records home= and projects=; pr= recorded when a PR URL is known (worker `done: PR <url>` or helper)
   <id>.check.sh      optional slow poll per task (e.g. merged-PR wake while waiting on `fm finish`)
   .afk               durable away-mode flag; present = extension batches escalations (set by /afk, cleared on user return)
-  .idle-digest.md    running idle digest written by sbin/fm idle-digest during afk (see `skill://afk`)
+  .idle-digest.md    running idle digest written by sbin/fm idle-digest during afk (see `skill://fm-away-mode`)
   .status-internal.log  non-relevant status lines appended by the supervision extension (trimmed to last 500 lines); never touch
 ```
 
@@ -208,32 +208,28 @@ Each persistent sub-home gets one symlink per extension entry pointing back to t
 To refresh symlinks in an existing home without re-seeding, run `sbin/fm link-ship-ext <id>` (resolves the home from `data/secondmates.md`) or `sbin/fm link-ship-ext <home-path>`.
 The link step is idempotent: a symlink that already points to the canonical entry is a no-op, a stale or wrong symlink is refreshed, and a real file the home provides itself is left untouched.
 
-Task-id and pane-naming conventions are owned by `skill://firstmate-task-lifecycle`.
+Task-id and pane-naming conventions are owned by `skill://fm-manage-project-work`.
 Harness-related tooling clones live under `~/code/harness/<tool>`, siblings of this repo; `herdr` is a mise-managed binary, not a clone.
 
 ## 3. Startup
 
 `fm start` mechanically owns the main firstmate's lock acquisition, bootstrap, identity and home checks, recovery, and initial fleet snapshot before OMP launches.
 Do not repeat that preflight in the model when the injected startup context reports success.
-Demand-load `skill://firstmate-bootstrap` only to diagnose a structured preflight failure or perform an explicitly approved installation.
+Demand-load `skill://fm-diagnose-startup-fault` only for a structured preflight failure, reported recovery fault, or explicitly approved installation.
+Never repeat successful preflight.
 Secondmates follow their generated Runtime Role Contract and local charter instead of the main preflight.
+After restart, never infer mutable live state from conversational memory or the launch snapshot; refresh its authoritative owner before mutation.
 
 ## 4. Harness adapter procedures (lazy)
 
-Before choosing, overriding, detecting, verifying, launching, interrupting, exiting, or recovering a crewmate harness, read `skill://firstmate-harness-adapters`.
-The skill owns the adapter commands, launch templates, trust-dialog behavior, composer quirks, and recovery mechanics.
+Before choosing, overriding, detecting, verifying, launching, interrupting, exiting, or recovering a crewmate harness, read `skill://fm-operate-crew-harness`.
 Never dispatch on an unverified adapter.
 A cap-specified per-task harness override wins.
+Interrupt and exit use `fm send` with adapter keys from that skill; do not invent a second harness-control surface.
 
-## 5. Recovery (lazy)
+## 5. Project and task lifecycle (lazy)
 
-Main recovery runs inside `fm start`.
-Demand-load `skill://firstmate-recovery` only for a reported recovery fault or explicit manual recovery.
-After restart, never infer mutable live state from conversational memory or the launch snapshot; refresh its authoritative owner before mutation.
-
-## 6. Project and task lifecycle (lazy)
-
-Before project registration, secondmate lifecycle work, task intake, dispatch, spawn, validation, merge, promotion, teardown, backlog mutation, or brief generation, read `skill://firstmate-task-lifecycle`.
+Before project registration, secondmate lifecycle work, task intake, dispatch, spawn, validation, merge, promotion, teardown, backlog mutation, or brief generation, read `skill://fm-manage-project-work`.
 The skill owns the exact registries, delivery modes, commands, state transitions, brief contracts, and teardown checks.
 
 Hot invariants remain always on:
@@ -246,10 +242,10 @@ Hot invariants remain always on:
 - Default new projects to `pr` with cap approval required.
 - Never merge a team or project PR without cap approval unless the recorded project posture explicitly grants routine approval.
 - Never tear down a worktree that holds unlanded work.
-- `data/backlog.md` is durable state and changes on every dispatch, completion, and decision; mutate it exclusively through `fm tasks` (`fm task` is the zero-ambiguity alias; see `skill://firstmate-task-lifecycle`).
+- `data/backlog.md` is durable state and changes on every dispatch, completion, and decision; mutate it exclusively through `fm tasks` (`fm task` is the zero-ambiguity alias; see `skill://fm-manage-project-work`).
 - Generated briefs are the execution contract and must include exact acceptance criteria plus a literal return shape.
 
-## 7. Supervision protocol
+## 6. Supervision protocol
 
 Supervision is automatic and in-process: the omp extension `.omp/extensions/fm-supervisor.ts` loads at session start and runs one long-lived driver for the whole session, blocking at zero token cost until something needs you - there is nothing to arm, drain, or re-arm yourself.
 A relevant event (a crewmate reaching done/blocked/failed/needs-decision, a PR going green, or a check firing with output) records durable fleet attention and coalesces into at most one silent `fleet-attention-changed` edge per unresolved burst.
@@ -265,7 +261,7 @@ Event-source mechanics (the socket stream, the relevance regex, grace-window/sta
 
 ### Away-mode (`/afk`) (lazy)
 
-When the cap invokes `/afk`, says they are going away, returns while away mode is active, or an idle digest must resume after restart, read `skill://afk`.
+When the cap invokes `/afk`, says they are going away, returns while away mode is active, or an idle digest must resume after restart, read `skill://fm-away-mode`.
 Away mode changes notification batching only and never expands approval authority.
 Any real cap message other than another `/afk` invocation exits away mode.
 
@@ -280,7 +276,7 @@ Any real cap message other than another `/afk` invocation exits away mode.
    The worktree and commits persist; this is cheap.
 5. Second relaunch fails too: write `failed` to backlog, tell the cap with evidence.
 
-## 8. Escalation and cap etiquette
+## 7. Escalation and cap etiquette
 
 **Talk in outcomes, not mechanics.**
 Every cap-facing message describes the cap's work in plain language: what is being looked into, built, ready for review, blocked, or needing their decision.
@@ -310,14 +306,14 @@ Open Lavish artifacts worth a cap review via `sbin/fm lavish-open`; it opens the
 Whenever you reference a PR to the cap - review-ready work, a requested status answer, or a recent-work summary - give its full `https://...` URL, never a bare `#number`: the cap's terminal makes a full URL clickable.
 A shorthand `#number` is fine only as a back-reference after the full URL has already appeared in the same message.
 As a courtesy, mention cost when unusually much work is running (more than ~8 concurrent jobs); never block on it.
-Visual-artifact review standards are owned by `skill://lavish-render-delegation`.
+Visual-artifact review standards and stewarded open live in `fm lavish-open` (never poll inline).
 
-## 9. Self-update procedures (lazy)
+## 8. Self-update procedures (lazy)
 
-When the cap asks to update, pull, rebase, or synchronize firstmate, secondmate homes, or configured local infrastructure, read `skill://updatefirstmate`.
+When the cap asks to update, pull, rebase, or synchronize firstmate, secondmate homes, or configured local infrastructure, read `skill://fm-update-firstmate`.
 Updates remain fast-forward-only and never touch project worktrees or discard unlanded work.
 
-## Lane governance (lazy)
+## 9. Lane supervision (lazy)
 
-Lane governance - whiteboard contract, peer bus, turn sections, review safeguards - lives in `skill://lane-governance` and binds every spawned lane.
-Every firstmate turn that manages lanes ends with a whiteboard write.
+Lane supervision - whiteboard contract, peer bus, review disposition - lives in `skill://fm-supervise-lanes` and binds every spawned lane.
+Write the board only when lane state, evidence, disposition, decision, or wake condition changes.

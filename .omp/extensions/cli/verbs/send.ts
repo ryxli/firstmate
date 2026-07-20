@@ -11,6 +11,9 @@
 // --steer marks the message as steering/correction; it bypasses the dispatch
 //   gate (freeze and focus locks) while still verifying delivery.
 // Special keys instead of text: fm send <pane> [--steer] --key Escape
+// Adapter-aware: fm send <pane> [--steer] --interrupt | --exit
+//   resolves harness= from state/<id>.meta and uses the internal harness
+//   adapter registry (interrupt key sequence / exit slash command).
 //
 // Dispatch gate: new work is refused when state/.dispatch-freeze exists or
 // state/.focus-<id> exists for the target mate. Bypass with --steer or
@@ -26,11 +29,10 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadArtifact } from "../lib/artifact";
+import { exitCommand, interruptPlan } from "../lib/harness-adapters";
 import { paneInputPending, resolveLivePane } from "../lib/herdr";
 import { homeFromCwd } from "../lib/root";
 
-// Equivalent of the former script's SCRIPT_DIR/.. (sbin's parent = repo root),
-// resolved from this verb module's own location (verbs -> cli -> extensions -> .omp -> root).
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/+$/, "");
 
 function resolveState(): string {
@@ -41,8 +43,6 @@ function resolveState(): string {
 	return stateOverride || `${fmHome}/state`;
 }
 
-// firstLine(path): the first line of a file (no trailing newline), or "" when
-// the file is missing or unreadable. Mirrors `head -n1 "$path" 2>/dev/null`.
 function firstLine(path: string): string {
 	try {
 		return readFileSync(path, "utf8").split("\n")[0] ?? "";
@@ -51,11 +51,25 @@ function firstLine(path: string): string {
 	}
 }
 
+function metaHarness(state: string, paneTarget: string): string | undefined {
+	if (!paneTarget.startsWith("fm-")) return undefined;
+	const id = paneTarget.slice("fm-".length);
+	try {
+		const raw = readFileSync(join(state, `${id}.meta`), "utf8");
+		const m = raw.match(/(?:^|\n|\s)harness=([^\s\n]+)/);
+		return m?.[1];
+	} catch {
+		return undefined;
+	}
+}
+
 async function run(argv: string[]): Promise<number> {
 	const args = argv.slice(1);
 	const target = args[0];
 	if (target === undefined) {
-		process.stderr.write("usage: fm send <pane> [--steer] <text...>\n       fm send <pane> [--steer] --key <key>\n");
+		process.stderr.write(
+			"usage: fm send <pane> [--steer] <text...>\n       fm send <pane> [--steer] --key <key>\n       fm send <pane> [--steer] --interrupt|--exit\n",
+		);
 		return 1;
 	}
 
@@ -63,7 +77,6 @@ async function run(argv: string[]): Promise<number> {
 	const pane = resolveLivePane(target, state);
 	if (pane === null) return 1;
 
-	// Parse --steer: steering messages bypass the dispatch gate.
 	let rest = args.slice(1);
 	let steer = false;
 	if (rest[0] === "--steer") {
@@ -72,8 +85,6 @@ async function run(argv: string[]): Promise<number> {
 	}
 	const steerText = rest.join(" ");
 
-	// Post-accept send ban: once accepted (or abandoned/superseded), the
-	// implementation pane is released - land via fm finish <id>.
 	if (target.startsWith("fm-")) {
 		const taskId = target.slice("fm-".length);
 		const art = loadArtifact(taskId);
@@ -85,8 +96,6 @@ async function run(argv: string[]): Promise<number> {
 		}
 	}
 
-	// Dispatch gate: block new work during a freeze or focus lock.
-	// Bypass with FM_DISPATCH_OVERRIDE=1 or --steer.
 	if (process.env.FM_DISPATCH_OVERRIDE !== "1" && !steer) {
 		const freezePath = join(state, ".dispatch-freeze");
 		if (existsSync(freezePath)) {
@@ -103,6 +112,41 @@ async function run(argv: string[]): Promise<number> {
 				return 1;
 			}
 		}
+	}
+
+	if (rest[0] === "--interrupt" || rest[0] === "--exit") {
+		const harness = metaHarness(state, target);
+		if (!harness) {
+			process.stderr.write(`error: cannot resolve harness= from meta for ${target}; pass --key explicitly\n`);
+			return 1;
+		}
+		if (rest[0] === "--interrupt") {
+			const plan = interruptPlan(harness);
+			if (!plan) {
+				process.stderr.write(`error: no interrupt plan for harness '${harness}'\n`);
+				return 1;
+			}
+			for (const key of plan.keys) {
+				const res = spawnSync("herdr", ["pane", "send-keys", pane, key], { stdio: "inherit" });
+				if (res.error || (res.status ?? 1) !== 0) return res.status ?? 1;
+			}
+			return 0;
+		}
+		const cmd = exitCommand(harness);
+		if (!cmd) {
+			process.stderr.write(`error: no exit command for harness '${harness}'\n`);
+			return 1;
+		}
+		if (paneInputPending(pane)) {
+			process.stderr.write(`blocked: ${pane} composer holds an unsent draft; text was not sent\n`);
+			return 75;
+		}
+		const res = spawnSync("herdr", ["pane", "run", pane, cmd], { stdio: ["inherit", "inherit", "ignore"] });
+		if (res.error || res.status !== 0) {
+			process.stderr.write(`error: exit command not sent to ${pane}\n`);
+			return 1;
+		}
+		return 0;
 	}
 
 	if (rest[0] === "--key") {
@@ -126,7 +170,6 @@ async function run(argv: string[]): Promise<number> {
 		}
 	}
 
-	// Capture steer events: log to the events journal when a steering message was sent.
 	if (steer && rest[0] !== "--key" && steerText.length > 0) {
 		spawnSync(join(REPO_ROOT, "sbin", "fm"), ["capture", "steer", target, steerText, ""], {
 			stdio: ["ignore", "inherit", "ignore"],

@@ -44,6 +44,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { supervisorName, workerLabel } from "../lib/identity";
+import { getHarnessAdapter } from "../lib/harness-adapters";
 import { herdrReapHuskSlot, jsonGet, metaSet, metaValue } from "../lib/herdr";
 import { shellQuote } from "../lib/spawn";
 import { crewRoleContract, ensureSecondmateParentIdentity, secondmateRoleContract } from "../lib/role-contract";
@@ -222,6 +223,7 @@ export const LAUNCH_TEMPLATES: Record<string, string> = {
 };
 
 export function launchTemplate(harness: string, crewModel?: string): string | null {
+	if (!getHarnessAdapter(harness)) return null;
 	const sqModel = crewModel ? shellQuote(crewModel) : "";
 	switch (harness) {
 		case "omp":

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract checks for the tracked updatefirstmate skill.
+# Contract checks for the tracked fm-update-firstmate skill.
 #
 # The shared procedure must update the generic firstmate fleet first, then read
 # an optional local target list from data/cap.md. The list is intentionally
@@ -7,8 +7,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SKILL="$ROOT/.agents/skills/updatefirstmate/SKILL.md"
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-updatefirstmate-skill.XXXXXX")
+SKILL="$ROOT/.agents/skills/fm-update-firstmate/SKILL.md"
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-update-firstmate-skill.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
@@ -28,8 +28,6 @@ assert_not_contains() {
   esac
 }
 
-# Interpret the documented local section shape. Only direct bullets in the
-# section name additional checkouts; the next level-two heading ends the set.
 read_optional_targets() {
   local cap=$1 line in_set=0
   while IFS= read -r line || [ -n "$line" ]; do
@@ -49,14 +47,13 @@ read_optional_targets() {
 test_generic_skill_source() {
   local source before_targets
   source=$(<"$SKILL")
-  before_targets=${source%%'## Personal infrastructure update set'*}
+  before_targets=${source%%'## Optional local infrastructure'*}
 
   assert_contains "$before_targets" 'sbin/fm update' \
     "generic fleet update precedes optional local targets"
-  # shellcheck disable=SC2016
-  assert_contains "$source" 'read the optional `## Personal infrastructure update set` section in local `data/cap.md`' \
+  assert_contains "$source" '## Personal infrastructure update set' \
     "skill documents the local target contract"
-  assert_contains "$source" 'If the section is missing or has no entries, update no optional repositories.' \
+  assert_contains "$source" 'missing section means no optional targets' \
     "skill defines the absent-target behavior"
 
   local forbidden
@@ -105,4 +102,4 @@ test_generic_skill_source
 test_configured_local_targets
 test_absent_local_targets
 
-echo "# all updatefirstmate skill contract checks passed"
+echo "# all fm-update-firstmate skill contract checks passed"

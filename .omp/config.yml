@@ -10,6 +10,8 @@ skills:
   # Do NOT set includeSkills here: it does not merely preload - it REPLACES
   # the discoverable skill registry wholesale, making every unlisted skill
   # unreadable via skill:// (verified live 2026-07-17: a session with only
-  # [bootstrap, recovery] listed got "Unknown skill: firstmate-task-lifecycle").
-  # The cached-prefix preload of the every-session skills is `fm start`'s
+  # [bootstrap, recovery] listed got "Unknown skill: fm-manage-project-work").
+  # Fleet skills are namespaced fm-*; demand-load them. Never use includeSkills
+  # to preload - it replaces discovery.
+  # The cached-prefix preload of every-session context is `fm start`'s
   # --append-system-prompt injection; skill discovery must stay complete.

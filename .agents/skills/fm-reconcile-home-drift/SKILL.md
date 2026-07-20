@@ -1,10 +1,12 @@
 ---
-name: reconcile-baseline
-description: Reconcile arbitrary local drift in a firstmate home onto today's baseline. Use when a fresh spawn finds local files, state, or clones that diverge from the tracked template or its remote.
+name: fm-reconcile-home-drift
+description: >-
+  Classifies local home drift onto today's baseline. Use when a fresh spawn
+  finds diverged files, state, or clones.
 user-invocable: true
 ---
 
-# reconcile-baseline
+# fm-reconcile-home-drift
 
 This skill is a routing map, not a procedure.
 Every rule it points at is owned elsewhere; follow the owner, never a restatement.

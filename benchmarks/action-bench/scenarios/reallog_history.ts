@@ -226,33 +226,34 @@ function seOracle(d: string): Trace {
 // fm-turn-board-audit : turns that skipped the board-write exit guard (session-history)
 // ===========================================================================
 // A generic whiteboard turn log (trigger/outcome/board-write per turn), mirroring the
-// real state/whiteboard-metrics.jsonl shape. The turn-exit guard: EVERY turn writes
-// the board, so a turn with board_write=false is a section-6 incident regardless of
-// its outcome. Flag exactly those turn ids.
+// real state/whiteboard-metrics.jsonl shape. Change-gated write rule: write only when
+// lane state, evidence, disposition, decision, or wake condition changes. Flag turns
+// that wrote without a real change, or skipped a write when a change occurred.
 interface TurnRec {
 	id: string;
 	trigger: string;
+	change: "none" | "lane-state" | "evidence" | "disposition" | "decision" | "wake";
 	board_write: boolean;
 	outcome: string;
 }
 const TURNS: TurnRec[] = [
-	{ id: "t1", trigger: "steer", board_write: true, outcome: "progress" },
-	{ id: "t2", trigger: "tick", board_write: false, outcome: "progress" },
-	{ id: "t3", trigger: "subagent-return", board_write: true, outcome: "settled" },
-	{ id: "t4", trigger: "tick", board_write: true, outcome: "blocked" },
-	{ id: "t5", trigger: "none", board_write: false, outcome: "progress" },
-	{ id: "t6", trigger: "message", board_write: true, outcome: "needs-decision" },
-	{ id: "t7", trigger: "tick", board_write: false, outcome: "error" },
+	{ id: "t1", trigger: "steer", change: "lane-state", board_write: true, outcome: "progress" },
+	{ id: "t2", trigger: "tick", change: "none", board_write: true, outcome: "progress" },
+	{ id: "t3", trigger: "subagent-return", change: "disposition", board_write: true, outcome: "settled" },
+	{ id: "t4", trigger: "tick", change: "none", board_write: false, outcome: "blocked" },
+	{ id: "t5", trigger: "none", change: "wake", board_write: false, outcome: "progress" },
+	{ id: "t6", trigger: "message", change: "decision", board_write: true, outcome: "needs-decision" },
+	{ id: "t7", trigger: "notice", change: "none", board_write: true, outcome: "ack" },
 ];
 const TBA_RULES =
 	"# Audit the whiteboard turn loop\n" +
-	"turns.json is a list of turn records { id, trigger, board_write, outcome }. The turn-exit guard\n" +
-	"requires EVERY turn to write the whiteboard before it ends; a turn that ended with board_write\n" +
-	"false is an incident, no matter its outcome. List every incident turn id.\n" +
+	"turns.json is a list of turn records { id, trigger, change, board_write, outcome }.\n" +
+	"Write the board only when change is lane-state, evidence, disposition, decision, or wake.\n" +
+	"Incidents are: (a) board_write=true with change=none, or (b) board_write=false with a real change.\n" +
 	"Write audit.json as { \"incidents\": [\"<id>\", ...] } with the ids in the order they appear.\n";
 
 function tbaTruth(): string[] {
-	return TURNS.filter((t) => !t.board_write).map((t) => t.id);
+	return TURNS.filter((t) => (t.change === "none" && t.board_write) || (t.change !== "none" && !t.board_write)).map((t) => t.id);
 }
 
 function tbaSetup(d: string): void {

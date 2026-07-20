@@ -6,7 +6,7 @@
 // not emit a trickle of tiny per-event closeouts. Instead it consolidates every
 // update into ONE running digest and relays a single ~one-screen summary the
 // moment the cap returns. This module owns the mechanical, testable bounds
-// of that loop so the documented protocol (skill://idle-digest, AGENTS.md s.8)
+// of that loop so the documented protocol (skill://fm-away-mode, AGENTS.md)
 // is enforced rather than trusted:
 //
 //   - begin   idempotent: create the running digest (or resume an in-progress
@@ -32,7 +32,7 @@
 //
 // The loop NEVER changes who approves what or takes any project-mutating /
 // destructive action: refinement is read-only, firstmate-repo-safe grooming.
-// See skill://idle-digest for the consent, scope, and stop-condition contract.
+// See skill://fm-away-mode for the consent, scope, and stop-condition contract.
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,7 +65,7 @@ When the first mate would otherwise go idle and the cap is away (the
 not emit a trickle of tiny per-event closeouts. Instead it consolidates every
 update into ONE running digest and relays a single ~one-screen summary the
 moment the cap returns. This helper owns the mechanical, testable bounds
-of that loop so the documented protocol (skill://idle-digest, AGENTS.md s.8)
+of that loop so the documented protocol (skill://fm-away-mode, AGENTS.md)
 is enforced rather than trusted:
 
   - begin   idempotent: create the running digest (or resume an in-progress
@@ -91,7 +91,7 @@ Bounds (seconds / counts; 0 disables that bound's refinement entirely):
 
 The loop NEVER changes who approves what or takes any project-mutating /
 destructive action: refinement is read-only, firstmate-repo-safe grooming.
-See skill://idle-digest for the consent, scope, and stop-condition contract.
+See skill://fm-away-mode for the consent, scope, and stop-condition contract.
 
 Usage:
   fm idle-digest begin  [reason]

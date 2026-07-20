@@ -2,7 +2,7 @@
 // latest origin.
 // Ported behavior-preserving from the former sbin/fm update.
 //
-// Mechanical half of the /updatefirstmate skill. Fast-forwards the running
+// Mechanical half of the /fm-update-firstmate skill. Fast-forwards the running
 // firstmate repo's default branch from origin, then fast-forwards every
 // registered secondmate home (each a herdr-managed git worktree of this repo,
 // or a standalone clone) the same way. FAST-FORWARD ONLY, exactly like

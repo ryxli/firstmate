@@ -409,6 +409,7 @@ describe("fm start prompt", () => {
 		expect(result.staticContext).toContain("Refresh: fm fleet");
 		expect(result.appendSystemPrompt).not.toContain(result.staticContext);
 		expect(result.appendSystemPrompt).not.toContain("FM_SUPERVISED_SUCCESSOR");
+		expect(result.appendSystemPrompt).not.toContain("skill://fm-diagnose-startup-fault");
 		expect(result.appendSystemPrompt).not.toContain("skill://firstmate-bootstrap");
 		expect(result.appendSystemPrompt).not.toContain("skill://firstmate-recovery");
 		expect(result.appendSystemPrompt).not.toContain("Run `sbin/fm bootstrap`");
