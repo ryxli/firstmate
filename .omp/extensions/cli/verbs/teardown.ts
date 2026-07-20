@@ -26,9 +26,9 @@
 //   secondmate child work for kind=secondmate. Only use it when the cap has
 //   explicitly said to discard the work.
 //
-// The backlog reminder always points at the native `fm tasks done` /
-// `fm tasks ready` subcommands (see verbs/tasks.ts; `fm task` is its
-// explicit zero-ambiguity singular alias, verbs/task.ts).
+// The backlog reminder points ship tasks at fm finish (closes backlog) and
+// scout/secondmate at fm tasks done / fm tasks ready (see verbs/tasks.ts;
+// `fm task` is the zero-ambiguity singular alias).
 //
 // sbin/fm fleet-sync has itself been ported to the `fleet-sync` verb, so
 // the post-teardown refresh below shells out to `fm fleet-sync` rather than a
@@ -165,24 +165,20 @@ function defaultBranch(proj: string): string | null {
 }
 
 // backlogRefreshReminder: the reminder printed after a successful teardown.
-// Always points at the native `fm tasks` subcommands (verbs/tasks.ts).
-function backlogRefreshReminder(id: string, kind: string, mode: string, prUrl: string): string {
-	let doneCmd: string;
+// Ship tasks: prefer fm finish (closes backlog). Scout/secondmate still use tasks done.
+function backlogRefreshReminder(id: string, kind: string, _mode: string, _prUrl: string): string {
+	let doneHint: string;
 	switch (kind) {
 		case "scout":
-			doneCmd = `fm tasks done ${id} --report data/${id}/report.md`;
+			doneHint = `If backlog is still open, run fm tasks done ${id} --report data/${id}/report.md`;
 			break;
 		case "secondmate":
-			doneCmd = `fm tasks done ${id} --note "retired"`;
+			doneHint = `If backlog is still open, run fm tasks done ${id} --note "retired"`;
 			break;
 		default:
-			if (isTrunkMode(mode)) {
-				doneCmd = `fm tasks done ${id} --note "local main"`;
-			} else {
-				doneCmd = `fm tasks done ${id} --pr ${prUrl || "PR_URL"}`;
-			}
+			doneHint = `Prefer fm finish ${id} (closes backlog on land); if already finished, skip`;
 	}
-	return `Backlog: ${id} just finished. Run ${doneCmd}, then run fm tasks ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.`;
+	return `Backlog: ${id} just finished. ${doneHint}. Then run fm tasks ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.`;
 }
 
 // registryHomeForLine: extract the "home: <path>" field out of one
@@ -654,7 +650,7 @@ async function runInner(argv: string[]): Promise<number> {
 					if (dirty) process.stderr.write("uncommitted changes present\n");
 					if (unmerged) process.stderr.write(`commits not yet on ${branch}:\n${unmerged}\n`);
 					process.stderr.write(
-						`Land via fm merge-local / fm tasks artifact landed, or push to a fork/remote, or --force with cap OK to discard.\n`,
+						`Land via fm accept then fm finish ${id}, or push to a fork/remote, or --force with cap OK to discard.\n`,
 					);
 					return 1;
 				}
@@ -662,7 +658,9 @@ async function runInner(argv: string[]): Promise<number> {
 				process.stderr.write(`REFUSED: worktree ${wt} has work not on any remote.\n`);
 				if (dirty) process.stderr.write("uncommitted changes present\n");
 				if (unpushed) process.stderr.write(`unpushed commits:\n${unpushed}\n`);
-				process.stderr.write("Push the branch, land via pr-check/merge, or get the cap's explicit OK to discard, then --force.\n");
+				process.stderr.write(
+					`Push the branch, land via fm accept then fm finish ${id}, or get the cap's explicit OK to discard, then --force.\n`,
+				);
 				return 1;
 			}
 		}

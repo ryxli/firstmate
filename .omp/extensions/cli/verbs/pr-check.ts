@@ -1,9 +1,6 @@
-// fm verb: pr-check - record a PR-ready task: appends pr=<url> to
-// state/<id>.meta and registers its merged-PR check with automatic
-// in-process supervision. The generated check prints one line iff the PR is
-// merged (the check contract: output = wake firstmate, silence = keep
-// sleeping).
-// Ported behavior-preserving from the former sbin/fm pr-check.
+// fm verb: pr-check - optional helper: appends pr=<url> to state/<id>.meta and
+// arms a merged-PR wake check. Prefer worker `done: PR <url>` (finish resolves
+// it) plus `fm finish <id>`; this verb is not required on the happy path.
 // Usage: fm pr-check <task-id> <pr-url>
 
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -47,7 +44,7 @@ async function run(argv: string[]): Promise<number> {
 	}
 
 	const checkUrl = shellQuote(url);
-	// On MERGED: wake supervisor and idempotently mark state/<id>.artifact.json landed.
+	// On MERGED: wake supervisor; finish drains land/backlog/cleanup.
 	const fmBin = shellQuote(join(REPO_ROOT, "sbin", "fm"));
 	const homeExport = process.env.FM_HOME?.trim() ? `FM_HOME=${shellQuote(process.env.FM_HOME.trim())} ` : "";
 	const checkScript = `URL=${checkUrl}
@@ -57,7 +54,7 @@ PR_NUMBER=\${PR_REF##*/pull/}
 state=$(gh-axi pr view "$PR_NUMBER" --repo "$PR_REPO" 2>/dev/null | awk -F': *' '/^[[:space:]]*state:/{print toupper($2); exit}')
 if [ "$state" = "MERGED" ]; then
   echo "merged"
-  ${homeExport}${fmBin} tasks artifact land ${shellQuote(id)} >/dev/null 2>&1 || true
+  ${homeExport}${fmBin} finish ${shellQuote(id)} >/dev/null 2>&1 || true
 fi
 `;
 	writeFileSync(join(state, `${id}.check.sh`), checkScript);
@@ -68,6 +65,6 @@ fi
 
 export default {
 	name: "pr-check",
-	describe: "Record a PR URL into a task's meta file and arm its merged-PR poll check.",
+	describe: "Optional helper: record a PR URL on meta and arm a merged-PR wake that runs fm finish.",
 	run,
 };

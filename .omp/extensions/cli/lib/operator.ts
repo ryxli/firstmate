@@ -3,7 +3,7 @@
 // the multi-lever artifact ceremony; FM_HOME isolation is a hard prerequisite.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decode } from "@toon-format/toon";
@@ -47,6 +47,38 @@ export function readTaskMeta(taskId: string): { path: string; text: string } | n
 	const path = join(resolveStateDir(), `${taskId}.meta`);
 	if (!existsSync(path)) return null;
 	return { path, text: readFileSync(path, "utf8") };
+}
+
+/** Match `done: PR https://...` (optional trailing `; ...` fields). */
+const DONE_PR_RE = /\bdone:\s*PR\s+(https:\/\/[^\s;]+)/i;
+
+/**
+ * Resolve PR URL from meta `pr=` or worker status `done: PR <url>`.
+ * When found only in status, persist `pr=` onto meta so finish/checks stay durable.
+ * Optional `fm pr-check` remains a helper; finish does not require it.
+ */
+export function resolvePrUrl(taskId: string): string {
+	const meta = readTaskMeta(taskId);
+	const fromMeta = meta ? metaField(meta.text, "pr=") : "";
+	if (fromMeta) return fromMeta;
+
+	const statusPath = join(resolveStateDir(), `${taskId}.status`);
+	if (!existsSync(statusPath)) return "";
+	const status = readFileSync(statusPath, "utf8");
+	let found = "";
+	for (const line of status.split(/\r?\n/)) {
+		const m = DONE_PR_RE.exec(line);
+		if (m) found = m[1];
+	}
+	if (!found) return "";
+
+	if (meta?.path) {
+		const lines = meta.text.split(/\r?\n/);
+		if (!lines.some(l => l === `pr=${found}` || l.startsWith("pr="))) {
+			appendFileSync(meta.path, meta.text.endsWith("\n") || meta.text.length === 0 ? `pr=${found}\n` : `\npr=${found}\n`);
+		}
+	}
+	return found;
 }
 
 export function releaseWorkerPane(taskId: string): void {
@@ -144,7 +176,14 @@ export function integrateTrunk(
 	return { trunkSha: after, branch: def };
 }
 
-export type PrQueryResult = { state: string; mergeSha: string | null };
+export type PrQueryResult = {
+	state: string;
+	mergeSha: string | null;
+	/** PR head commit OID when present in the API payload. */
+	headSha?: string | null;
+	/** owner/repo from the PR URL (base repository). */
+	repo?: string;
+};
 
 export type PrQuery = (prUrl: string) => PrQueryResult;
 
@@ -154,9 +193,43 @@ export function parsePrUrl(url: string): { repo: string; number: string } {
 	return { repo: m[1], number: m[2] };
 }
 
-/** Query PR merge state via gh-axi API (TOON output; no raw gh / JSON assumption). */
+/** Parse git remote URL into owner/repo when it points at GitHub. */
+export function resolveGithubRepoFromRemote(remoteUrl: string): string | null {
+	const trimmed = remoteUrl.trim().replace(/\.git$/i, "");
+	const https = /github\.com[/:]([^/]+\/[^/]+)$/i.exec(trimmed.replace(/^ssh:\/\//i, ""));
+	if (https) return https[1];
+	const scp = /^git@github\.com:([^/]+\/[^/]+)$/i.exec(trimmed);
+	if (scp) return scp[1];
+	return null;
+}
+
+/** Resolve the task project's GitHub owner/repo from origin, else null. */
+export function resolveProjectGithubRepo(projectPath: string): string | null {
+	if (!projectPath || !existsSync(projectPath)) return null;
+	const remote = gitOut(projectPath, ["remote", "get-url", "origin"]);
+	if (!remote) return null;
+	return resolveGithubRepoFromRemote(remote);
+}
+
+function readPrHeadSha(row: Record<string, unknown>): string | null {
+	const folded = row["head.sha"];
+	if (typeof folded === "string" && folded.length > 0 && folded !== "null") return folded;
+	const head = row.head;
+	if (head && typeof head === "object" && !Array.isArray(head)) {
+		const sha = (head as Record<string, unknown>).sha;
+		if (typeof sha === "string" && sha.length > 0 && sha !== "null") return sha;
+	}
+	return null;
+}
+
+/** Query PR via gh-axi API (TOON). Honors FM_PR_API_FIXTURE for tests. */
 export function queryPrMergeState(prUrl: string): PrQueryResult {
 	const { repo, number } = parsePrUrl(prUrl);
+	const fixture = process.env.FM_PR_API_FIXTURE?.trim();
+	if (fixture) {
+		const detail = parseGhAxiPullToon(readFileSync(fixture, "utf8"));
+		return { ...detail, repo: detail.repo ?? repo };
+	}
 	const path = `/repos/${repo}/pulls/${number}`;
 	const res = spawnSync("bunx", ["gh-axi", "api", path], { encoding: "utf8" });
 	const out = `${res.stdout ?? ""}`.trim();
@@ -164,12 +237,13 @@ export function queryPrMergeState(prUrl: string): PrQueryResult {
 	if ((res.status ?? 1) !== 0) {
 		throw new Error(err || out || `gh-axi api ${path} failed`);
 	}
-	return parseGhAxiPullToon(out);
+	const detail = parseGhAxiPullToon(out);
+	return { ...detail, repo: detail.repo ?? repo };
 }
 
 /**
  * Parse gh-axi `api /repos/.../pulls/N` TOON output.
- * Reads top-level fields `merged`, `state`, and `merge_commit_sha` only.
+ * Reads merged/state/merge_commit_sha and head SHA (nested head.sha or folded head.sha).
  */
 export function parseGhAxiPullToon(text: string): PrQueryResult {
 	let decoded: unknown;
@@ -186,11 +260,57 @@ export function parseGhAxiPullToon(text: string): PrQueryResult {
 	const mergeRaw = row.merge_commit_sha;
 	const mergeSha =
 		typeof mergeRaw === "string" && mergeRaw.length > 0 && mergeRaw !== "null" ? mergeRaw : null;
-	if (merged) return { state: "MERGED", mergeSha };
+	const headSha = readPrHeadSha(row);
+	const base: PrQueryResult = { headSha, mergeSha };
+	if (merged) return { ...base, state: "MERGED" };
 	const raw = String(row.state ?? "").toUpperCase();
-	if (raw === "OPEN") return { state: "OPEN", mergeSha: null };
-	if (raw === "CLOSED") return { state: "CLOSED", mergeSha: null };
-	return { state: raw || "UNKNOWN", mergeSha };
+	if (raw === "OPEN") return { ...base, state: "OPEN" };
+	if (raw === "CLOSED") return { ...base, state: "CLOSED" };
+	return { ...base, state: raw || "UNKNOWN" };
+}
+
+function normalizeSha(sha: string): string {
+	return sha.trim().toLowerCase();
+}
+
+/**
+ * Before PR accept freezes: PR URL repo must match the project's origin GitHub
+ * repo, and PR head SHA must equal the frozen candidate SHA.
+ */
+export function assertPrMatchesAccept(opts: {
+	prUrl: string;
+	candidateSha: string;
+	projectPath: string;
+	/** Injected owner/repo for tests; default resolves from project origin. */
+	projectGithubRepo?: string;
+	detail?: PrQueryResult;
+	queryPr?: PrQuery;
+}): { prUrl: string; headSha: string; repo: string } {
+	const { prUrl, candidateSha, projectPath } = opts;
+	const parsed = parsePrUrl(prUrl);
+	const detail = opts.detail ?? (opts.queryPr ?? queryPrMergeState)(prUrl);
+	const prRepo = (detail.repo ?? parsed.repo).toLowerCase();
+	const projectRepoName = (opts.projectGithubRepo ?? resolveProjectGithubRepo(projectPath))?.toLowerCase();
+	if (!projectRepoName) {
+		throw new Error(
+			`cannot resolve GitHub repo for project at ${projectPath}; set origin to github.com/owner/repo before accept`,
+		);
+	}
+	if (prRepo !== projectRepoName) {
+		throw new Error(`PR repo ${prRepo} does not match project origin ${projectRepoName}`);
+	}
+	const headSha = detail.headSha?.trim() ?? "";
+	if (!headSha) {
+		throw new Error(`PR ${prUrl} has no head SHA; cannot prove it matches the candidate`);
+	}
+	const want = normalizeSha(candidateSha);
+	const got = normalizeSha(headSha);
+	if (want !== got) {
+		throw new Error(
+			`PR head ${shortSha(headSha)} != candidate ${shortSha(candidateSha)}; refuse accept (stale or wrong PR)`,
+		);
+	}
+	return { prUrl, headSha, repo: prRepo };
 }
 
 export type FinishStepResult = {
@@ -235,13 +355,15 @@ export function finishTask(taskId: string, opts: FinishOpts = {}): FinishStepRes
 
 	// --- PR path: observation-only (no local trunk integrate) ---
 	if (mode === "pr" && !isLanded(record)) {
-		const prUrl = metaField(readTaskMeta(taskId)?.text ?? "", "pr=");
+		const prUrl = resolvePrUrl(taskId);
 		if (!prUrl) {
 			return {
 				ok: false,
 				stopped: true,
-				lines: [`error: ${taskId} has no pr= in meta; record the PR URL first`],
-				next: `fm pr-check ${taskId} <pr-url>`,
+				lines: [
+					`error: ${taskId} has no PR URL (meta pr= or status done: PR <url>); worker must report the URL before finish`,
+				],
+				next: `ensure status has done: PR <url>, then fm finish ${taskId}`,
 			};
 		}
 		let status: PrQueryResult;
@@ -387,7 +509,7 @@ export function finishTask(taskId: string, opts: FinishOpts = {}): FinishStepRes
 							record.acceptedRevision?.candidateSha ??
 							"landed",
 					);
-					const prUrl = metaField(readTaskMeta(taskId)?.text ?? "", "pr=");
+					const prUrl = resolvePrUrl(taskId);
 					const proof = mode === "pr" && prUrl ? prUrl : `landed:${shortSha(trunk)}`;
 					store.transition(taskId, "done", { proof });
 					store.save();

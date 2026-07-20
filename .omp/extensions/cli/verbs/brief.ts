@@ -21,10 +21,10 @@
 //   Set FM_SECONDMATE_SCOPE='<scope>' to write a routing scope distinct from the charter text.
 // For ship tasks, the definition of done is shaped by the project's delivery mode
 // (data/projects.md via fm project-mode; trunk|pr only):
-//   pr     implement, focused review + tests, push + open PR via gh-axi -> cap merge (default)
-//   trunk  implement on branch, stop and report "ready in branch" (no push/PR);
-//          firstmate reviews, cap approves, firstmate merges to local default
+//   pr     push fm/<id>, open PR, report done: PR <url> (mandatory); then fm accept / finish
+//   trunk  implement on branch, ready for fm accept (no push/PR); fm finish lands locally
 // Scout tasks ignore mode - their deliverable is a report, not a merge.
+// Supervisor path: fm accept (judgment) → fm revise (pre-accept) → fm finish (drain).
 // Ship tasks include a project-memory section so durable project-intrinsic
 // learnings can be committed to AGENTS.md through the project's delivery path.
 // Refuses to overwrite an existing brief.
@@ -444,7 +444,7 @@ The worker task is complete when a candidate is committed on \`fm/${id}\` with f
 Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass; fix anything you broke.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so integrate stays a fast-forward.
 When it is implemented and committed, append \`done: ready in branch fm/${id}; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
-Firstmate reviews the candidate (\`fm tasks artifact\`), and on accept lands via \`fm merge-local\`.`,
+Firstmate judges with \`fm accept\` / \`fm revise\`, then drains with \`fm finish\` (integrate, land, backlog close, cleanup).`,
 		};
 	}
 	// pr (default)
@@ -453,11 +453,11 @@ Firstmate reviews the candidate (\`fm tasks artifact\`), and on accept lands via
 		rule1: `1. Never push to the default branch (push only your \`fm/${id}\` branch). Never merge a PR.`,
 		dod: `# Definition of done
 This project ships **pr**: collaborative delivery via GitHub PR against a moving upstream HEAD.
-Prefer a candidate for supervisor review (\`fm tasks artifact\`); after accept, firstmate lands via \`fm pr-check\` + merge observe. You may still push and open the PR yourself when the brief requires it.
+The worker task is complete only when a PR is open and its URL is reported. Push \`fm/${id}\`, open the PR with \`gh-axi\`, then stop.
 Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
-When it is implemented and committed, either (a) append \`done: ready in branch fm/${id}; ...\` for supervisor accept, or (b) push, open a PR with \`gh-axi\`, then append \`done: PR {url}; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop.
-Write any PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
-The supervisor owns accept/revise; \`fm send\` is for revise/steer only, never post-accept landing.`,
+When it is implemented and committed: push your branch, open a PR with \`gh-axi\`, then append \`done: PR {url}; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. Do not report done without a PR URL.
+Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
+Firstmate judges with \`fm accept\` / \`fm revise\` (accept requires the PR URL), then drains with \`fm finish\` (observes the PR, lands when merged, closes backlog, cleanup). \`fm send\` is for revise/steer only, never post-accept landing.`,
 	};
 }
 

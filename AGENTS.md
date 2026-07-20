@@ -31,7 +31,7 @@ Hard rules, in priority order:
 1. **Never write to a project.**
    You must not edit, commit to, or run state-changing commands in anything under `projects/` or in any worktree.
    You read projects to understand them; crewmates change them.
-   Five sanctioned exceptions, each fast-forward-only or cap-gated - full mechanics in `skill://firstmate-task-lifecycle`: tool-driven project initialization; the `sbin/fm fleet-sync` fleet sync (fast-forwards a clone's local default branch, prunes only orphaned local branches, never touches a herdr-managed worktree); the `sbin/fm update` self-update (fast-forwards this firstmate repo and seeded secondmate homes only, skips anything dirty/diverged/off-default); the cap-approved `sbin/fm merge-local` local merge for a `trunk` project; and a cap-authorized guarded non-force push to `origin/main` for trunk delivery when a remote exists, with PRs forbidden.
+   Five sanctioned exceptions, each fast-forward-only or cap-gated - full mechanics in `skill://firstmate-task-lifecycle`: tool-driven project initialization; the `sbin/fm fleet-sync` fleet sync (fast-forwards a clone's local default branch, prunes only orphaned local branches, never touches a herdr-managed worktree); the `sbin/fm update` self-update (fast-forwards this firstmate repo and seeded secondmate homes only, skips anything dirty/diverged/off-default); the cap-approved `sbin/fm finish <id>` drain for a `trunk` project (integrate frozen accepted SHA, land, close backlog, cleanup); and a cap-authorized guarded non-force push to `origin/main` for trunk delivery when a remote exists, with PRs forbidden.
    Project `AGENTS.md` maintenance is not another exception: firstmate records not-yet-committed project knowledge in `data/` and has crewmates update project `AGENTS.md` through normal worktree delivery (see `skill://firstmate-task-lifecycle`).
 2. **For team/project repos: never merge a PR without the cap's explicit word.**
    This is a standing rule for work outside this firstmate repo.
@@ -191,8 +191,8 @@ data/                personal fleet records; LOCAL, gitignored as a whole
 projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by crewmates: "<state>: <note>" lines
-  <id>.meta          written by fm-spawn: pane=, worktree=, project=, harness=, kind=, mode=, yolo=; kind=secondmate also records home= and projects= (fm-pr-check appends pr=)
-  <id>.check.sh      optional slow poll you write per task (e.g. merged-PR check)
+  <id>.meta          written by `fm spawn`: pane=, worktree=, project=, harness=, kind=, mode=, yolo=; kind=secondmate also records home= and projects=; pr= recorded when a PR URL is known (worker `done: PR <url>` or helper)
+  <id>.check.sh      optional slow poll per task (e.g. merged-PR wake while waiting on `fm finish`)
   .afk               durable away-mode flag; present = extension batches escalations (set by /afk, cleared on user return)
   .idle-digest.md    running idle digest written by sbin/fm idle-digest during afk (see `skill://afk`)
   .status-internal.log  non-relevant status lines appended by the supervision extension (trimmed to last 500 lines); never touch

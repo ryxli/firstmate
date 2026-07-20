@@ -3,7 +3,7 @@
 //
 // Artifact spine: allowed for WorkerLoop revise/steer only. Never use fm send
 // on post-accept land paths. After accept, worker ownership is released;
-// land via fm merge-local (trunk) or fm pr-check + merge (pr).
+// land via fm finish <id> (and fm revise only before accept).
 //
 // Usage: fm send <pane> [--steer] <text...>
 //   <pane> may be a bare firstmate pane name (fm-xyz), resolved through this
@@ -72,14 +72,14 @@ async function run(argv: string[]): Promise<number> {
 	}
 	const steerText = rest.join(" ");
 
-	// Post-accept send ban: once WorkerLoop accepts (or abandons/supersedes),
-	// the implementation pane is released - land via merge-local / pr-check / artifact land.
+	// Post-accept send ban: once accepted (or abandoned/superseded), the
+	// implementation pane is released - land via fm finish <id>.
 	if (target.startsWith("fm-")) {
 		const taskId = target.slice("fm-".length);
 		const art = loadArtifact(taskId);
 		if (art && (art.reviewState === "accepted" || art.reviewState === "abandoned" || art.reviewState === "superseded")) {
 			process.stderr.write(
-				`error: artifact ${taskId} reviewState=${art.reviewState}; fm send refused (revise is pre-accept only; land via merge-local/pr-check/artifact land)\n`,
+				`error: artifact ${taskId} reviewState=${art.reviewState}; fm send refused (revise is pre-accept only; land via fm finish ${taskId})\n`,
 			);
 			return 1;
 		}

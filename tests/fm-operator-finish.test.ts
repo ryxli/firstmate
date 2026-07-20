@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveMainHome } from "../.omp/extensions/bridge/collect";
-import { finishTask, parseGhAxiPullToon } from "../.omp/extensions/cli/lib/operator";
+import { finishTask, parseGhAxiPullToon, assertPrMatchesAccept, resolveGithubRepoFromRemote } from "../.omp/extensions/cli/lib/operator";
 import { isLanded, loadArtifact } from "../.omp/extensions/cli/lib/artifact";
 import { BacklogStore } from "../.omp/extensions/cli/lib/backlog-store";
 
@@ -47,6 +47,27 @@ function git(cwd: string, args: string[]): string {
 		throw new Error(`git ${args.join(" ")}: ${res.stderr || res.stdout}`);
 	}
 	return (res.stdout ?? "").trim();
+}
+
+function writePrFixture(home: string, headSha: string): string {
+	const path = join(home, "pr-api.toon");
+	writeFileSync(
+		path,
+		`state: open
+merged: false
+merge_commit_sha: null
+head:
+  sha: ${headSha}
+`,
+	);
+	return path;
+}
+
+function setGithubOrigin(proj: string, repo = "example/web"): void {
+	spawnSync("git", ["-C", proj, "remote", "remove", "origin"], {
+		stdio: ["ignore", "ignore", "ignore"],
+	});
+	git(proj, ["remote", "add", "origin", `https://github.com/${repo}.git`]);
 }
 
 function setupTrunkProject(home: string, name: string, taskId: string): { child: string; proj: string } {
@@ -189,6 +210,8 @@ describe("fm accept / finish", () => {
 			const child = git(wt, ["rev-parse", "HEAD"]);
 			// Simulate remote merge object present without advancing local main.
 			git(proj, ["update-ref", "refs/remotes/origin/main", child]);
+			setGithubOrigin(proj, "example/web");
+			const fixture = writePrFixture(home, child);
 
 			writeFileSync(
 				join(home, "state", `${id}.meta`),
@@ -202,7 +225,7 @@ describe("fm accept / finish", () => {
 			expect(
 				spawnSync(FM, ["accept", id, "--sha", child, "--mode", "pr"], {
 					encoding: "utf8",
-					env: { ...process.env, FM_HOME: home },
+					env: { ...process.env, FM_HOME: home, FM_PR_API_FIXTURE: fixture },
 				}).status,
 			).toBe(0);
 
@@ -223,6 +246,180 @@ describe("fm accept / finish", () => {
 			expect(String(landed.delivery?.receipts.find(r => r.type === "landed")?.detail?.trunkSha)).toBe(child);
 			expect(git(proj, ["rev-parse", "main"])).toBe(base);
 			expect(BacklogStore.load(join(home, "data", "backlog.md")).get(id)?.state).toBe("done");
+		});
+	});
+
+	it("PR accept refuses without a PR URL and leaves the worker unfrozen", () => {
+		withHome(home => {
+			const id = "pr-no-url";
+			const name = "web";
+			const proj = join(home, "projects", name);
+			const wt = join(home, "worktrees", id);
+			mkdirSync(proj, { recursive: true });
+			mkdirSync(join(home, "worktrees"), { recursive: true });
+			git(proj, ["init"]);
+			git(proj, ["checkout", "-b", "main"]);
+			git(proj, ["config", "user.email", "t@example.com"]);
+			git(proj, ["config", "user.name", "t"]);
+			writeFileSync(join(proj, "a.txt"), "one\n");
+			git(proj, ["add", "a.txt"]);
+			git(proj, ["commit", "-m", "base"]);
+			git(proj, ["branch", `fm/${id}`]);
+			git(proj, ["worktree", "add", wt, `fm/${id}`]);
+			writeFileSync(join(wt, "a.txt"), "one\ntwo\n");
+			git(wt, ["add", "a.txt"]);
+			git(wt, ["commit", "-m", "change"]);
+			const child = git(wt, ["rev-parse", "HEAD"]);
+
+			writeFileSync(
+				join(home, "state", `${id}.meta`),
+				`project=${proj}\nmode=pr\nkind=ship\nyolo=off\nworktree=${wt}\n`,
+			);
+			writeFileSync(join(home, "data", "projects.md"), `- ${name} [pr] - test\n`);
+
+			const res = spawnSync(FM, ["accept", id, "--sha", child, "--mode", "pr"], {
+				encoding: "utf8",
+				env: { ...process.env, FM_HOME: home },
+			});
+			expect(res.status).toBe(1);
+			expect(res.stderr).toContain("no PR URL");
+			expect(loadArtifact(id)?.reviewState).not.toBe("accepted");
+		});
+	});
+
+	it("PR accept refuses when head SHA != candidate", () => {
+		withHome(home => {
+			const id = "pr-stale-head";
+			const name = "web";
+			const proj = join(home, "projects", name);
+			const wt = join(home, "worktrees", id);
+			mkdirSync(proj, { recursive: true });
+			mkdirSync(join(home, "worktrees"), { recursive: true });
+			git(proj, ["init"]);
+			git(proj, ["checkout", "-b", "main"]);
+			git(proj, ["config", "user.email", "t@example.com"]);
+			git(proj, ["config", "user.name", "t"]);
+			writeFileSync(join(proj, "a.txt"), "one\n");
+			git(proj, ["add", "a.txt"]);
+			git(proj, ["commit", "-m", "base"]);
+			git(proj, ["branch", `fm/${id}`]);
+			git(proj, ["worktree", "add", wt, `fm/${id}`]);
+			writeFileSync(join(wt, "a.txt"), "one\ntwo\n");
+			git(wt, ["add", "a.txt"]);
+			git(wt, ["commit", "-m", "change"]);
+			const child = git(wt, ["rev-parse", "HEAD"]);
+			setGithubOrigin(proj, "example/web");
+			const fixture = writePrFixture(home, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+			writeFileSync(
+				join(home, "state", `${id}.meta`),
+				`project=${proj}\nmode=pr\nkind=ship\nyolo=off\nworktree=${wt}\npr=https://github.com/example/web/pull/42\n`,
+			);
+			writeFileSync(join(home, "data", "projects.md"), `- ${name} [pr] - test\n`);
+
+			const res = spawnSync(FM, ["accept", id, "--sha", child, "--mode", "pr"], {
+				encoding: "utf8",
+				env: { ...process.env, FM_HOME: home, FM_PR_API_FIXTURE: fixture },
+			});
+			expect(res.status).toBe(1);
+			expect(res.stderr).toMatch(/PR head|!= candidate/);
+			expect(loadArtifact(id)?.reviewState).not.toBe("accepted");
+		});
+	});
+
+	it("PR accept refuses when PR repo != project origin", () => {
+		withHome(home => {
+			const id = "pr-wrong-repo";
+			const name = "web";
+			const proj = join(home, "projects", name);
+			const wt = join(home, "worktrees", id);
+			mkdirSync(proj, { recursive: true });
+			mkdirSync(join(home, "worktrees"), { recursive: true });
+			git(proj, ["init"]);
+			git(proj, ["checkout", "-b", "main"]);
+			git(proj, ["config", "user.email", "t@example.com"]);
+			git(proj, ["config", "user.name", "t"]);
+			writeFileSync(join(proj, "a.txt"), "one\n");
+			git(proj, ["add", "a.txt"]);
+			git(proj, ["commit", "-m", "base"]);
+			git(proj, ["branch", `fm/${id}`]);
+			git(proj, ["worktree", "add", wt, `fm/${id}`]);
+			writeFileSync(join(wt, "a.txt"), "one\ntwo\n");
+			git(wt, ["add", "a.txt"]);
+			git(wt, ["commit", "-m", "change"]);
+			const child = git(wt, ["rev-parse", "HEAD"]);
+			setGithubOrigin(proj, "example/web");
+			const fixture = writePrFixture(home, child);
+
+			writeFileSync(
+				join(home, "state", `${id}.meta`),
+				`project=${proj}\nmode=pr\nkind=ship\nyolo=off\nworktree=${wt}\npr=https://github.com/other/elsewhere/pull/1\n`,
+			);
+			writeFileSync(join(home, "data", "projects.md"), `- ${name} [pr] - test\n`);
+
+			const res = spawnSync(FM, ["accept", id, "--sha", child, "--mode", "pr"], {
+				encoding: "utf8",
+				env: { ...process.env, FM_HOME: home, FM_PR_API_FIXTURE: fixture },
+			});
+			expect(res.status).toBe(1);
+			expect(res.stderr).toMatch(/does not match project origin/);
+			expect(loadArtifact(id)?.reviewState).not.toBe("accepted");
+		});
+	});
+
+	it("finish resolves PR URL from status done: PR without pr-check", () => {
+		withHome(home => {
+			const id = "pr-from-status";
+			const name = "web";
+			const proj = join(home, "projects", name);
+			const wt = join(home, "worktrees", id);
+			mkdirSync(proj, { recursive: true });
+			mkdirSync(join(home, "worktrees"), { recursive: true });
+			git(proj, ["init"]);
+			git(proj, ["checkout", "-b", "main"]);
+			git(proj, ["config", "user.email", "t@example.com"]);
+			git(proj, ["config", "user.name", "t"]);
+			writeFileSync(join(proj, "a.txt"), "one\n");
+			git(proj, ["add", "a.txt"]);
+			git(proj, ["commit", "-m", "base"]);
+			git(proj, ["branch", `fm/${id}`]);
+			git(proj, ["worktree", "add", wt, `fm/${id}`]);
+			writeFileSync(join(wt, "a.txt"), "one\ntwo\n");
+			git(wt, ["add", "a.txt"]);
+			git(wt, ["commit", "-m", "change"]);
+			const child = git(wt, ["rev-parse", "HEAD"]);
+			git(proj, ["update-ref", "refs/remotes/origin/main", child]);
+			setGithubOrigin(proj, "example/web");
+			const fixture = writePrFixture(home, child);
+
+			writeFileSync(
+				join(home, "state", `${id}.meta`),
+				`project=${proj}\nmode=pr\nkind=ship\nyolo=off\nworktree=${wt}\n`,
+			);
+			writeFileSync(
+				join(home, "state", `${id}.status`),
+				`done: PR https://github.com/example/web/pull/99; goal x; deliverable y; evidence z; acceptance a=pass; blocker none; next action none\n`,
+			);
+			writeFileSync(join(home, "data", "projects.md"), `- ${name} [pr] - test\n`);
+			const store = BacklogStore.load(join(home, "data", "backlog.md"));
+			store.create({ id, title: "pr from status", state: "inflight", kind: "ship", repo: name, deps: [] });
+			store.save();
+
+			expect(
+				spawnSync(FM, ["accept", id, "--sha", child, "--mode", "pr"], {
+					encoding: "utf8",
+					env: { ...process.env, FM_HOME: home, FM_PR_API_FIXTURE: fixture },
+				}).status,
+			).toBe(0);
+			expect(readFileSync(join(home, "state", `${id}.meta`), "utf8")).toContain(
+				"pr=https://github.com/example/web/pull/99",
+			);
+
+			const done = finishTask(id, {
+				queryPr: () => ({ state: "MERGED", mergeSha: child }),
+			});
+			expect(done.ok).toBe(true);
+			expect(isLanded(loadArtifact(id)!)).toBe(true);
 		});
 	});
 
@@ -277,6 +474,7 @@ user.login: bob
 		const r = parseGhAxiPullToon(MERGED_PR_TOON);
 		expect(r.state).toBe("MERGED");
 		expect(r.mergeSha).toBe("deadbeefcafebabe0123456789abcdef01234567");
+		expect(r.headSha).toBe("aaa111");
 	});
 
 	it("parses real gh-axi TOON open PR without merge sha", () => {
@@ -292,6 +490,38 @@ user.login: bob
 			),
 		).toThrow(/TOON decode failed|not an object/i);
 	});
+
+	it("assertPrMatchesAccept requires head == candidate and matching repo", () => {
+		expect(resolveGithubRepoFromRemote("https://github.com/example/web.git")).toBe("example/web");
+		expect(resolveGithubRepoFromRemote("git@github.com:example/web.git")).toBe("example/web");
+		expect(
+			assertPrMatchesAccept({
+				prUrl: "https://github.com/example/web/pull/1",
+				candidateSha: "abc123def",
+				projectPath: "/unused",
+				projectGithubRepo: "example/web",
+				detail: { state: "OPEN", mergeSha: null, headSha: "abc123def", repo: "example/web" },
+			}).headSha,
+		).toBe("abc123def");
+		expect(() =>
+			assertPrMatchesAccept({
+				prUrl: "https://github.com/example/web/pull/1",
+				candidateSha: "abc123def",
+				projectPath: "/unused",
+				projectGithubRepo: "example/web",
+				detail: { state: "OPEN", mergeSha: null, headSha: "other000", repo: "example/web" },
+			}),
+		).toThrow(/PR head/);
+		expect(() =>
+			assertPrMatchesAccept({
+				prUrl: "https://github.com/other/repo/pull/1",
+				candidateSha: "abc123def",
+				projectPath: "/unused",
+				projectGithubRepo: "example/web",
+				detail: { state: "OPEN", mergeSha: null, headSha: "abc123def", repo: "other/repo" },
+			}),
+		).toThrow(/does not match project origin/);
+	});
 });
 
 describe("fleet under FM_HOME", () => {
@@ -302,7 +532,7 @@ describe("fleet under FM_HOME", () => {
 				env: { ...process.env, FM_HOME: home, HOME: home },
 			});
 			// May fail structurally but must not leak the real clone path
-			expect(res.stdout + res.stderr).not.toContain("/Users/ryan/code/harness/firstmate/data");
+			expect(res.stdout + res.stderr).not.toContain(join(ROOT, "data"));
 			expect(resolveMainHome()).toBe(home);
 		});
 	});

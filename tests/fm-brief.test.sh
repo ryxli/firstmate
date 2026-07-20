@@ -93,6 +93,12 @@ check_assignment_completion "$brief" 'done: PR {url}'
 check_ship_setup "$brief" task-a1
 check_house_blocks "$brief"
 grep -qF 'This project ships **pr**' "$brief" || fail "default project did not produce a pr ship brief"
+grep -qF 'Do not report done without a PR URL' "$brief" \
+  || fail "pr brief did not make PR URL reporting mandatory"
+! grep -qF 'optionally a PR' "$brief" \
+  || fail "pr brief still treats opening a PR as optional"
+! grep -qF 'ready in branch fm/task-a1' "$brief" \
+  || fail "pr brief still offers ready-in-branch as a done path"
 pass "pr ship brief has the evidence-first assignment contract and status completion"
 
 brief=$(scaffold task-b2 collab)

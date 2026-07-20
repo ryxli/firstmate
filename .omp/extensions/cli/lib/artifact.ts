@@ -514,7 +514,7 @@ export function reconcileLanded(
 	return record;
 }
 
-/** After merge-local FF: prove candidate is ancestor of trunk, then land. */
+/** After trunk FF integrate: prove candidate is ancestor of trunk, then land. */
 export function landAfterFfMerge(taskId: string, detail: { trunkSha: string; branch: string; repo: string }, dataDir = resolveDataDir()): ArtifactRecord {
 	const record = loadArtifact(taskId, dataDir);
 	if (!record?.acceptedRevision || !record.delivery) {

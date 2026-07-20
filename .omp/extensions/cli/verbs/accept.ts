@@ -9,14 +9,17 @@ import {
 	canonicalizeDeliveryMode,
 	ensureArtifact,
 	loadArtifact,
+	projectRepo,
 	saveArtifact,
 } from "../lib/artifact";
 import {
+	assertPrMatchesAccept,
 	deriveAndSubmitCandidate,
 	metaField,
 	readTaskMeta,
 	receiptLine,
 	releaseWorkerPane,
+	resolvePrUrl,
 	shortSha,
 } from "../lib/operator";
 
@@ -69,6 +72,26 @@ async function run(argv: string[]): Promise<number> {
 			deriveAndSubmitCandidate(record, { sha: flagVal(args, "--sha"), parent: flagVal(args, "--parent") });
 		}
 		const mode = resolveMode(id, flagVal(args, "--mode"));
+		if (mode === "pr") {
+			const prUrl = resolvePrUrl(id);
+			if (!prUrl) {
+				process.stderr.write(
+					`error: ${id} has no PR URL (meta pr= or status done: PR <url>); refuse accept until the worker opens a PR and reports the URL\n`,
+				);
+				return 1;
+			}
+			const candidateSha =
+				record.revisions.at(-1)?.candidateSha ?? record.acceptedRevision?.candidateSha ?? "";
+			if (!candidateSha) {
+				process.stderr.write(`error: ${id} has no candidate SHA to compare against the PR head\n`);
+				return 1;
+			}
+			assertPrMatchesAccept({
+				prUrl,
+				candidateSha,
+				projectPath: projectPath || projectRepo(project),
+			});
+		}
 		accept(record, mode, {
 			by: flagVal(args, "--by") ?? "firstmate",
 			criteria: ["operator-accept"],

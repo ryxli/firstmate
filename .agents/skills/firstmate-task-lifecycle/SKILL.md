@@ -43,23 +43,22 @@ Spawn records `mode`/`yolo`/`harness`/`kind` in meta and creates `fm/<id>` workt
 
 ## Finish (operator surface)
 
-Internals live in `data/artifacts/<id>.json`. Operator verbs:
+Internals: `data/artifacts/<id>.json`. Diagnostics only: `fm artifact show <id> [--full]`.
 
 | Verb | Role |
 |---|---|
-| `fm accept <id>` | Derive candidate from git, freeze verdict, close pane, queue integrate |
+| `fm accept <id>` | Judgment: derive candidate from git, freeze verdict, close pane, queue integrate |
 | `fm revise <id> --reason ...` | Pre-accept correction only (never reopens accepted) |
-| `fm finish <id>` | Resumable: integrate → land → backlog done → cleanup |
+| `fm finish <id>` | Resumable drain: integrate → land → backlog close → cleanup |
 
 ```text
 worker ready → fm accept <id> → fm finish <id> → closed
                  ↘ fm revise <id> (pre-accept)
 ```
 
-- **trunk:** `finish` refuses if `fm/<id>` moved past the frozen accepted SHA; otherwise FF-merges that SHA, lands, closes, cleans up. Running `finish` is the authorize step.
-- **pr:** observation-only - not merged → `waiting <id>: PR not merged` (not blocked); merged → land at remote merge SHA without updating local trunk. Need `pr=` via `fm pr-check` first.
-- Compact receipts; full provenance: `fm artifact show <id> --full`. Prefer accept/revise/finish over deprecated `fm tasks artifact`.
-- `fm send` refused after accept. Dispose needs landed or `discard`.
+- **trunk:** `finish` refuses if `fm/<id>` moved past the frozen accepted SHA; otherwise FF-merges that SHA, lands, closes backlog, cleans up. Running `finish` is the authorize step.
+- **pr:** worker must push, open a PR, and report `done: PR <url>` (URL recorded on meta). `fm accept` refuses without that URL, and requires PR head SHA == candidate SHA and PR repo == project origin. `finish` observes the PR - not merged → `waiting <id>: PR not merged`; merged → land at remote merge SHA without updating local trunk.
+- Compact receipts by default. `fm send` refused after accept. Dispose needs landed or explicit discard.
 
 Scout: report then teardown. Secondmate retire: explicit `fm teardown <id>` only.
 
@@ -69,6 +68,6 @@ Scout: report then teardown. Secondmate retire: explicit `fm teardown <id>` only
 
 ## Backlog
 
-Mutate only via `fm tasks`. Landed closes ops view. `fm tasks ready` schedules. Fleet default actionable-only; `--full` / `--state done` for history.
+Mutate only via `fm tasks`. `fm finish` closes the backlog row when it lands. `fm tasks ready` schedules. Fleet default actionable-only; `--full` / `--state done` for history.
 
 Promotion: `data/promote/` candidates; AGENTS.md disposition verbs; one owning home.

@@ -79,7 +79,7 @@ function shipHint(id: string): string {
 	);
 	return mode === "trunk"
 		? `Run \`fm accept ${id}\` when ready, then \`fm finish ${id}\` to land`
-		: `Run \`fm accept ${id}\` when ready, then \`fm finish ${id}\` after the PR merges`;
+		: `After the worker reports done: PR <url>, run \`fm accept ${id}\`, then \`fm finish ${id}\` when the PR merges`;
 }
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -615,11 +615,12 @@ async function cmdReady(rest: string[]): Promise<number> {
 	const landed = attention.find(row => /^MERGED\b/.test(row.reason));
 	let scheduler: Record<string, unknown>;
 	if (landed) {
+		const landedId = String(landed.key ?? landed.id ?? "");
 		scheduler = {
 			class: "completion",
 			lane: landed,
-			next_command: `fm tasks fleet get ${landed.key ?? landed.id}`,
-			action: "delivery landed; inspect the lane, then record it with `fm tasks done` and `fm teardown` once the proof is confirmed",
+			next_command: `fm tasks fleet get ${landedId}`,
+			action: `delivery landed; prefer \`fm finish ${landedId}\` (lands, closes backlog, cleanup) once the PR is merged`,
 		};
 	} else if (items.length > 0) {
 		const [top, ...restReady] = items;
