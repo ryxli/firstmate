@@ -41,7 +41,7 @@ describe("fm-context-weight", () => {
 		const inputs = {
 			"AGENTS.md": "# Agent\nshared context\n## Rules\nkeep it small\n",
 			".agents/skills/alpha/SKILL.md": "# Alpha\nskill context\n",
-			"data/cap.md": "# Preferences\ncaptain context\n",
+			"data/cap.md": "# Preferences\ncap context\n",
 			"data/mates/mate/brief.md": "You are a secondmate: supervise.\n\n# Charter\ncharter context\n",
 		};
 		for (const [path, text] of Object.entries(inputs)) {

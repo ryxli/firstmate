@@ -29,7 +29,7 @@ const env = {
   FM_ESCALATE_BATCH_SECS: "0.1",
   FM_CHECK_INTERVAL: "0.3",
   FM_CHECK_TIMEOUT: "1",
-  FM_CAPTAIN_OS_NOTIFY: "0",
+  FM_CAP_OS_NOTIFY: "0",
 };
 const previousEnv = new Map();
 for (const [key, value] of Object.entries(env)) {

@@ -100,7 +100,7 @@ SH
 scaffold_controller() {
   local home=$1
   mkdir -p "$home/state" "$home/data" "$home/config" "$home/bin"
-  printf 'name=firstmate\nrole=firstmate\nparent=captain\n' > "$home/config/identity"
+  printf 'name=firstmate\nrole=firstmate\nparent=cap\n' > "$home/config/identity"
   cat > "$home/data/backlog.md" <<'EOF'
 ## In flight
 

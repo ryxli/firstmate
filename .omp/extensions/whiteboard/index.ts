@@ -1,11 +1,11 @@
 // whiteboard - board-as-conversation loop.
 //
 // The board is a shared, free-form markdown document that is the
-// primary conversational channel between the captain and the agent.
+// primary conversational channel between the cap and the agent.
 // Newest entries go at the bottom; an optional ## Working section holds
 // the shared next-action queue. Structure is convention only, never parsed.
 //
-// The captain edits the board in nvim; the agent reads the diff and replies by
+// The cap edits the board in nvim; the agent reads the diff and replies by
 // editing the board via whiteboard_write. Loop state is session-local: enable it
 // in each named agent session; it is not persisted across sessions.
 //
@@ -89,7 +89,7 @@ interface LoopRuntime {
 	lastOutcome?:      string;
 	lastSummary?:      string;
 	tickCount:         number;
-	consecutiveTurns:  number;  // self-continued turns since last captain edit
+	consecutiveTurns:  number;  // self-continued turns since last cap edit
 	autonomy:          boolean;
 	maxTurns:          number;
 	idleStreak:       number;  // consecutive self-continued ticks with no board change
@@ -171,7 +171,7 @@ export function loopBackoffMs(idleStreak: number, minMs: number, maxMs: number):
 	return Math.min(maxMs, Math.max(minMs, scaled));
 }
 
-// Decode the backslash escapes a captain can type in a single-line slash arg into
+// Decode the backslash escapes a cap can type in a single-line slash arg into
 // the characters they name: `\n` -> newline, `\t` -> tab, `\\` -> backslash,
 // `\"` -> quote. Everything else is left verbatim. This is the ONLY place slash
 // text is un-escaped; agent tools receive real text through JSON and never route
@@ -283,7 +283,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 		const clock = sinceLast !== undefined && sinceLast >= 0 ? `${ts} (+${formatInterval(sinceLast)} since last tick)` : ts;
 		// Status fields render one per line so no single line wraps into an unreadable blob.
 		const fields: string[] = [];
-		// Presence: elapsed since the last human (non-self) board edit; grows while the captain is away, resets on their next edit.
+		// Presence: elapsed since the last human (non-self) board edit; grows while the cap is away, resets on their next edit.
 		const editor = process.env.USER || "user";
 		if (lastUserEditAt !== undefined && tickQueuedAt - lastUserEditAt >= 0) {
 			const sinceEdit = tickQueuedAt - lastUserEditAt;
@@ -346,7 +346,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 			return true;
 		}
 		if (runtime.queued && deliverAs !== "steer") { notify(ctx, "loop tick already queued"); return true; }
-		if (reason === "captain-edit") clearLoopTimer(runtime);
+		if (reason === "cap-edit") clearLoopTimer(runtime);
 		const tickQueuedAt = _now();
 		runtime.checkpointOutcome = null;
 		runtime.checkpointSummary = null;
@@ -414,7 +414,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 						runtime.consecutiveTurns = 0;
 						runtime.idleStreak = 0;
 						runtime.lastUserEditAt = _now();
-						if (!runtime.queued) queueLoopTick(runtime.identity, undefined, "captain-edit");
+						if (!runtime.queued) queueLoopTick(runtime.identity, undefined, "cap-edit");
 					} finally {
 						setLoopStatus(runtime);
 					}
@@ -673,7 +673,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 			} else {
 				clearLoopTimer(runtime);
 				// Rest: no self-continuation. Loop stays enabled; watcher remains armed.
-				// The next captain edit (watcher fire) will reset consecutiveTurns and queue a new turn.
+				// The next cap edit (watcher fire) will reset consecutiveTurns and queue a new turn.
 				if (checkpointOutcome !== null) {
 					runtime.lastOutcome = checkpointOutcome;
 					runtime.lastSummary = checkpointSummary;
@@ -731,7 +731,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 		async execute(_id, params) {
 			const scope = defaultScope();
 			const absPath = resolvePath(scope.path);
-			// Normalize the agent's write the same way the captain's nvim formats the
+			// Normalize the agent's write the same way the cap's nvim formats the
 			// board on save (prettierd), so both authors converge on one canonical
 			// shape and the diff never churns on whitespace. Fail-safe: unchanged on error.
 			const formatted = formatMarkdown(params.text, absPath);
@@ -750,7 +750,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "whiteboard_checkpoint",
 		label: "Whiteboard Checkpoint",
-		description: "Record the outcome of this board-conversation turn. progress self-continues (when autonomy on and under max_turns); settled/needs-decision/blocked/error rest and wait for the next captain edit.",
+		description: "Record the outcome of this board-conversation turn. progress self-continues (when autonomy on and under max_turns); settled/needs-decision/blocked/error rest and wait for the next cap edit.",
 		parameters: z.object({
 			outcome: z.enum(["progress", "settled", "needs-decision", "blocked", "error"]).describe("Turn outcome"),
 			summary: z.string().describe("One-sentence summary"),

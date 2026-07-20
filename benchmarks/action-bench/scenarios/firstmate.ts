@@ -158,14 +158,14 @@ Anything else is NOT relevant. A match inside a larger word does NOT count: "alr
 const CLS_BUGGY = `KEYWORDS = ["done:", "blocked:", "failed:", "needs-decision:", "ready", "checks green", "merged"]
 
 
-def is_captain_relevant(line):
+def is_cap_relevant(line):
     # naive substring match
     return any(k in line for k in KEYWORDS)
 `;
-const CLS_REPRO = `from classify import is_captain_relevant
+const CLS_REPRO = `from classify import is_cap_relevant
 
 line = "already working on the fix"
-got = is_captain_relevant(line)
+got = is_cap_relevant(line)
 print("line:", repr(line), "-> got:", got, "want: False")
 assert got is False, "'already' must NOT be cap-relevant (it only contains the substring 'ready')"
 print("repro PASS")
@@ -177,7 +177,7 @@ _PHRASES = ("PR ready", "checks green", "ready in branch", "merged")
 _TS = re.compile(r"^\\d{4}-\\d\\d-\\d\\dT[\\d:]+\\s+")
 
 
-def is_captain_relevant(line):
+def is_cap_relevant(line):
     core = _TS.sub("", line)
     if re.match(r"^working(?:\\s|:)", core, re.IGNORECASE):
         return False
@@ -219,12 +219,12 @@ function clsRunHeldout(d: string): [number, number] {
 	const cases = `[${CLS_HELDOUT.map(([line, exp]) => `(${JSON.stringify(line)}, ${exp ? "True" : "False"})`).join(", ")}]`;
 	const driver =
 		"import sys\n" +
-		"from classify import is_captain_relevant\n" +
+		"from classify import is_cap_relevant\n" +
 		`cases = ${cases}\n` +
 		"ok = 0\n" +
 		"for line, exp in cases:\n" +
 		"    try:\n" +
-		"        got = bool(is_captain_relevant(line))\n" +
+		"        got = bool(is_cap_relevant(line))\n" +
 		"    except Exception:\n" +
 		"        got = None\n" +
 		"    if got == exp:\n" +
@@ -261,7 +261,7 @@ function clsOracle(d: string): Trace {
 		150,
 		3,
 		[toolCall("read", "RULES.md"), toolCall("read", "repro.py"), toolCall("edit", "classify.py")],
-		"reimplemented is_captain_relevant per RULES.md",
+		"reimplemented is_cap_relevant per RULES.md",
 	);
 }
 
@@ -389,7 +389,7 @@ export const SCENARIOS: Scenario[] = [
 		id: "fm-bugfix-repro",
 		difficulty: "medium",
 		task:
-			"is_captain_relevant(line) in classify.py mis-classifies some status lines. `python3 repro.py` shows " +
+			"is_cap_relevant(line) in classify.py mis-classifies some status lines. `python3 repro.py` shows " +
 			"one failing case. Make the function correctly classify status lines per the rules in RULES.md for ALL " +
 			"inputs, not just the one in repro.py. Do NOT modify repro.py or RULES.md. Then stop.",
 		setup: clsSetup,

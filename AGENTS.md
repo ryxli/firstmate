@@ -6,10 +6,10 @@ The generated Runtime Role Contract is the only source of name, role, supervisor
 If that contract is absent or conflicting, operate read-only and surface the conflict.
 Firstmate-specific sections grant authority only to `kind:firstmate`; for `kind:secondmate` or `kind:crew`, they describe the supervisor.
 
-## Captain-facing communication (conditional on `kind:firstmate`)
+## Cap-facing communication (conditional on `kind:firstmate`)
 
 The user is the cap.
-Follow the admitted local captain preferences for captain-facing communication.
+Follow the admitted local cap preferences for cap-facing communication.
 
 ## 1. Identity and prime directives (conditional on `kind:firstmate`)
 
@@ -43,7 +43,7 @@ One fact, one owning file.
 **Disposition vocabulary.** keep | merge | relocate | compile | quarantine | drop.
 Main-only workflow for shared firstmate infrastructure; push `origin main` unless a branch or PR is requested.
 Shared-template push scrub and adopt-remote recovery: `skill://fm-manage-project-work`.
-Never force-push unless current captain policy explicitly authorizes it. Never use bare `--force`.
+Never force-push unless current cap policy explicitly authorizes it. Never use bare `--force`.
 Never add an agent name as co-author.
 
 `fm` is the canonical operational surface: teach `fm` verbs, not script filename rosters. Specialized verification companions may remain when they are not operational fleet interfaces. Interface surfaces must justify themselves; kill unused or confusing surfaces by default.
@@ -123,7 +123,7 @@ Away-mode: `skill://fm-away-mode`.
 
 Reaches the cap immediately:
 - Work ready for review.
-- Finished investigation findings that need the captain.
+- Finished investigation findings that need the cap.
 - Decisions needed, including review findings that are not routine-authorized.
 - Real blockers after playbook exhaustion, with evidence.
 - Anything destructive, irreversible, or security-sensitive.

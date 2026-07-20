@@ -24,8 +24,11 @@ function tempHome(prefix: string): string {
 function secondmateHome(id: string, name: string, scope: string, parent?: string): string {
 	const home = tempHome(`fm-role-${id}-`);
 	mkdirSync(join(home, "sbin"));
+	mkdirSync(join(home, ".omp", "skills"), { recursive: true });
+	mkdirSync(join(home, "state"));
 	writeFileSync(join(home, ".fm-secondmate-home"), `${id}\n`);
 	writeFileSync(join(home, "config", "identity"), `schema_version=1\nname=${name}\nrole=${scope}\n${parent ? `parent=${parent}\n` : ""}`);
+	writeFileSync(join(home, "config", "shared-skills"), "");
 	writeFileSync(join(home, "data", "charter.md"), `# Charter\n${name}\n\n# Routing scope\n${scope}\n\n# Project clones\nnone\n`);
 	return home;
 }
@@ -34,12 +37,12 @@ describe("runtime role contracts", () => {
 	it("generates Keel main, Kodiak secondmate, Plum secondmate, and crew contracts", () => {
 		const fallbackMain = tempHome("fm-role-main-fallback-");
 		const main = tempHome("fm-role-main-");
-		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n");
+		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=cap\n");
 		const kodiak = secondmateHome("kodiak", "Kodiak", "frontend and design routing", "Keel");
 		const plum = secondmateHome("plum", "Plum", "legacy evidence only", "Keel");
 		try {
 			expect(mainRoleContract({ home: fallbackMain })).toContain("name: firstmate\nkind: firstmate");
-			expect(mainRoleContract({ home: main })).toContain("You are Keel, the first mate reporting to the captain.");
+			expect(mainRoleContract({ home: main })).toContain("You are Keel, the first mate reporting to the cap.");
 			expect(mainRoleContract({ home: main })).toContain("name: Keel\nkind: firstmate");
 			expect(roleContractForHome(main)).toContain("name: Keel\nkind: firstmate");
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("You are Kodiak, a secondmate reporting to Keel.");
@@ -59,7 +62,7 @@ describe("runtime role contracts", () => {
 
 	it("keeps secondmate identity and authority in the runtime role contract", () => {
 		const main = tempHome("fm-role-main-");
-		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=firstmate\nparent=captain\n");
+		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=firstmate\nparent=cap\n");
 		const kodiak = secondmateHome("kodiak", "Kodiak", "frontend", "Keel");
 		try {
 			const contract = secondmateRoleContract({ home: kodiak, mainHome: main });
@@ -76,7 +79,7 @@ describe("runtime role contracts", () => {
 
 	it("updates stale generated secondmate parent when main identity is known", () => {
 		const main = tempHome("fm-role-main-");
-		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n");
+		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=cap\n");
 		const kodiak = secondmateHome("kodiak", "Kodiak", "frontend", "OldMain");
 		try {
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("reports_to: Keel");
@@ -114,7 +117,7 @@ describe("shared AGENTS role neutrality", () => {
 		expect(agents).toContain("# Fleet operating procedures");
 		expect(agents).toContain("This file defines shared procedure, never active identity.");
 		expect(agents).toContain("`kind:secondmate` or `kind:crew`");
-		expect(agents).toContain("Captain-facing communication (conditional on `kind:firstmate`)");
+		expect(agents).toContain("Cap-facing communication (conditional on `kind:firstmate`)");
 		expect(agents).toContain("Resolve the registered project and current secondmate scope before starting background execution");
 	});
 });
@@ -215,7 +218,7 @@ describe("secondmate structural gate", () => {
 		const smState = join(sm, "state");
 		mkdirSync(bin);
 		mkdirSync(mainState);
-		mkdirSync(smState);
+		mkdirSync(smState, { recursive: true });
 		mkdirSync(join(main, "projects"));
 		writeFileSync(join(mainState, ".lock"), "999999\n");
 		writeFileSync(join(bin, "ps"), "#!/bin/sh\nexit 1\n");
@@ -224,7 +227,7 @@ describe("secondmate structural gate", () => {
 			const help = spawnSync(FM, ["--help"], { cwd: sm, env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` }, encoding: "utf8" });
 			expect(help.status).toBe(0);
 			expect(help.stdout).not.toContain("command: home");
-			expect(help.stdout).toContain("fleet update");
+			expect(help.stdout).toContain("fleet,");
 			const allowed = spawnSync(FM, ["lock", "status"], {
 				cwd: sm,
 				env: {
@@ -282,7 +285,7 @@ exit 0
 		const env = { ...process.env, FM_HOME: fresh.main, FM_STATE_OVERRIDE: join(fresh.main, "state"), FM_DATA_OVERRIDE: join(fresh.main, "data"), FM_CONFIG_OVERRIDE: join(fresh.main, "config"), FM_PROJECTS_OVERRIDE: join(fresh.main, "projects"), PATH: `${fresh.bin}:${process.env.PATH ?? ""}` };
 		try {
 			const first = spawnSync(FM, ["spawn", "kodiak", fresh.sm, "omp", "--secondmate"], { cwd: REPO_ROOT, env, encoding: "utf8" });
-			expect(first.status).toBe(0);
+			expect(first.status, `${first.stdout}${first.stderr}`).toBe(0);
 			const firstLog = readFileSync(fresh.log, "utf8");
 			expect(firstLog).toContain("agent start kodiak");
 			expect(firstLog).toContain("omp --append-system-prompt=");

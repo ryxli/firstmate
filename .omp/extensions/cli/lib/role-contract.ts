@@ -4,6 +4,8 @@ import { homeFromCwd } from "./root";
 import { assertIdentityDisplayName, identityValue } from "./identity";
 
 const DEFAULT_MAIN_NAME = "firstmate";
+// Read legacy identity records without emitting the retired parent value.
+const LEGACY_CAP_PARENT = "captain";
 
 export { IDENTITY_DISPLAY_NAME_MAX_BYTES, IdentityNameOversizeError, assertIdentityDisplayName } from "./identity";
 
@@ -62,9 +64,9 @@ export function roleKindForHome(home: string): Extract<RoleKind, "firstmate" | "
 	const configDir = join(home, "config");
 	const configuredRole = identityValue(configDir, "role")?.trim().toLowerCase();
 	const configuredParent = identityValue(configDir, "parent")?.trim().toLowerCase();
-	const parentIsCaptain = configuredParent === "captain" || configuredParent === "cap";
-	const parentIsSupervisor = configuredParent !== undefined && !parentIsCaptain;
-	if (marked) return configuredRole === "firstmate" || parentIsCaptain ? "unverified" : "secondmate";
+	const parentIsCap = configuredParent === LEGACY_CAP_PARENT || configuredParent === "cap";
+	const parentIsSupervisor = configuredParent !== undefined && !parentIsCap;
+	if (marked) return configuredRole === "firstmate" || parentIsCap ? "unverified" : "secondmate";
 	return configuredRole === "secondmate" || parentIsSupervisor ? "unverified" : "firstmate";
 }
 
@@ -141,11 +143,11 @@ export function mainRoleContract(input: RoleContractInput): string {
 		[
 			"# Runtime Role Contract",
 			"priority: system/developer",
-			`You are ${name}, the first mate reporting to the captain.`,
+			`You are ${name}, the first mate reporting to the cap.`,
 			`name: ${name}`,
 			"kind: firstmate",
-			"reports_to: captain",
-			"authority: fleet-wide supervisor, direct captain interface, fleet-policy owner",
+			"reports_to: cap",
+			"authority: fleet-wide supervisor, direct cap interface, fleet-policy owner",
 			"scope: all registered homes, direct reports, fleet routing, and shared firstmate policy",
 			"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
 		].join("\n"),
@@ -165,7 +167,7 @@ export function secondmateRoleContract(input: RoleContractInput): string {
 		`name: ${name}`,
 		"kind: secondmate",
 		`reports_to: ${mainName}`,
-		"authority: own-home and charter-domain only; relay captain interface through the main firstmate",
+		"authority: own-home and charter-domain only; relay cap interface through the main firstmate",
 		"not_authorized: sibling governance, main-home governance, fleet policy, cap direct interface",
 		`routing_scope: ${charterScope(input.home)}`,
 		"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
@@ -182,7 +184,7 @@ export function crewRoleContract(input: RoleContractInput): string {
 		"kind: crew",
 		`reports_to: ${supervisor}`,
 		"authority: assigned brief only",
-		"scope: the launching supervisor owns all routing, captain communication, and fleet policy",
+		"scope: the launching supervisor owns all routing, cap communication, and fleet policy",
 		"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
 	].join("\n");
 }

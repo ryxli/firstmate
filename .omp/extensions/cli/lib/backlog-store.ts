@@ -24,6 +24,8 @@ import { dependencySatisfied, dependencySatisfiedPure } from "./artifact";
 
 export type TaskState = "inflight" | "queued" | "done";
 export const HOLD_KINDS = ["cap", "external", "load", "parked", "future"] as const;
+// Read old backlog tags but normalize them to the canonical cap value.
+const LEGACY_HOLD_KIND = "captain";
 export type HoldKind = (typeof HOLD_KINDS)[number];
 
 export interface Dep {
@@ -105,7 +107,7 @@ const TAIL_KIND = /\s*\(kind:\s*([^()]+)\)\s*$/;
 const TAIL_PRIORITY = /\s*\(priority:\s*([0-4])\)\s*$/;
 const TAIL_SINCE = /\s*\(since\s+(\d{4}-\d{2}-\d{2})\)\s*$/;
 const TAIL_HOLD_UNTIL = /\s*\(hold-until:\s*(\d{4}-\d{2}-\d{2})\)\s*$/;
-const TAIL_HOLD_KIND = new RegExp(`\\s*\\(hold-kind:\\s*(${[...HOLD_KINDS, "captain"].join("|")})\\)\\s*$`);
+const TAIL_HOLD_KIND = new RegExp(`\\s*\\(hold-kind:\\s*(${[...HOLD_KINDS, LEGACY_HOLD_KIND].join("|")})\\)\\s*$`);
 const TAIL_HOLD = /\s*\(hold:\s*([^()]+)\)\s*$/;
 const TAIL_CLOSED = /\s*\((merged|reported|done)\s+(\d{4}-\d{2}-\d{2})\)\s*$/;
 
@@ -180,7 +182,7 @@ function extractTags(rest: string): ExtractedTags {
 		}
 		m = title.match(TAIL_HOLD_KIND);
 		if (m) {
-			holdKind ??= (m[1] === "captain" ? "cap" : m[1]) as HoldKind;
+			holdKind ??= (m[1] === LEGACY_HOLD_KIND ? "cap" : m[1]) as HoldKind;
 			title = title.slice(0, m.index);
 			stripped = true;
 			continue;

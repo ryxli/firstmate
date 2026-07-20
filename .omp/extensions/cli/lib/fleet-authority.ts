@@ -8,6 +8,8 @@ import { resolveMainHome } from "../../bridge/collect";
 import { identityValue } from "./identity";
 import { homeFromCwd } from "./root";
 import { isSecondmateHome, roleKindForHome } from "./role-contract";
+// Read legacy identity records without granting them a new output spelling.
+const LEGACY_CAP_PARENT = "captain";
 
 export type FleetAuthResult =
 	| { ok: true; controllerHome: string }
@@ -31,7 +33,7 @@ export function hasPositiveFirstmateEvidence(home: string): boolean {
 	const configDir = join(home, "config");
 	const role = identityValue(configDir, "role")?.trim().toLowerCase();
 	const parent = identityValue(configDir, "parent")?.trim().toLowerCase();
-	const parentIsCap = parent === "cap" || parent === "captain";
+	const parentIsCap = parent === "cap" || parent === LEGACY_CAP_PARENT;
 	if (role === "firstmate") return true;
 	if (parentIsCap) return true;
 	const hasSbin = existsSync(join(home, "sbin", "fm")) || existsSync(join(home, "sbin", "fm-spawn.sh"));

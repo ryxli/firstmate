@@ -1,13 +1,13 @@
 // whiteboard markdown formatting.
 //
-// Mirrors the captain's nvim format-on-save: conform.nvim formats markdown with
+// Mirrors the cap's nvim format-on-save: conform.nvim formats markdown with
 // `prettierd` (falling back to `prettier`), stop-after-first. Every agent
-// whiteboard write is normalized the same way, so agent writes and the captain's
+// whiteboard write is normalized the same way, so agent writes and the cap's
 // nvim writes converge on one canonical shape and the board diff stays clean
 // instead of churning on list markers, blank-line runs, and trailing whitespace.
 //
 // Prettier's default `proseWrap: "preserve"` means prose is NOT re-wrapped, so
-// the captain's sentence-per-line convention is kept intact; only structural
+// the cap's sentence-per-line convention is kept intact; only structural
 // whitespace is normalized.
 //
 // Fail-safe by construction: if no formatter is on PATH, the formatter errors,

@@ -20,7 +20,7 @@ Project code changes use OMP subagents only on an isolated delivery surface; oth
 When FM is required, changes use ship tasks and read-only work uses scout tasks (report at `data/<id>/report.md`).
 `trunk` never routes to a secondmate; only `pr` projects do.
 Serialize overlapping repo areas; otherwise parallelize.
-Once the captain freezes scope, every active and queued thread must trace to that set; newly observed symptoms are evidence within an existing thread until a verified causal chain proves otherwise.
+Once the cap freezes scope, every active and queued thread must trace to that set; newly observed symptoms are evidence within an existing thread until a verified causal chain proves otherwise.
 
 ## Registries
 
@@ -32,7 +32,7 @@ Secondmate charters stay ~40 lines: domain, escalation path, and definition of d
 
 ## Shared-template push scrub
 
-Before pushing this reusable firstmate repository: confirm no personal-name/path/hostname leaks in tracked material, confirm untracked-local files are not staged, and confirm the push is fast-forward (or standing harness-layer `--force-with-lease` when captain policy authorizes it). Never bare `--force`. After an authorized harness-layer rewrite, the other laptop recovers with `fm update --adopt-remote`.
+Before pushing this reusable firstmate repository: confirm no personal-name/path/hostname leaks in tracked material, confirm untracked-local files are not staged, and confirm the push is fast-forward (or standing harness-layer `--force-with-lease` when cap policy authorizes it). Never bare `--force`. After an authorized harness-layer rewrite, the other laptop recovers with `fm update --adopt-remote`.
 
 ## Which verb advances state
 

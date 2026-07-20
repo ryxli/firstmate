@@ -415,16 +415,16 @@ pass "ready: worker completion alone (ready in branch, not merged) never counts 
 home=$(fm_home)
 skeleton "$home"
 run_fm "$home" tasks add hold-1 "task to hold" >/dev/null
-run_fm "$home" tasks hold hold-1 --reason "captain decision pending" --kind captain >/dev/null
-grep -qF -- '(hold: captain decision pending)' "$(backlog_of "$home")" || fail "hold: reason not recorded"
-grep -qF -- '(hold-kind: captain)' "$(backlog_of "$home")" || fail "hold: kind not recorded"
+run_fm "$home" tasks hold hold-1 --reason "cap decision pending" --kind cap >/dev/null
+grep -qF -- '(hold: cap decision pending)' "$(backlog_of "$home")" || fail "hold: reason not recorded"
+grep -qF -- '(hold-kind: cap)' "$(backlog_of "$home")" || fail "hold: kind not recorded"
 out=$(run_fm "$home" tasks ready)
 echo "$out" | grep -E '^[[:space:]]+hold-1,' && fail "ready: held task must not appear as a row in the plain ready list"
 out=$(run_fm "$home" tasks ready --include-held)
 echo "$out" | grep -A3 '^held\[' | grep -qF "hold-1" || fail "ready --include-held: held task must appear in the held group"
 pass "hold: excludes a task from ready; --include-held surfaces it in a separate group"
 
-out=$(run_fm "$home" tasks hold hold-1 --reason "captain decision pending" --kind captain)
+out=$(run_fm "$home" tasks hold hold-1 --reason "cap decision pending" --kind cap)
 echo "$out" | grep -q "already held" || fail "hold: idempotent re-hold must report already held"
 pass "hold: re-holding with the identical reason/kind is a no-op"
 

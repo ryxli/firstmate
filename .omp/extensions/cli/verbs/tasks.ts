@@ -525,7 +525,7 @@ function cmdBlockOrUnblock(rest: string[], mode: "block" | "unblock"): number {
 	return 0;
 }
 
-const HOLD_USAGE = 'usage: fm tasks hold <id> --reason "<text>" [--kind captain|external|load|parked|future] [--until YYYY-MM-DD]';
+const HOLD_USAGE = 'usage: fm tasks hold <id> --reason "<text>" [--kind cap|external|load|parked|future] [--until YYYY-MM-DD]';
 
 function cmdHold(rest: string[]): number {
 	const args = [...rest];

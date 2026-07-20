@@ -121,7 +121,7 @@ describe("formatMarkdown decision logic", () => {
 	});
 });
 
-// End-to-end against the real formatter the captain's nvim uses. Skipped when no
+// End-to-end against the real formatter the cap's nvim uses. Skipped when no
 // formatter is installed so the suite stays green on a bare machine.
 const hasPrettierd = spawnSync("prettierd", ["--version"], { encoding: "utf8" }).status === 0;
 const e2e = hasPrettierd ? test : test.skip;

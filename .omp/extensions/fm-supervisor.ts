@@ -136,7 +136,7 @@ const STATUS_PREFIX_RE = /^(done|blocked|failed|needs-decision):/i;
 const STATUS_PHRASE_RE = /(^|[^A-Za-z])(PR ready|checks green|ready in branch|merged)([^A-Za-z]|$)/i;
 const WORKING_STATUS_RE = /^working(?:\s|:)/i;
 
-function captainRelevantStatusLine(line: string): boolean {
+function capRelevantStatusLine(line: string): boolean {
 	const stripped = line.replace(/^\d{4}-\d{2}-\d{2}T\S+\s+/, "");
 	if (WORKING_STATUS_RE.test(stripped)) return false;
 	return STATUS_PREFIX_RE.test(stripped) || STATUS_PHRASE_RE.test(stripped);
@@ -150,7 +150,7 @@ function captainRelevantStatusLine(line: string): boolean {
 function isRelevant(e: FleetEvent): boolean {
 	switch (e.kind) {
 		case "status":
-			return e.status_line !== undefined && captainRelevantStatusLine(e.status_line);
+			return e.status_line !== undefined && capRelevantStatusLine(e.status_line);
 		case "check":
 			return (e.check_out ?? "").length > 0;
 		case "herdr":
@@ -980,7 +980,7 @@ async function fireStale(sup: Supervisor, crew: Crewmate, _idleStart: number): P
 	}
 	if (await isAwaitingMerge(sup, crew)) return; // parked on a green PR: by design
 	const last = await lastStatusLine(sup, crew.task);
-	if (last && captainRelevantStatusLine(last)) return; // already reported something cap-worthy
+	if (last && capRelevantStatusLine(last)) return; // already reported something cap-worthy
 	enqueueStale(sup);
 }
 
@@ -1017,7 +1017,7 @@ async function fireCompletion(sup: Supervisor, crew: Crewmate): Promise<void> {
 		return;
 	}
 	const last = await lastStatusLine(sup, crew.task);
-	if (last && captainRelevantStatusLine(last)) return;
+	if (last && capRelevantStatusLine(last)) return;
 	enqueueStale(sup);
 }
 
@@ -1125,7 +1125,7 @@ async function onStatusFileChange(sup: Supervisor, filename: string): Promise<vo
 
 	const crew = findCrewByTask(sup, task);
 	const pane = crew?.pane ?? "?";
-	if (captainRelevantStatusLine(last)) {
+	if (capRelevantStatusLine(last)) {
 		if (crew?.dependency && !validateBlockedReport(last).valid) {
 			await appendInternalLog(sup, task, `rejected malformed blocked report: ${last}`);
 			return;

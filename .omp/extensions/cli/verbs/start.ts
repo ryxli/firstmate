@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { lockSnapshot, removeLockIfOwner, resolveLockPaths, sleepMs, withLockClaim, writeLockOwner, type SessionLockPaths } from "../lib/session-lock";
 
-import { FM_START_STATIC_CONTEXT_ENV, CaptainContextOversizeError, mainPreloadBlock, runStartupContext } from "../lib/startup-context";
+import { FM_START_STATIC_CONTEXT_ENV, CapContextOversizeError, mainPreloadBlock, runStartupContext } from "../lib/startup-context";
 import { ensureSecondmateHomeSkills } from "../lib/ensure-home-skills";
 import { activeHome, IdentityNameOversizeError, RoleContractOversizeError, roleContractForHome, roleKindForHome } from "../lib/role-contract";
 
@@ -222,7 +222,7 @@ async function run(argv: string[]): Promise<number> {
 		}
 		preload = mainPreloadBlock(home);
 	} catch (error) {
-		if (error instanceof CaptainContextOversizeError) {
+		if (error instanceof CapContextOversizeError) {
 			process.stderr.write(
 				`fm start: ${error.path} is ${error.actualBytes} UTF-8 bytes; allowed ${error.maxBytes}. Shrink data/cap.md; OMP was not launched.\n`,
 			);

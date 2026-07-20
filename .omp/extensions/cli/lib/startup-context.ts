@@ -493,21 +493,21 @@ export function mainHomeStructurally(home: string): boolean {
 }
 
 /** Hard ceiling for the normalized `data/cap.md` admission payload (UTF-8 bytes). */
-export const CAPTAIN_CONTEXT_MAX_BYTES = 3010;
+export const CAP_CONTEXT_MAX_BYTES = 3010;
 
 /** Successful-start stub only; fault procedure bodies stay demand-loaded. */
 export const STARTUP_PRELOAD_STUB =
 	"`fm start` completed deterministic startup checks before launch.\n" +
 	"The startup fleet summary is a static snapshot; use `fm fleet` for current operational state.\n";
 
-export class CaptainContextOversizeError extends Error {
+export class CapContextOversizeError extends Error {
 	readonly path: string;
 	readonly actualBytes: number;
 	readonly maxBytes: number;
 
 	constructor(path: string, actualBytes: number, maxBytes: number) {
-		super(`data/cap.md exceeds captain context ceiling: ${actualBytes} > ${maxBytes} bytes (${path})`);
-		this.name = "CaptainContextOversizeError";
+		super(`data/cap.md exceeds cap context ceiling: ${actualBytes} > ${maxBytes} bytes (${path})`);
+		this.name = "CapContextOversizeError";
 		this.path = path;
 		this.actualBytes = actualBytes;
 		this.maxBytes = maxBytes;
@@ -515,16 +515,16 @@ export class CaptainContextOversizeError extends Error {
 }
 
 /** Normalize trailing newlines to exactly one; do not trim leading or interior whitespace. */
-export function normalizeCaptainPayload(raw: string): string {
+export function normalizeCapPayload(raw: string): string {
 	return raw.replace(/\n+$/u, "") + "\n";
 }
 
 /**
  * Admit home-local `data/cap.md` only. Never falls back to a tracked/repo copy.
- * Missing file → null. Oversize after normalization → CaptainContextOversizeError.
+ * Missing file → null. Oversize after normalization → CapContextOversizeError.
  * Returns the normalized admitted payload exactly once (file heading preserved).
  */
-export function captainContextBlock(home: string, maxBytes = CAPTAIN_CONTEXT_MAX_BYTES): string | null {
+export function capContextBlock(home: string, maxBytes = CAP_CONTEXT_MAX_BYTES): string | null {
 	const path = join(home, "data", "cap.md");
 	let raw: string;
 	try {
@@ -533,22 +533,22 @@ export function captainContextBlock(home: string, maxBytes = CAPTAIN_CONTEXT_MAX
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
 		throw error;
 	}
-	const admitted = normalizeCaptainPayload(raw);
+	const admitted = normalizeCapPayload(raw);
 	const actualBytes = Buffer.byteLength(admitted, "utf8");
-	if (actualBytes > maxBytes) throw new CaptainContextOversizeError(path, actualBytes, maxBytes);
+	if (actualBytes > maxBytes) throw new CapContextOversizeError(path, actualBytes, maxBytes);
 	return admitted;
 }
 
 /**
- * Main-firstmate system-prompt preload: stub + optional bounded captain preferences.
- * Preserves the captain payload's terminal newline in the join:
- * stub_without_trailing_newlines + "\\n\\n" + normalized_captain.
+ * Main-firstmate system-prompt preload: stub + optional bounded cap preferences.
+ * Preserves the cap payload's terminal newline in the join:
+ * stub_without_trailing_newlines + "\\n\\n" + normalized_cap.
  */
-export function mainPreloadBlock(home: string, maxBytes = CAPTAIN_CONTEXT_MAX_BYTES): string {
+export function mainPreloadBlock(home: string, maxBytes = CAP_CONTEXT_MAX_BYTES): string {
 	const stub = STARTUP_PRELOAD_STUB.replace(/\n+$/u, "");
-	const captain = captainContextBlock(home, maxBytes);
-	if (captain === null) return stub;
-	return `${stub}\n\n${captain}`;
+	const cap = capContextBlock(home, maxBytes);
+	if (cap === null) return stub;
+	return `${stub}\n\n${cap}`;
 }
 
 export async function runStartupContext(options: StartupContextOptions): Promise<StartupContextOutcome> {

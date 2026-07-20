@@ -20,7 +20,7 @@ writeFileSync(join(state, "consumer-a.meta"), "pane=w1:p2\nkind=ship\n");
 writeFileSync(join(state, "consumer-b.meta"), "pane=w1:p3\nkind=ship\n");
 writeFileSync(join(state, "producer.status"), "done: artifact ready\n");
 writeFileSync(join(state, "consumer-a.status"), "working\n");
-const env = { FM_HOME: home, FM_STATE_OVERRIDE: state, HERDR_SOCKET_PATH: join(home, "missing.sock"), FM_SIGNAL_GRACE: "0.01", FM_CAPTAIN_OS_NOTIFY: "0" };
+const env = { FM_HOME: home, FM_STATE_OVERRIDE: state, HERDR_SOCKET_PATH: join(home, "missing.sock"), FM_SIGNAL_GRACE: "0.01", FM_CAP_OS_NOTIFY: "0" };
 const previous = new Map();
 for (const [key, value] of Object.entries(env)) { previous.set(key, process.env[key]); process.env[key] = value; }
 const handlers = new Map();
