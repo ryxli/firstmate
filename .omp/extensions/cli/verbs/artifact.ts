@@ -39,6 +39,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "artifact",
-	describe: "Show a task's durable artifact record (compact; --full for provenance).",
+	describe: "Show a task's durable artifact record.",
+	surface: "captain",
 	run,
 };

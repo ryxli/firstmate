@@ -49,6 +49,7 @@ async function run(_argv: string[]): Promise<number> {
 
 export default {
 	name: "toolbelt",
-	describe: "List every discovered fm verb with its description.",
+	describe: "List every discovered fm verb.",
+	surface: "captain",
 	run,
 };

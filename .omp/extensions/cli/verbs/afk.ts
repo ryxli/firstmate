@@ -101,6 +101,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "afk",
-	describe: "Enter, exit, or report away-mode (owns .afk flag and idle-digest cleanup).",
+	describe: "Enter, exit, or report away-mode.",
+	surface: "captain",
 	run,
 };

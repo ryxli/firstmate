@@ -702,6 +702,7 @@ async function runInner(argv: string[]): Promise<number> {
 
 export default {
 	name: "teardown",
-	describe: "Tear down a finished task's worktree/pane/state, or retire a secondmate home, then print a backlog refresh reminder.",
+	describe: "Remove finished worktree/pane state, or retire a secondmate home.",
+	surface: "captain",
 	run,
 };

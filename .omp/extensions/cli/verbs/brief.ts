@@ -499,6 +499,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "brief",
-	describe: "Scaffold a crewmate brief or persistent secondmate charter, and regenerate/check registry-driven secondmate projections.",
+	describe: "Scaffold a crewmate brief or secondmate charter.",
+	surface: "captain",
 	run,
 };

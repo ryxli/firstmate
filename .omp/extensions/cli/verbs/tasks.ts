@@ -1139,6 +1139,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "tasks",
-	describe: "Canonical backlog ledger + live fleet task system (add/list/show/start/done/reopen/update/block/unblock/hold/unhold/ready/mv/prune/render/fleet).",
+	describe: "Manage the backlog and live fleet tasks.",
+	surface: "captain",
 	run,
 };

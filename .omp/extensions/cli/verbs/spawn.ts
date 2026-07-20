@@ -999,6 +999,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "spawn",
-	describe: "Spawn a direct report: a crewmate in a git worktree, or a secondmate in its isolated firstmate home.",
+	describe: "Spawn a crewmate or secondmate.",
+	surface: "captain",
 	run,
 };

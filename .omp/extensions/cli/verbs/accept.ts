@@ -54,7 +54,11 @@ async function run(argv: string[]): Promise<number> {
 	const args = argv.slice(1);
 	const id = args.find(a => !a.startsWith("-"));
 	if (!id || args.includes("--help") || args.includes("-h")) {
-		process.stderr.write("usage: fm accept <task-id> [--sha <commit>] [--by <who>] [--mode trunk|pr] [--full]\n");
+		process.stderr.write(
+			"usage: fm accept <task-id> [--sha <commit>] [--by <who>] [--mode trunk|pr] [--full]\n" +
+				"Approves the candidate and queues integration.\n" +
+				"Derives from git if needed, freezes the verdict, and closes the worker pane.\n",
+		);
 		return id ? 0 : 1;
 	}
 	const full = args.includes("--full");
@@ -113,6 +117,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "accept",
-	describe: "Accept a task's candidate (derive from git), freeze verdict, close the worker pane, queue integrate.",
+	describe: "Approve a task's candidate and queue it for integration.",
+	surface: "captain",
 	run,
 };

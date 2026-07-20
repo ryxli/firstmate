@@ -275,6 +275,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "start",
-	describe: "Wait for authority, then launch a fresh interactive firstmate OMP session.",
+	describe: "Launch a fresh firstmate OMP session.",
+	surface: "captain",
 	run,
 };

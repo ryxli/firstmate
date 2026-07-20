@@ -61,6 +61,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "revise",
-	describe: "Record a pre-accept correction packet; keep the implementation workspace open.",
+	describe: "Record a pre-accept correction; keep the workspace open.",
+	surface: "captain",
 	run,
 };

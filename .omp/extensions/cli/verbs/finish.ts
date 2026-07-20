@@ -24,6 +24,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "finish",
-	describe: "Finish one accepted task: integrate, land, close backlog, cleanup (resumable, idempotent).",
+	describe: "Integrate, land, and clean up an accepted task.",
+	surface: "captain",
 	run,
 };

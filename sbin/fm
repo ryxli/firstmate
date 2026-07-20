@@ -6,12 +6,9 @@
 // Adding a verb requires adding exactly one file here: there is no separate
 // registry to edit.
 //
-// sbin/fm is a symlink to this file, kept for every existing consumer.
-// Note: Bun resolves an entry-script symlink to its realpath before exposing
-// it via process.argv / import.meta.url, so this script cannot tell whether
-// it was invoked as `fm` or `fm` - both names run identical code. Root
-// help therefore always uses the pre-split fm help contract (frozen,
-// byte-compatible shape); `help` is accepted as a synonym for `--help`.
+// Root `fm --help` is the captain workflow guide (help.ts), not a verb dump.
+// Full inventory: `fm toolbelt`. Nested detail: `fm fleet|home|tasks --help`.
+// `help` is accepted as a synonym for `--help`.
 
 import { readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -22,6 +19,7 @@ import { activeHome, forbiddenInSecondmate, isSecondmateHome } from "../.omp/ext
 interface Verb {
 	name: string;
 	describe: string;
+	surface?: "captain" | "internal";
 	run(argv: string[]): number | Promise<number>;
 }
 
@@ -58,7 +56,7 @@ async function main(): Promise<number> {
 		delete process.env.FM_CONFIG_OVERRIDE;
 	}
 	if (!argv.length || argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
-		output(commandHelp("fm", { secondmate }));
+		output(commandHelp("fm"));
 		return 0;
 	}
 	const forbidden = secondmate ? forbiddenInSecondmate(argv) : null;

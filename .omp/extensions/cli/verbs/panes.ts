@@ -67,6 +67,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "panes",
-	describe: "List herdr panes with detected agent name, agent_status, pane_id.",
+	describe: "List herdr panes and agent status.",
+	surface: "captain",
 	run,
 };

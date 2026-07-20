@@ -79,8 +79,9 @@ function envOr(name: string, fallback: string): string {
 }
 
 function usage(): void {
-	process.stderr.write("usage: fm home-seed <id> <home|-> <project>...\n");
-	process.stderr.write("       fm home-seed validate\n");
+	process.stderr.write("usage: fm home seed <id> <home|-> <project>...\n");
+	process.stderr.write("       fm home seed validate\n");
+	process.stderr.write("       fm home-seed …  # compatibility alias\n");
 	process.stderr.write("       fm link-ship-ext <id|home-path>  # refresh extension symlinks without re-seeding\n");
 }
 

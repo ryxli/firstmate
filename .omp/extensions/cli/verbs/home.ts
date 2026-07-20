@@ -1,10 +1,11 @@
-// fm verb: home - mate-home layout/links and specialist skill isolation.
+// fm verb: home - mate-home layout/links, specialist skill isolation, and seeding.
 //
 // Usage:
 //   fm home <check|repair> <mate|--all>
 //   fm home skills sync <secondmate-id|home-path>
 //   fm home skills check <secondmate-id|home-path>
 //   fm home skills reconcile <secondmate-id|--all>
+//   fm home seed <id> <home|-> <project>...   (alias: fm home-seed …)
 
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -159,13 +160,21 @@ async function homeSkillsCommand(args: string[]): Promise<number> {
 	return 2;
 }
 
+async function homeSeedCommand(args: string[]): Promise<number> {
+	const { default: homeSeed } = await import("./home-seed");
+	return homeSeed.run(["home-seed", ...args]);
+}
+
 async function homeCommand(argv: string[]): Promise<number> {
-	if (argv.length === 1 && (argv[0] === "--help" || argv[0] === "-h")) {
+	if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
 		output(commandHelp("fm home"));
-		return 0;
+		return argv.length === 0 ? 2 : 0;
 	}
 	if (argv[0] === "skills") {
 		return homeSkillsCommand(argv.slice(1));
+	}
+	if (argv[0] === "seed") {
+		return homeSeedCommand(argv.slice(1));
 	}
 	return homeLayoutCommand(argv);
 }
@@ -176,6 +185,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "home",
-	describe: "Mate-home layout, shared-code links, and specialist skill isolation.",
+	describe: "Check or repair mate-home layout and skills.",
+	surface: "captain",
 	run,
 };

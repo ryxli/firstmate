@@ -200,6 +200,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "fleet",
-	describe: "Fleet overview and persistent-mate lifecycle (stop/clean/check).",
+	describe: "Show fleet overview and manage persistent-mate lifecycle.",
+	surface: "captain",
 	run,
 };

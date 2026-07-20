@@ -81,6 +81,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "freeze",
-	describe: "Toggle the global dispatch-freeze flag and per-mate focus locks.",
+	describe: "Toggle dispatch-freeze and per-mate focus locks.",
+	surface: "captain",
 	run,
 };

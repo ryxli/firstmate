@@ -444,6 +444,7 @@ function findFirst(text: string, key: string): string | undefined {
 
 export default {
 	name: "health",
-	describe: "Read-only, bounded health check for the local firstmate fleet.",
+	describe: "Run a quick local fleet health check.",
+	surface: "captain",
 	run,
 };

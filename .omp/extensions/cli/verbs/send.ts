@@ -256,6 +256,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "send",
-	describe: "Steer or control a visible pane (not mate-to-mate communication).",
+	describe: "Steer or control a visible pane.",
+	surface: "captain",
 	run,
 };

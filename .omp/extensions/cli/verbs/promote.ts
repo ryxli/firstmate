@@ -62,6 +62,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "promote",
-	describe: "Flip a scout task's meta kind= to ship in place, restoring teardown protection.",
+	describe: "Promote a scout task to ship.",
+	surface: "captain",
 	run,
 };

@@ -175,6 +175,7 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "peek",
-	describe: "Print a bounded tail of a crewmate pane's output plus a one-line status header.",
+	describe: "Show a bounded tail of a mate's pane output.",
+	surface: "captain",
 	run,
 };
