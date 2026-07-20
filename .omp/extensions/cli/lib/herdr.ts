@@ -247,6 +247,9 @@ export async function herdrReapHuskSlot(slot: string): Promise<boolean> {
 // plain text by default. Note: --lines is not honored by --source visible
 // (herdr always returns the full visible viewport for that source), so this
 // scans the whole visible tail rather than relying on a short window.
+const OMP_COMPOSER_HEADER_RE = /^╭── .+(?: ──|▶────)╮$/;
+const OMP_EMPTY_COMPOSER_BOTTOM_RE = /^╰─( +)─╯$/;
+
 export function paneInputPending(pane: string): boolean {
 	// If the agent is mid-turn, the visible last line is agent output, never
 	// unsubmitted human text. Defer to the busy check so a working pane is
@@ -256,6 +259,20 @@ export function paneInputPending(pane: string): boolean {
 	const res = spawnSync("herdr", ["pane", "read", pane, "--lines", "3", "--source", "visible"], { encoding: "utf8" });
 	const raw = (res.stdout ?? "").split(/\r?\n/).filter(line => !/^[ \t]*$/.test(line));
 	if (raw.length === 0) return false;
+
+	// OMP renders its status inside the composer's rounded top border. When
+	// empty, the exact final compositor is that header immediately followed by
+	// a spaces-only rounded bottom border. Recognize the bounded final frame
+	// before scanning historical viewport content, which would otherwise leave
+	// the decorated status row as a false draft candidate. Any interior row or
+	// non-space bottom content breaks this exact match and remains fail-closed.
+	if (
+		raw.length >= 2 &&
+		OMP_COMPOSER_HEADER_RE.test(raw[raw.length - 2]) &&
+		OMP_EMPTY_COMPOSER_BOTTOM_RE.test(raw[raw.length - 1])
+	) {
+		return false;
+	}
 
 	let found = false;
 	let result = "";
@@ -270,11 +287,11 @@ export function paneInputPending(pane: string): boolean {
 	// pending/not-pending). A border-only row (e.g. omp/opus's "╰── … ──╯", or
 	// Claude Code's plain rule lines) collapses to whitespace once box-drawing
 	// chrome is stripped and is skipped the same way, since it carries no
-	// signal either way. Nothing real follows the composer's actual content
-	// line in these layouts, so the last surviving candidate is always that
-	// content line. "result" (not "stripped") carries the winning candidate
-	// across iterations, since a later skipped border/chrome row must not
-	// clobber it.
+	// signal either way. For the remaining known layouts, nothing real follows
+	// the composer's actual content line, so the last surviving candidate is
+	// that content line. "result" (not "stripped") carries the winning
+	// candidate across iterations, since a later skipped border/chrome row must
+	// not clobber it.
 	for (const line of raw) {
 		if (line.includes("shift+tab to cycle") || line.includes("for shortcuts")) continue;
 		let stripped = line

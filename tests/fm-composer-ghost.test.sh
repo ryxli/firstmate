@@ -210,6 +210,33 @@ test_current_claude_code_real_draft_is_pending() {
   pass "fm_pane_input_pending: current Claude Code real draft is pending"
 }
 
+test_current_omp_empty_composer_is_not_pending() {
+  local dir fb
+  dir="$TMP_ROOT/current-omp-empty"; mkdir -p "$dir"
+  fb=$(make_fake_herdr "$dir")
+  # Current OMP renders its decorated status in the rounded top border and
+  # collapses an empty composer to the rounded bottom border. Visible pane
+  # reads retain earlier output above this final compositor frame.
+  export FM_FAKE_PANE_LINES=$'previous agent output\n\n╭──  GPT-5.6-Sol · 󰪣 high   firstmate/fm-send-omp-composer-fix   fm/fm-send-omp-composer-fix ────  42K  $0.36 (sub)   12.9%/272K 󰁨 ──╮\n╰─                                                                 ─╯'
+  export FM_FAKE_AGENT_STATUS="idle"
+  if PATH="$fb:$PATH" ts_pane_input_pending "w1:p1"; then
+    fail "current OMP empty composer falsely read as pending"
+  fi
+  pass "fm_pane_input_pending: current OMP empty composer is NOT pending"
+}
+
+test_current_omp_real_draft_is_pending() {
+  local dir fb
+  dir="$TMP_ROOT/current-omp-draft"; mkdir -p "$dir"
+  fb=$(make_fake_herdr "$dir")
+  # Same current OMP status/composer frame, with real human-typed content.
+  export FM_FAKE_PANE_LINES=$'previous agent output\n\n╭──  GPT-5.6-Sol · 󰪣 high   firstmate/fm-send-omp-composer-fix   fm/fm-send-omp-composer-fix ────  42K  $0.36 (sub)   12.9%/272K 󰁨 ──╮\n│ cap typed a draft                                              │\n╰─                                                                 ─╯'
+  export FM_FAKE_AGENT_STATUS="idle"
+  PATH="$fb:$PATH" ts_pane_input_pending "w1:p1" \
+    || fail "real typed text in current OMP composer not detected as pending"
+  pass "fm_pane_input_pending: current OMP real draft is pending"
+}
+
 test_working_status_is_busy
 test_idle_status_is_not_busy
 test_bordered_empty_composer_is_not_pending
@@ -220,3 +247,5 @@ test_working_status_not_pending
 test_rounded_bottom_border_is_not_pending
 test_current_claude_code_empty_composer_is_not_pending
 test_current_claude_code_real_draft_is_pending
+test_current_omp_empty_composer_is_not_pending
+test_current_omp_real_draft_is_pending

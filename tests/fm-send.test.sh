@@ -157,6 +157,55 @@ test_send_blocks_human_draft_in_current_claude_code_ui() {
   pass "fm-send still blocks a human draft in the current Claude Code UI"
 }
 
+test_send_proceeds_on_empty_current_omp_composer() {
+  local dir home fb count
+  dir="$TMP_ROOT/empty-current-omp"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  # Current OMP layout: the status row is the composer's rounded top border,
+  # and an empty composer has only the rounded bottom border beneath it.
+  # Historical output remains in `pane read --source visible`, so neither it
+  # nor the decorated status row may be mistaken for an unsent draft.
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" \
+    FM_FAKE_PANE_LINES=$'previous agent output\n\n╭──  GPT-5.6-Sol · 󰪣 high   firstmate/fm-send-omp-composer-fix   fm/fm-send-omp-composer-fix ────  42K  $0.36 (sub)   12.9%/272K 󰁨 ──╮\n╰─                                                                 ─╯' \
+    "$ROOT/sbin/fm" send fm-task "atomic work" \
+    || fail "fm-send blocked on a visibly empty current OMP composer"
+
+  count=$(grep -cF 'herdr pane run w1:p1 atomic work' "$dir/herdr.log")
+  [ "$count" = "1" ] || fail "expected one pane run, got $count"
+  assert_no_sendq "$home"
+  pass "fm-send proceeds exactly once on an empty current OMP composer"
+}
+
+test_send_blocks_human_draft_in_current_omp_composer() {
+  local dir home fb rc count
+  dir="$TMP_ROOT/draft-current-omp"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home"
+  fb=$(make_fake_herdr "$dir")
+
+  # Same current OMP status/composer frame, with a real composer content row.
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" \
+    FM_FAKE_PANE_LINES=$'previous agent output\n\n╭──  GPT-5.6-Sol · 󰪣 high   firstmate/fm-send-omp-composer-fix   fm/fm-send-omp-composer-fix ────  42K  $0.36 (sub)   12.9%/272K 󰁨 ──╮\n│ cap typed a draft                                              │\n╰─                                                                 ─╯' \
+    "$ROOT/sbin/fm" send fm-task "must not land" >/dev/null 2>"$dir/err" \
+    || rc=$?
+
+  [ "$rc" = "75" ] || fail "expected OMP unsent draft to exit 75, got $rc"
+  count=$(grep -cF 'herdr pane run ' "$dir/herdr.log" || true)
+  [ "$count" = "0" ] || fail "fm-send wrote into an OMP human draft"
+  grep -F 'text was not sent' "$dir/err" >/dev/null \
+    || fail "fm-send did not report fail-closed OMP draft handling"
+  assert_no_sendq "$home"
+  pass "fm-send blocks a human draft in the current OMP composer"
+}
+
 test_send_failure_is_not_retried() {
   local dir home fb rc count
   dir="$TMP_ROOT/failure"
@@ -251,6 +300,8 @@ test_send_submits_once
 test_send_blocks_human_draft
 test_send_proceeds_on_empty_current_claude_code_composer
 test_send_blocks_human_draft_in_current_claude_code_ui
+test_send_proceeds_on_empty_current_omp_composer
+test_send_blocks_human_draft_in_current_omp_composer
 test_send_failure_is_not_retried
 test_sequential_sends_do_not_amplify
 test_key_bypasses_composer_guard
