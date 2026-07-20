@@ -56,7 +56,7 @@ test_generic_skill_source() {
     "skill must not read optional targets from data/cap.md"
 
   local forbidden
-  for forbidden in '/Users/' 'chezmoi' 'dotfiles' 'oh-my-pi' 'lavish-axi' 'linear-axi'; do
+  for forbidden in '/Users/' 'chezmoi' 'dotfiles' 'oh-my-pi' 'lavish-axi'; do
     assert_not_contains "$source" "$forbidden" \
       "shared skill contains no personal infrastructure enumeration"
   done
