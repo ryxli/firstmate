@@ -747,7 +747,7 @@ async function run(argv: string[]): Promise<number> {
 		projAbs = validated.value;
 		wt = projAbs;
 		const charterPath = `${projAbs}/data/charter.md`;
-		brief = existsSync(charterPath) ? charterPath : `${data}/${id}/brief.md`;
+		brief = existsSync(charterPath) ? charterPath : `${data}/mates/${id}/brief.md`;
 	} else {
 		const cdRes = cdPwd(resolveProjectDirArg(projects, proj));
 		if (!cdRes.ok) return 1;
