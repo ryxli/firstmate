@@ -570,17 +570,18 @@ function validateFirstmateHomeForSpawn(id: string, home: string, fmRoot: string,
 
 // --- pre-spawn duplicate-pane guard --------------------------------------------
 
-// findMatchingPaneId: the pane_id of the first live herdr pane whose cwd
-// equals <cwd>, or "" when none match OR the match's pane_id is itself empty
-// (mirrors the bash/python guard: an empty printed pane_id never trips the
-// `[ -n "$_guard_pane" ]` check, so it is treated the same as no match).
+// findMatchingPaneId: the pane_id of the first Herdr agent pane whose cwd
+// equals <cwd>, or "" when none match. Plain shell panes can legitimately
+// remain in a persistent mate workspace and must not block a new agent.
 function findMatchingPaneId(cwd: string): string {
 	const res = spawnSync("herdr", ["pane", "list"], { encoding: "utf8" });
 	try {
-		const parsed = JSON.parse(res.stdout ?? "") as { result?: { panes?: Array<{ pane_id?: string; cwd?: string }> } };
+		const parsed = JSON.parse(res.stdout ?? "") as {
+			result?: { panes?: Array<{ pane_id?: string; cwd?: string; agent_session?: unknown }> };
+		};
 		const panes = parsed?.result?.panes ?? [];
 		for (const p of panes) {
-			if (p && p.cwd === cwd) return p.pane_id ?? "";
+			if (p?.agent_session && p.cwd === cwd) return p.pane_id ?? "";
 		}
 	} catch {
 		// best-effort, mirrors the python helper's `2>/dev/null || true`
@@ -588,9 +589,12 @@ function findMatchingPaneId(cwd: string): string {
 	return "";
 }
 
-// recoverMissingRegisteredSecondmateWorkspace: when a registered workspace no
-// longer exists (herdr restarted with a fresh layout), create a replacement
-// workspace and durably update both the registry and this task's meta file.
+// recoverMissingRegisteredSecondmateWorkspace: for a registered secondmate
+// workspace, rename an existing Herdr workspace to the mate display label, or
+// when it is missing (herdr restarted with a fresh layout), create a
+// replacement with --label and durably update registry + meta (rolling back
+// the registry write if meta update fails). Create already names the
+// replacement, so this path never renames again.
 // Returns the (possibly unchanged) workspace to use, or null on failure
 // (having already written the error to stderr).
 function recoverMissingRegisteredSecondmateWorkspace(params: {
@@ -609,7 +613,17 @@ function recoverMissingRegisteredSecondmateWorkspace(params: {
 	if (workspace !== registeredWorkspace) return workspace;
 
 	const getRes = spawnSync("herdr", ["workspace", "get", workspace], { encoding: "utf8" });
-	if (getRes.status === 0) return workspace;
+	if (getRes.status === 0) {
+		// Existing registered workspace: rename to the mate display label before
+		// spawn continues. No durable registry/meta mutation on this path.
+		const renameRes = spawnSync("herdr", ["workspace", "rename", workspace, label], { encoding: "utf8" });
+		if (renameRes.status !== 0) {
+			process.stderr.write(`error: herdr workspace rename failed for secondmate ${id}\n`);
+			process.stderr.write(`${(renameRes.stdout ?? "") + (renameRes.stderr ?? "")}\n`);
+			return null;
+		}
+		return workspace;
+	}
 
 	const combined = (getRes.stdout ?? "") + (getRes.stderr ?? "");
 	if (!/"code":"workspace_not_found"|workspace .+ not found/.test(combined)) {
@@ -618,6 +632,8 @@ function recoverMissingRegisteredSecondmateWorkspace(params: {
 		return null;
 	}
 
+	// Missing registered workspace: create already assigns --label <mate>, so
+	// do not rename again. Registry/meta commits below roll back on failure.
 	const createRes = spawnSync("herdr", ["workspace", "create", "--cwd", projAbs, "--label", label, "--no-focus"], {
 		encoding: "utf8",
 	});
@@ -765,9 +781,8 @@ async function run(argv: string[]): Promise<number> {
 		brief = `${data}/${id}/brief.md`;
 	}
 
-	// Pre-spawn guard: refuse if any herdr pane already has cwd == the
-	// secondmate home. Prevents duplicate spawns when an existing session is
-	// alive but hook-less (agent_status=unknown).
+	// Pre-spawn guard: refuse if a Herdr agent pane already has cwd == the
+	// secondmate home. Plain shell panes in that home are not duplicate mates.
 	if (kind === "secondmate" && !envOrUndefined("FM_SPAWN_FORCE")) {
 		const guardPane = findMatchingPaneId(wt);
 		if (guardPane) {
@@ -872,10 +887,10 @@ async function run(argv: string[]): Promise<number> {
 	}
 	const paneCmd = `${launchCmd}; exec "\${SHELL:-/bin/zsh}" -l`;
 
-	// The tab and pane label are display-only. The unique task id is the
-	// durable herdr registration slot, while the harness keeps its integration
-	// identity.
-	const label = kind === "secondmate" ? (secondmateRegistryValue(data, id, "name") ?? "home") : workerLabel(config, id, envOrUndefined("FM_TASK_LABEL"));
+	// Workspace, tab, and pane labels are display-only. The unique task id is
+	// the durable Herdr registration slot, while the harness keeps its
+	// integration identity.
+	const label = kind === "secondmate" ? (secondmateRegistryValue(data, id, "name") ?? id) : workerLabel(config, id, envOrUndefined("FM_TASK_LABEL"));
 	const agentSlot = id;
 	const agentIdentity = harness;
 

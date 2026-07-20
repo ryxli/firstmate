@@ -99,21 +99,23 @@ export type AgentSlotRead =
 /** Tri-state agent slot → pane binding. Only explicit not-found is absence. */
 export function readAgentSlot(target: string): AgentSlotRead {
 	const res = spawnSync("herdr", ["agent", "get", target], { encoding: "utf8" });
-	const text = typeof res.stdout === "string" ? res.stdout : "";
+	const stdout = typeof res.stdout === "string" ? res.stdout : "";
+	const stderr = typeof res.stderr === "string" ? res.stderr : "";
+	const errorText = stdout + stderr;
 	if (res.error || (res.status ?? 1) !== 0) {
-		if (isExplicitNotFound(text)) return { presence: "absent" };
+		if (isExplicitNotFound(errorText)) return { presence: "absent" };
 		return { presence: "error", reason: res.error?.message || `herdr agent get rc=${res.status ?? 1}` };
 	}
-	if (text.includes('"error"')) {
-		if (isExplicitNotFound(text)) return { presence: "absent" };
-		return { presence: "error", reason: jsonGet(text, "error", "message") || "herdr agent get error" };
+	if (stdout.includes('"error"')) {
+		if (isExplicitNotFound(stdout)) return { presence: "absent" };
+		return { presence: "error", reason: jsonGet(stdout, "error", "message") || "herdr agent get error" };
 	}
-	const paneId = text.match(/"pane_id":"([^"]*)"/)?.[1] ?? "";
+	const paneId = stdout.match(/"pane_id":"([^"]*)"/)?.[1] ?? "";
 	if (!paneId) {
 		// Successful get without a pane_id is malformed, not absence.
 		return { presence: "error", reason: "agent get succeeded without pane_id" };
 	}
-	const status = text.match(/"agent_status":"([^"]*)"/)?.[1] ?? "";
+	const status = stdout.match(/"agent_status":"([^"]*)"/)?.[1] ?? "";
 	return { presence: "present", paneId, status };
 }
 

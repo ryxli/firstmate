@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for the pre-spawn duplicate-pane guard in fm spawn --secondmate.
-# The guard refuses to spawn when a live herdr pane already has cwd == the
-# resolved secondmate home, preventing ghost-session duplicate mates.
+# The guard refuses to spawn when a Herdr agent pane already has cwd == the
+# resolved secondmate home. Plain shell panes in that home are ignored.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -39,23 +39,50 @@ mkdir -p "$FM_TEST_HOME/state" \
          "$FM_TEST_HOME/data" \
          "$FM_TEST_HOME/projects" \
          "$FM_TEST_HOME/config"
+# Harness resolves before the duplicate guard; seed a verified adapter so T1
+# can reach the pane-list check instead of failing closed on 'unknown'.
+printf 'omp\n' > "$FM_TEST_HOME/config/crew-harness"
 
 # Build a minimal valid secondmate home for the given id.
 # Returns the abs path via echo.
 make_sm_home() {
   local id=$1 dir
   dir="$TMP_ROOT/homes/$id"
-  mkdir -p "$dir/sbin" "$dir/data" "$dir/state" "$dir/config" "$dir/projects"
+  mkdir -p "$dir/sbin" "$dir/data" "$dir/state" "$dir/config" "$dir/projects" "$dir/.omp/skills"
   printf '%s\n' "$id" > "$dir/.fm-secondmate-home"
   : > "$dir/AGENTS.md"
+  : > "$dir/config/shared-skills"
+  : > "$dir/config/local-skills"
   ( cd "$dir" && pwd -P )
 }
 
 # Fake herdr: returns a pane list with a single pane whose cwd == $1.
-# When $1 is empty, returns an empty pane list.
+# The optional second argument selects agent (default) or shell.
+# Agent and shell panes use separate literal JSON branches so the fixture
+# never interpolates a JSON fragment into the printf format string.
 make_herdr() {
-  local cwd_fixture=$1
-  cat > "$BIN_DIR/herdr" << SH
+  local cwd_fixture=$1 kind=${2:-agent}
+  if [ "$kind" = agent ]; then
+    cat > "$BIN_DIR/herdr" << SH
+#!/usr/bin/env bash
+case "\${1:-}" in
+  pane)
+    case "\${2:-}" in
+      list)
+        printf '{"id":"cli:pane:list","result":{"panes":['
+        if [ -n "$cwd_fixture" ]; then
+          printf '{"pane_id":"wT:p1","cwd":"%s","agent_status":"unknown","agent_session":{"agent":"omp"}}' "$cwd_fixture"
+        fi
+        printf ']}}\n'
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+exit 1
+SH
+  else
+    cat > "$BIN_DIR/herdr" << SH
 #!/usr/bin/env bash
 case "\${1:-}" in
   pane)
@@ -73,6 +100,7 @@ case "\${1:-}" in
 esac
 exit 1
 SH
+  fi
   chmod +x "$BIN_DIR/herdr"
 }
 
@@ -144,9 +172,22 @@ test_guard_passes_empty_pane_list() {
   pass "T4 guard allows spawn when herdr returns no panes"
 }
 
+# --- T5: a shell in the mate home is not a duplicate agent --------------------
+test_guard_ignores_matching_shell_pane() {
+  local home out
+  home=$(make_sm_home grd-t5)
+  make_herdr "$home" shell
+
+  out=$(run_spawn grd-t5 "$home")
+  printf '%s\n' "$out" | grep -q 'already has a live pane' \
+    && fail "guard treated a shell as a duplicate mate: $out"
+  pass "T5 guard ignores matching shell panes"
+}
+
 test_guard_refuses_matching_pane
 test_guard_passes_no_match
 test_guard_bypassed_with_force
 test_guard_passes_empty_pane_list
+test_guard_ignores_matching_shell_pane
 
 echo "# all fm-spawn-guard tests passed"

@@ -52,10 +52,20 @@ scaffold_secondmate_charter() {
   FM_HOME="$home" FM_SECONDMATE_CHARTER="$charter" "$ROOT/sbin/fm" brief "$id" --secondmate "$@" >/dev/null
 }
 
+# Spawn reconciles home skills before launch; seeded secondmate homes need
+# real skill containers plus explicit empty manifests.
+seed_secondmate_skills_layout() {
+  local home=$1
+  mkdir -p "$home/config" "$home/state" "$home/.omp/skills"
+  [ -f "$home/config/shared-skills" ] || : > "$home/config/shared-skills"
+  [ -f "$home/config/local-skills" ] || : > "$home/config/local-skills"
+}
+
 mark_firstmate_home() {
   local home=$1
   mkdir -p "$home/sbin"
   printf '# Firstmate\n' > "$home/AGENTS.md"
+  seed_secondmate_skills_layout "$home"
 }
 
 make_firstmate_git_root() {
@@ -227,7 +237,9 @@ test_fm_home_parameterization() {
   FM_HOME="$home_one" FM_SECONDMATE_CHARTER='ops domain' "$ROOT/sbin/fm" brief task-c --secondmate app >/dev/null \
     || fail "secondmate brief scaffold failed under FM_HOME"
   brief="$home_one/data/mates/task-c/brief.md"
-  grep -F "through the fleet peer bus" "$brief" >/dev/null || fail "secondmate brief did not use peer-bus escalation"
+  grep -F $'# Charter\nops domain' "$brief" >/dev/null || fail "secondmate brief did not retain its domain charter"
+  grep -F $'# Routing scope\nops domain' "$brief" >/dev/null || fail "secondmate brief did not retain its routing scope"
+  ! grep -F "through the fleet peer bus" "$brief" >/dev/null || fail "secondmate brief retained generic escalation prose"
 
   printf 'project=x\n' > "$home_one/state/task-a.meta"
   FM_HOME="$home_one" FM_GUARD_GRACE=999999 "$ROOT/sbin/fm" pr-check task-a https://github.com/example/repo/pull/1 >/dev/null 2>/dev/null \
@@ -1151,6 +1163,7 @@ test_secondmate_spawn_repairs_shared_links() {
   home="$TMP_ROOT/link-repair-home"
   subhome="$TMP_ROOT/link-repair-subhome"
   mkdir -p "$home/data/link-sub" "$home/state" "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects"
+  seed_secondmate_skills_layout "$subhome"
   printf 'link-sub\n' > "$subhome/.fm-secondmate-home"
   ln -s "$ROOT/AGENTS.md" "$subhome/AGENTS.md"
   ln -s "$ROOT/sbin" "$subhome/sbin"
@@ -1171,28 +1184,28 @@ test_secondmate_spawn_repairs_shared_links() {
 }
 
 test_secondmate_spawn_preserves_shared_link_conflicts() {
-  local home subhome fakebin log err
+  local home subhome fakebin log
   home="$TMP_ROOT/link-conflict-home"
   subhome="$TMP_ROOT/link-conflict-subhome"
-  err="$TMP_ROOT/link-conflict.err"
   mkdir -p "$home/data" "$home/state" "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects" "$subhome/.agents"
+  seed_secondmate_skills_layout "$subhome"
   printf 'link-conflict\n' > "$subhome/.fm-secondmate-home"
   ln -s "$ROOT/AGENTS.md" "$subhome/AGENTS.md"
   ln -s "$ROOT/sbin" "$subhome/sbin"
   printf 'keep this file\n' > "$subhome/.agents/conflict"
+  printf 'persistent charter\n' > "$subhome/data/charter.md"
   printf '%s\n' '- link-conflict - link conflict domain (home: '"$subhome"'; workspace: w-conflict; scope: link conflict domain; projects: alpha; added 2026-07-11)' > "$home/data/secondmates.md"
   fakebin=$(make_fake_herdr "$TMP_ROOT/link-conflict-fake")
   log="$TMP_ROOT/link-conflict-fake/herdr.log"
 
-  if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
-    "$ROOT/sbin/fm" spawn link-conflict "$subhome" codex --secondmate >/dev/null 2>"$err"; then
-    fail "secondmate spawn overwrote a non-empty shared link conflict"
-  fi
-  grep -F 'failed to repair shared-code links' "$err" >/dev/null \
-    || fail "spawn did not explain shared link conflict"
+  # home-link --repair skips a non-empty local .agents tree rather than failing closed.
+  PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
+    "$ROOT/sbin/fm" spawn link-conflict "$subhome" codex --secondmate >/dev/null \
+    || fail "secondmate spawn refused a home with a skipped .agents conflict"
   [ "$(cat "$subhome/.agents/conflict")" = 'keep this file' ] \
     || fail "link repair changed non-empty conflicting content"
-  grep -F 'agent start' "$log" >/dev/null && fail "conflicting home launched an agent"
+  [ ! -L "$subhome/.agents" ] || fail "link repair replaced conflicting .agents with a shared symlink"
+  grep -F -- '--workspace w-conflict' "$log" >/dev/null || fail "conflicting home did not launch"
   pass "secondmate spawn preserves non-empty shared link conflicts"
 }
 
@@ -1235,6 +1248,9 @@ test_secondmate_spawn_requires_seeded_matching_home() {
 
   printf 'domain\n' > "$marker_only/.fm-secondmate-home"
   printf 'charter\n' > "$marker_only/data/charter.md"
+  # Skills reconciliation runs before the AGENTS.md/sbin checks; seed containers
+  # so this case still proves the missing-instruction refusal.
+  seed_secondmate_skills_layout "$marker_only"
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
     "$ROOT/sbin/fm" spawn domain "$marker_only" codex --secondmate >/dev/null 2>"$err"; then
     fail "secondmate spawn accepted a marked home missing AGENTS.md"
@@ -1359,7 +1375,7 @@ EOF
 }
 
 test_recovery_respawn_uses_persistent_home() {
-  local home subhome subhome_abs fakebin meta
+  local home subhome subhome_abs fakebin log meta
   home="$TMP_ROOT/recovery-home"
   subhome="$TMP_ROOT/recovery-subhome"
   mkdir -p "$home/data" "$home/state" "$subhome/data"
@@ -1367,10 +1383,11 @@ test_recovery_respawn_uses_persistent_home() {
   subhome_abs=$(cd "$subhome" && pwd -P)
   printf 'recover-sub\n' > "$subhome/.fm-secondmate-home"
   printf 'charter\n' > "$subhome/data/charter.md"
-  printf '%s\n' '- recover-sub - recovery domain mentions home: '"$TMP_ROOT/ignored-summary-home"' (home: '"$subhome"'; scope: recovery domain mentions home: '"$TMP_ROOT/ignored-scope-home"'; projects: gamma; added 2026-06-22)' > "$home/data/secondmates.md"
+  printf '%s\n' '- recover-sub - recovery domain mentions home: '"$TMP_ROOT/ignored-summary-home"' (home: '"$subhome"'; workspace: w-existing; scope: recovery domain mentions home: '"$TMP_ROOT/ignored-scope-home"'; projects: gamma; added 2026-06-22)' > "$home/data/secondmates.md"
   fakebin=$(make_fake_herdr "$TMP_ROOT/recovery-fake")
+  log="$TMP_ROOT/recovery-fake/herdr.log"
 
-  PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$TMP_ROOT/recovery-fake/herdr.log" \
+  PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$log" \
     "$ROOT/sbin/fm" spawn recover-sub "echo relaunch" --secondmate >/dev/null 2>/dev/null \
     || fail "recovery secondmate respawn failed"
 
@@ -1378,6 +1395,8 @@ test_recovery_respawn_uses_persistent_home() {
   grep -Fx "home=$subhome_abs" "$meta" >/dev/null || fail "respawn did not preserve persistent home from meta/registry"
   grep -Fx 'projects=gamma' "$meta" >/dev/null || fail "respawn did not preserve project clone list from registry"
   grep -Fx 'pane=w1:p1' "$meta" >/dev/null || fail "respawn did not reconstruct the direct report window"
+  grep -F 'workspace rename w-existing recover-sub' "$log" >/dev/null \
+    || fail "respawn did not name the registered workspace after the mate id"
   pass "restart recovery can respawn a secondmate from durable registry and charter"
 }
 
@@ -1386,6 +1405,7 @@ test_recovery_respawn_replaces_missing_registered_workspace() {
   home="$TMP_ROOT/missing-workspace-recovery-home"
   subhome="$TMP_ROOT/missing-workspace-recovery-subhome"
   mkdir -p "$home/data" "$home/state" "$home/config" "$subhome/config" "$subhome/data" "$subhome/projects" "$subhome/state"
+  seed_secondmate_skills_layout "$subhome"
   subhome_abs=$(cd "$subhome" && pwd -P)
   printf 'bull\n' > "$subhome/.fm-secondmate-home"
   printf 'schema_version=1\nname=Bull\n' > "$subhome/config/identity"
@@ -1418,6 +1438,8 @@ EOF
   grep -F 'workspace get w-missing' "$log" >/dev/null || fail "recovery did not verify the recorded workspace"
   grep -F "workspace create --cwd $subhome_abs --label Bull --no-focus" "$log" >/dev/null \
     || fail "recovery did not create a replacement workspace with the registered display name"
+  grep -F 'workspace rename w-replacement' "$log" >/dev/null \
+    && fail "recovery renamed a replacement workspace that was already created with the mate label"
   grep -F 'worktree create' "$log" >/dev/null && fail "recovery recreated the persistent home"
   grep -F -- '--workspace w-replacement' "$log" >/dev/null || fail "spawn did not use the replacement workspace"
   grep -F 'omp --append-system-prompt=' "$log" >/dev/null || fail "recovery did not inject the runtime role contract"
@@ -2066,27 +2088,19 @@ test_secondmate_charter_brief_is_idle_by_default() {
   scaffold_secondmate_charter "$home" idle-sm 'feature work for alpha' alpha
   brief="$home/data/mates/idle-sm/brief.md"
   [ -f "$brief" ] || fail "secondmate charter brief was not scaffolded"
-  # Idle contract: waits for routed work, never self-initiates.
-  grep -F 'go idle and wait silently for the main firstmate' "$brief" >/dev/null \
-    || fail "charter brief does not tell the secondmate to go idle and wait for routed work"
-  grep -F 'Act only on tasks the main firstmate routes to you' "$brief" >/dev/null \
-    || fail "charter brief does not restrict work to routed tasks"
-  grep -F 'never spawn a survey, audit, or any self-directed' "$brief" >/dev/null \
-    || fail "charter brief does not forbid self-initiated survey/audit work"
-  grep -F 'state the diagnostic intent first, then send short human-legible expert commands one by one' "$brief" >/dev/null \
-    || fail "charter brief does not teach the visible-pane command style"
-  grep -F 'Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane' "$brief" >/dev/null \
-    || fail "charter brief does not forbid noisy visible-pane command blobs"
-  # Reconcile-on-startup must remain: bootstrap and recovery still run, scoped to own work.
-  grep -F 'run normal firstmate bootstrap and recovery' "$brief" >/dev/null \
-    || fail "charter brief dropped the bootstrap/recovery reconciliation step"
-  grep -F 'only to RECONCILE work that is already yours' "$brief" >/dev/null \
-    || fail "charter brief does not scope startup work to reconciling existing work"
-  # Regression guard: the over-broad phrasing that got misread as "go find work" is gone.
-  if grep -F 'then supervise work that matches your scope' "$brief" >/dev/null; then
-    fail "charter brief still uses the over-broad 'supervise work that matches your scope' phrasing"
-  fi
-  pass "secondmate charter brief is idle by default and does not self-initiate work"
+  # Lean charter projection: identity/scope live in the registry; the brief is
+  # the generated charter/scope/projects surface plus a mate-owned block.
+  grep -F $'# Charter\nfeature work for alpha' "$brief" >/dev/null \
+    || fail "charter brief did not retain its domain charter"
+  grep -F $'# Routing scope\nfeature work for alpha' "$brief" >/dev/null \
+    || fail "charter brief did not retain its routing scope"
+  grep -F -- '- alpha' "$brief" >/dev/null || fail "charter brief did not retain its registered project"
+  grep -F '<!-- BEGIN MATE-OWNED NOTES:' "$brief" >/dev/null || fail "charter brief omitted its mate-owned block"
+  ! grep -F 'go idle and wait silently for the main firstmate' "$brief" >/dev/null \
+    || fail "charter brief retained retired idle-contract prose"
+  ! grep -F 'You are a secondmate' "$brief" >/dev/null \
+    || fail "charter brief restated runtime identity"
+  pass "secondmate charter brief stays a lean registry projection"
 }
 
 test_tasks_mv_moves_in_scope_items() {

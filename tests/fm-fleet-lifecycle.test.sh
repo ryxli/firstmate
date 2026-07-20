@@ -36,7 +36,11 @@ case "${1:-}" in
     case "${2:-}" in
       get)
         if [ -n "${FM_FAKE_NO_SLOT:-}" ]; then
-          printf '{"error":"not found"}\n'
+          if [ -n "${FM_FAKE_NOT_FOUND_STDERR:-}" ]; then
+            printf '{"error":{"code":"agent_not_found","message":"agent not found"}}\n' >&2
+          else
+            printf '{"error":"not found"}\n'
+          fi
           exit 1
         fi
         # After agent.rename, only the renamed slot binds; fm-<id> is absent.
@@ -246,6 +250,7 @@ test_stop_already_stopped() {
   fb=$(make_fake_herdr "$dir")
 
   rc=0
+  FM_FAKE_NOT_FOUND_STDERR=1 \
   PATH="$fb:$PATH" FM_HOME="$ctrl" FM_FAKE_NO_SLOT=1 \
     "$ROOT/sbin/fm" fleet stop alice >"$dir/out" 2>"$dir/err" || rc=$?
   grep -q 'state=already-stopped mate=alice' "$dir/out" || fail "expected already-stopped: $(cat "$dir/out" "$dir/err")"
