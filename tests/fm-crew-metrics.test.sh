@@ -71,20 +71,27 @@ assert_contains "$out" "--home" "help text documents --home"
 assert_not_contains "$out" "/Users/" "help text must not leak any cap absolute path"
 pass "fm crew-metrics --help is a clean no-op from a neutral cwd/HOME"
 
-# --- crew-metrics.py wires --home's default to fm_paths.fm_home(), which
-#     honors FM_HOME, instead of a hardcoded cap absolute -----------------
-grep -q 'default=str(fm_paths.fm_home())' "$EVAL_DIR/crew-metrics.py" \
-  || fail "crew-metrics.py --home default no longer derives from fm_paths.fm_home()"
+# --- --home default honors FM_HOME (black-box: omit --home, seed backlog under
+#     FM_HOME, stub omp, assert outcomes come from that home's backlog) -------
 FAKE_HOME="$TMP/fake-home"
-mkdir -p "$FAKE_HOME"
-FAKE_HOME="$(cd -P "$FAKE_HOME" && pwd)"  # canonicalize (e.g. macOS /tmp -> /private/var symlink) to match fm_paths' physical resolution
-resolved_home="$(cd "$TMP" && EVAL_DIR="$EVAL_DIR" FM_HOME="$FAKE_HOME" python3 -c '
-import os, sys
-sys.path.insert(0, os.environ["EVAL_DIR"])
-import fm_paths
-print(fm_paths.fm_home())
-')"
-[ "$resolved_home" = "$FAKE_HOME" ] || fail "fm_paths.fm_home() = '$resolved_home', want FM_HOME override '$FAKE_HOME'"
+mkdir -p "$FAKE_HOME/data" "$FAKE_HOME/state"
+FAKE_HOME="$(cd -P "$FAKE_HOME" && pwd)"
+cat > "$FAKE_HOME/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+
+## Done
+- [x] probe-landed-task - finished
+EOF
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "{\"byFolder\":[]}"' > "$TMP/fake-omp"
+chmod +x "$TMP/fake-omp"
+metrics_out="$(
+  cd "$TMP" && PATH="$TMP:$PATH" FM_HOME="$FAKE_HOME" \
+    python3 "$EVAL_DIR/crew-metrics.py" --json --omp fake-omp
+)" || fail "crew-metrics --json under FM_HOME failed"
+landed="$(printf '%s\n' "$metrics_out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["outcomes"]["landed"])')"
+[ "$landed" = "1" ] || fail "expected landed=1 from FM_HOME backlog, got '$landed'"$'\n'"$metrics_out"
 pass "crew-metrics --home default honors FM_HOME instead of a hardcoded path"
 
 # --- fm_paths.code_root() derives the repo root from its own on-disk location,

@@ -76,17 +76,17 @@ describe("MATES lens: persistent roster with presence + load", () => {
 		expect(snap.mates.length).toBe(2);
 	});
 
-	it("firstmate first: role firstmate, idle, load 1", () => {
-		const m = snap.mates[0];
-		expect(m?.name).toBe("firstmate");
+	it("firstmate: role firstmate, idle, load 1", () => {
+		const m = snap.mates.find(mate => mate.name === "firstmate");
+		expect(m).toBeDefined();
 		expect(m?.role).toBe("firstmate");
 		expect(m?.herdrStatus).toBe("idle");
 		expect(m?.load).toBe(1);
 	});
 
 	it("plum: secondmate, working, load 1", () => {
-		const m = snap.mates[1];
-		expect(m?.name).toBe("plum");
+		const m = snap.mates.find(mate => mate.name === "plum");
+		expect(m).toBeDefined();
 		expect(m?.role).toBe("secondmate");
 		expect(m?.herdrStatus).toBe("working");
 		expect(m?.load).toBe(1);
@@ -130,8 +130,7 @@ describe("TASK lens: every backlog item tagged owner/project/state/worker", () =
 	});
 
 	it("only the stray pane is unaffiliated", () => {
-		expect(snap.otherLivePanes.length).toBe(1);
-		expect(snap.otherLivePanes[0]?.name).toBe("stray");
+		expect(snap.otherLivePanes.map(p => p.name).sort()).toEqual(["stray"]);
 	});
 });
 

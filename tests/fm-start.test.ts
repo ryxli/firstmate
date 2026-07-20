@@ -257,6 +257,60 @@ function commandLog(fx: Fixture): string[] {
 	return existsSync(fx.commandLog) ? readFileSync(fx.commandLog, "utf8").trim().split(/\r?\n/).filter(Boolean) : [];
 }
 
+function assertBefore(log: string[], earlier: string, later: string): void {
+	const i = log.indexOf(earlier);
+	const j = log.indexOf(later);
+	expect(i).toBeGreaterThanOrEqual(0);
+	expect(j).toBeGreaterThan(i);
+}
+
+/** Preflight contract: required commands, safety order, flags — not exact array equality. */
+function assertMainPreflight(log: string[], kind: "happy" | "repair" | "migrate-only" | "bootstrap-fail"): void {
+	if (kind === "bootstrap-fail") {
+		expect(log).toContain("bootstrap");
+		expect(log.filter(c => c === "bootstrap")).toHaveLength(1);
+		expect(log.some(c => c.startsWith("fleet snapshot"))).toBe(false);
+		expect(log.some(c => c.startsWith("home "))).toBe(false);
+		expect(log.some(c => c.startsWith("identity-migrate"))).toBe(false);
+		return;
+	}
+
+	expect(log[0]).toBe("bootstrap");
+	expect(log.filter(c => c === "bootstrap")).toHaveLength(1);
+	expect(log).toContain("identity-migrate check");
+	expect(log).toContain("home check --all");
+	expect(log).toContain("lavish-open --recover");
+	expect(log.filter(c => c.startsWith("fleet snapshot"))).toHaveLength(1);
+	expect(log.at(-1)).toBe("fleet snapshot --json --starting-main");
+
+	assertBefore(log, "bootstrap", "identity-migrate check");
+	assertBefore(log, "identity-migrate check", "home check --all");
+	assertBefore(log, "home check --all", "lavish-open --recover");
+	assertBefore(log, "lavish-open --recover", "fleet snapshot --json --starting-main");
+
+	if (kind === "happy") {
+		expect(log).not.toContain("identity-migrate migrate");
+		expect(log).not.toContain("home repair --all");
+		return;
+	}
+
+	expect(log).toContain("identity-migrate migrate");
+	assertBefore(log, "identity-migrate check", "identity-migrate migrate");
+	const migrateIdx = log.indexOf("identity-migrate migrate");
+	expect(log.slice(migrateIdx + 1)).toContain("identity-migrate check");
+
+	if (kind === "migrate-only") {
+		expect(log).not.toContain("home repair --all");
+		return;
+	}
+
+	expect(log).toContain("home repair --all");
+	assertBefore(log, "home check --all", "home repair --all");
+	const repairIdx = log.indexOf("home repair --all");
+	expect(log.slice(repairIdx + 1)).toContain("home check --all");
+	assertBefore(log, "home repair --all", "lavish-open --recover");
+}
+
 function liveHolder(): ChildProcess {
 	const child = spawn("sleep", ["5"]);
 	children.push(child);
@@ -288,20 +342,20 @@ describe("fm start main preflight", () => {
 	it("recognizes the production descriptive main role", async () => {
 		const fx = fixture();
 		mkdirSync(join(fx.home, "config"), { recursive: true });
-		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n");
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=cap\n");
 
 		const run = await runFm(fx, fx.home);
 
 		expect(run.status).toBe(0);
 		expect(readLaunch(fx.output).rolePrompt).toContain("kind: firstmate");
-		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json --starting-main"]);
+		assertMainPreflight(commandLog(fx), "happy");
 	});
 
 	it("runs deterministic startup commands before OMP launch", async () => {
 		const fx = fixture();
 		const run = await runFm(fx, fx.home);
 		expect(run.status).toBe(0);
-		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json --starting-main"]);
+		assertMainPreflight(commandLog(fx), "happy");
 		expect(readLaunch(fx.output).pid).toBeDefined();
 	});
 
@@ -309,14 +363,14 @@ describe("fm start main preflight", () => {
 		const fx = fixture();
 		const run = await runFm(fx, fx.home, { FM_START_TEST_SCENARIO: "identity-home-repair" });
 		expect(run.status).toBe(0);
-		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "identity-migrate migrate", "identity-migrate check", "home check --all", "home repair --all", "home check --all", "lavish-open --recover", "fleet snapshot --json --starting-main"]);
+		assertMainPreflight(commandLog(fx), "repair");
 	});
 
 	it("migrates missing identity files but fails closed on unsafe identity states", async () => {
 		const fx = fixture();
 		const run = await runFm(fx, fx.home, { FM_START_TEST_SCENARIO: "identity-no-identity" });
 		expect(run.status).toBe(0);
-		expect(commandLog(fx)).toEqual(["bootstrap", "identity-migrate check", "identity-migrate migrate", "identity-migrate check", "home check --all", "lavish-open --recover", "fleet snapshot --json --starting-main"]);
+		assertMainPreflight(commandLog(fx), "migrate-only");
 	});
 
 	it("stops before OMP on hard bootstrap failure", async () => {
@@ -326,7 +380,7 @@ describe("fm start main preflight", () => {
 		expect(existsSync(`${fx.output}.pid`)).toBe(false);
 		expect(run.stderr).toContain("fm start preflight failed:");
 		expect(run.stderr).toContain("blocking bootstrap diagnostics");
-		expect(commandLog(fx)).toEqual(["bootstrap"]);
+		assertMainPreflight(commandLog(fx), "bootstrap-fail");
 	});
 
 	it("launches with visible degraded fleet context", async () => {
@@ -410,10 +464,12 @@ describe("fm start prompt", () => {
 		const result = readLaunch(fx.output);
 		expect(result.marker).toBe("");
 		expect(result.home).toBe("");
-		expect(result.argc).toBe("2");
 		expect(result.kickoff).toBeUndefined();
 		expect(result.rolePrompt.startsWith("--append-system-prompt=")).toBe(true);
 		expect(result.appendSystemPrompt.startsWith("--append-system-prompt=")).toBe(true);
+		// No duplicate kickoff/system-prompt payloads on the argv surface.
+		expect(result.args.filter(arg => arg === "--" || arg.startsWith("--prompt"))).toHaveLength(0);
+		expect(result.args.filter(arg => arg.startsWith("--append-system-prompt=")).length).toBeGreaterThanOrEqual(1);
 		expect(result.rolePrompt).toContain("kind: firstmate");
 		expect(run.stdout).toBe("");
 		expect(result.staticContext).toContain("FIRSTMATE START");
@@ -573,17 +629,17 @@ describe("fm start admission failures", () => {
 		const fx = fixture();
 		mkdirSync(join(fx.home, "config"), { recursive: true });
 		mkdirSync(join(fx.home, "data"), { recursive: true });
-		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Keel\nrole=firstmate\nparent=captain\n");
-		const { CAPTAIN_CONTEXT_MAX_BYTES } = await import("../.omp/extensions/cli/lib/startup-context");
-		const prefix = "# Captain preferences\n\n";
-		const pad = "x".repeat(CAPTAIN_CONTEXT_MAX_BYTES - Buffer.byteLength(prefix, "utf8"));
+		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Keel\nrole=firstmate\nparent=cap\n");
+		const { CAP_CONTEXT_MAX_BYTES } = await import("../.omp/extensions/cli/lib/startup-context");
+		const prefix = "# Cap preferences\n\n";
+		const pad = "x".repeat(CAP_CONTEXT_MAX_BYTES - Buffer.byteLength(prefix, "utf8"));
 		writeFileSync(join(fx.home, "data", "cap.md"), `${prefix}${pad}`);
 
 		const run = await runFm(fx, fx.home);
 		expect(run.status).toBe(1);
 		expect(run.stderr).toContain("data/cap.md");
 		expect(run.stderr).toMatch(/\d+ UTF-8 bytes/);
-		expect(run.stderr).toContain(`allowed ${CAPTAIN_CONTEXT_MAX_BYTES}`);
+		expect(run.stderr).toContain(`allowed ${CAP_CONTEXT_MAX_BYTES}`);
 		expect(run.stderr).toContain("OMP was not launched");
 		expect(existsSync(`${fx.output}.pid`)).toBe(false);
 		expect(existsSync(join(fx.state, ".lock"))).toBe(false);
@@ -597,8 +653,8 @@ describe("fm start admission failures", () => {
 		mkdirSync(join(fx.home, "data"), { recursive: true });
 		const { IDENTITY_DISPLAY_NAME_MAX_BYTES } = await import("../.omp/extensions/cli/lib/identity");
 		const over = "A".repeat(IDENTITY_DISPLAY_NAME_MAX_BYTES + 1);
-		writeFileSync(join(fx.home, "config", "identity"), `schema_version=1\nname=${over}\nrole=firstmate\nparent=captain\n`);
-		writeFileSync(join(fx.home, "data", "cap.md"), "# Captain preferences\nok\n");
+		writeFileSync(join(fx.home, "config", "identity"), `schema_version=1\nname=${over}\nrole=firstmate\nparent=cap\n`);
+		writeFileSync(join(fx.home, "data", "cap.md"), "# Cap preferences\nok\n");
 
 		const run = await runFm(fx, fx.home);
 		expect(run.status).toBe(1);

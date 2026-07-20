@@ -38,34 +38,64 @@ make_home() {
   ln -s "$code/.omp/extensions/ship-ext.ts" "$home/.omp/extensions/ship-ext.ts"
 }
 
-fingerprint() {
-  # Stable content fingerprint of mutable skill surfaces (excludes receipt timestamps).
+# Semantic skill-surface snapshot (parsed sets + managed links). Keeps receipt
+# link map for activation/managed-link freshness; ignores raw YAML key order.
+skill_state() {
   local home=$1
-  {
-    printf 'SHARED\n'; [ -f "$home/config/shared-skills" ] && cat "$home/config/shared-skills"
-    printf 'LOCAL\n'; [ -f "$home/config/local-skills" ] && cat "$home/config/local-skills"
-    printf 'OMP\n'; [ -f "$home/config/omp.yml" ] && cat "$home/config/omp.yml"
-    printf 'SKILLS\n'
-    if [ -d "$home/.omp/skills" ]; then
-      find "$home/.omp/skills" -maxdepth 1 \( -type l -o -type d \) ! -name skills | sort | while read -r p; do
-        name=$(basename "$p")
-        if [ -L "$p" ]; then
-          printf 'L %s -> %s\n' "$name" "$(readlink "$p")"
-        else
-          printf 'D %s\n' "$name"
-        fi
-      done
-    fi
-    printf 'AGENTS\n'
-    if [ -L "$home/.agents" ]; then printf 'L -> %s\n' "$(readlink "$home/.agents")"
-    elif [ -e "$home/.agents" ]; then printf 'E\n'
-    else printf '%s\n' '-' ; fi
-    printf 'RECEIPT_LINKS\n'
-    if [ -f "$home/state/home-skills.receipt.json" ]; then
-      bun -e 'const j=JSON.parse(await Bun.file(process.argv[1]).text()); console.log(JSON.stringify(j.links,Object.keys(j.links).sort()))' \
-        "$home/state/home-skills.receipt.json"
-    fi
-  } | shasum -a 256 | awk '{print $1}'
+  bun -e '
+    import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync } from "node:fs";
+    import { join } from "node:path";
+    const home = process.argv[1];
+    const lines = (rel) => {
+      const p = join(home, rel);
+      if (!existsSync(p)) return null;
+      return readFileSync(p, "utf8").split(/\r?\n/).map(s => s.trim()).filter(Boolean).sort();
+    };
+    const links = {};
+    const skillsDir = join(home, ".omp/skills");
+    if (existsSync(skillsDir)) {
+      for (const name of readdirSync(skillsDir).sort()) {
+        if (name === "skills") continue;
+        const p = join(skillsDir, name);
+        const st = lstatSync(p);
+        if (st.isSymbolicLink()) links[name] = { kind: "link", target: readlinkSync(p) };
+        else if (st.isDirectory()) links[name] = { kind: "dir" };
+      }
+    }
+    let includeSkills = null, enabled = null, keep = null, model = null, ompRaw = null;
+    const ompPath = join(home, "config/omp.yml");
+    if (existsSync(ompPath)) {
+      ompRaw = readFileSync(ompPath, "utf8");
+      try {
+        const y = Bun.YAML.parse(ompRaw);
+        includeSkills = Array.isArray(y?.skills?.includeSkills) ? [...y.skills.includeSkills].sort() : y?.skills?.includeSkills ?? null;
+        enabled = y?.skills?.enabled ?? null;
+        keep = y?.keep ?? null;
+        model = y?.model ?? null;
+        ompRaw = null; // parsed OK — do not fingerprint raw text
+      } catch {
+        // Keep raw bytes only when unparseable so fail-closed cases still detect mutation.
+      }
+    }
+    let receiptLinks = null;
+    const receiptPath = join(home, "state/home-skills.receipt.json");
+    if (existsSync(receiptPath)) {
+      const j = JSON.parse(readFileSync(receiptPath, "utf8"));
+      const raw = j.links && typeof j.links === "object" ? j.links : {};
+      receiptLinks = Object.fromEntries(Object.keys(raw).sort().map(k => [k, raw[k]]));
+    }
+    let agents = "-";
+    const agentsPath = join(home, ".agents");
+    if (existsSync(agentsPath)) {
+      const st = lstatSync(agentsPath);
+      agents = st.isSymbolicLink() ? `L:${readlinkSync(agentsPath)}` : "E";
+    }
+    process.stdout.write(JSON.stringify({
+      shared: lines("config/shared-skills"),
+      local: lines("config/local-skills"),
+      includeSkills, enabled, keep, model, ompRaw, links, receiptLinks, agents,
+    }));
+  ' "$home"
 }
 
 # --- 1/2/9/10: effective set, exclusions, idempotency, unrelated overlay fields ---
@@ -109,13 +139,13 @@ test_effective_union_and_exclusions() {
     }
   ' "$home/config/omp.yml" || fail "includeSkills not exact sorted effective set"
 
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null \
     || fail "idempotent sync failed"
   FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$FM" home skills check "$home" >/dev/null \
     || fail "idempotent check failed"
-  after=$(fingerprint "$home")
-  [ "$before" = "$after" ] || fail "idempotent sync mutated fingerprint"
+  after=$(skill_state "$home")
+  [ "$before" = "$after" ] || fail "idempotent sync mutated skill state"
   pass "effective union, exclusions, overlay preserve, idempotency"
 }
 
@@ -205,28 +235,28 @@ test_fail_closed_zero_mutation() {
   : > "$home/config/local-skills"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "baseline sync failed"
 
-  # invalid glob name — fingerprint after intentional manifest edit
+  # invalid glob name — skill_state after intentional manifest edit
   printf '%s\n' 'core-*' > "$home/config/shared-skills"
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted glob name"; fi
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "glob name mutated state"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "glob name mutated state"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after glob failed"
 
   # duplicate across sources (local real dir claiming shared name)
   rm -f "$home/.omp/skills/core-a"
   write_skill "$home/.omp/skills/core-a" core-a
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted duplicate"; fi
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "duplicate mutated state"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "duplicate mutated state"
   rm -rf "$home/.omp/skills/core-a"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after duplicate failed"
 
   # missing source
   printf '%s\n' 'missing-skill' > "$home/config/shared-skills"
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted missing source"; fi
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "missing source mutated"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "missing source mutated"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after missing failed"
 
@@ -234,25 +264,25 @@ test_fail_closed_zero_mutation() {
   mkdir -p "$code/.agents/skills/bad-name"
   printf -- '---\nname: other-name\ndescription: x\n---\n' > "$code/.agents/skills/bad-name/SKILL.md"
   printf '%s\n' 'bad-name' > "$home/config/shared-skills"
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted name mismatch"; fi
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "mismatch mutated"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "mismatch mutated"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after mismatch failed"
 
   # foreign link
   ln -sfn /tmp/foreign-skill "$home/.omp/skills/foreign"
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted foreign link"; fi
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "foreign link mutated state"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "foreign link mutated state"
   rm -f "$home/.omp/skills/foreign"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "rebaseline after foreign failed"
 
   # retargeted recorded link (points away from both receipt and desired)
   ln -sfn "$code/.agents/skills/core-b" "$home/.omp/skills/core-a"
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted retargeted link"; fi
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "retarget mutated state"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "retarget mutated state"
   ln -sfn "$code/.agents/skills/core-a" "$home/.omp/skills/core-a"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "restore after retarget test failed"
 
@@ -265,32 +295,32 @@ test_fail_closed_zero_mutation() {
 
   # malformed yaml
   printf 'skills: [\n' > "$home/config/omp.yml"
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" 2>&1); then fail "accepted malformed yaml"; fi
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "malformed yaml mutated state"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "malformed yaml mutated state"
   rm -f "$home/config/omp.yml"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "restore omp failed"
 
   # missing shared-skills on seeded home is migration-required
   rm -f "$home/config/shared-skills"
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills check "$home" 2>&1); then
     fail "check accepted seeded home without shared-skills"
   fi
   case "$out" in *migration-required*|*blocked*) : ;; *) fail "expected migration-required: $out" ;; esac
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "migration-required check mutated state"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "migration-required check mutated state"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
   : > "$home/config/local-skills"
   FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills sync "$home" >/dev/null || fail "restore after migration-required failed"
 
   # drift: check fails without mutation when manifest ahead of reconciled state
   printf '%s\n' 'core-a' 'core-b' > "$home/config/shared-skills"
-  before=$(fingerprint "$home")
+  before=$(skill_state "$home")
   if out=$(FM_CODE_ROOT_OVERRIDE="$code" "$FM" home skills check "$home" 2>&1); then
     fail "check accepted drift"
   fi
   case "$out" in *result=drift*|*blocked*) : ;; *) fail "expected drift: $out" ;; esac
-  after=$(fingerprint "$home"); [ "$before" = "$after" ] || fail "drift check mutated state"
+  after=$(skill_state "$home"); [ "$before" = "$after" ] || fail "drift check mutated state"
   printf '%s\n' 'core-a' > "$home/config/shared-skills"
 
   # symlinked config container

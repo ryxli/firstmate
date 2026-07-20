@@ -44,11 +44,16 @@ PY
 printf '%s\n' '{"schema":"fleet-snapshot/1","home":"/tmp/home-a","homePaths":["/tmp/home-a","/tmp/plum","/tmp/gauge"],"health":{"state":"degraded","homes":3,"missingHomes":0,"livePanes":0,"herdr":"ok"},"agents":[],"tasks":[],"attention":[],"pending":[],"mates":[],"otherLivePanes":[],"notes":[]}' > "$TMP/count-input.json"
 bun "$ROOT/sbin/fm" fleet view --input "$TMP/count-input.json" --no-open --output "$TMP/count.html" >/dev/null
 python3 - "$TMP/count.html" <<'PY'
-import sys
-text = open(sys.argv[1]).read()
-assert '"homePaths":["/tmp/home-a","/tmp/plum","/tmp/gauge"]' in text
-assert 'typeof snap.health.homes === "number"' in text
-assert 'home_count: homeCount' in text
+import json, re, sys
+html = open(sys.argv[1]).read()
+m = re.search(r'<script type="application/json" id="fv-payload">(.*?)</script>', html, re.S)
+assert m, "missing fv-payload data island"
+payload = json.loads(m.group(1))
+fleet = payload["fleet"]
+paths = fleet["homePaths"]
+assert set(paths) == {"/tmp/home-a", "/tmp/plum", "/tmp/gauge"}, paths
+assert len(paths) == 3, paths
+assert fleet["health"]["homes"] == 3, fleet["health"]
 PY
 printf '%s\n' 'ok - visual projection carries authoritative multi-home count'
 

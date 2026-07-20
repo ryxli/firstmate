@@ -74,7 +74,7 @@ describe("canonical FleetSnapshot collector", () => {
 		try {
 			const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
 			expect(snapshot.schema).toBe("fleet-snapshot/1");
-			expect(snapshot.tasks.map(task => task.key)).toEqual(["home/self", "home/queued", "home/old"]);
+			expect(new Set(snapshot.tasks.map(task => task.key))).toEqual(new Set(["home/self", "home/queued", "home/old"]));
 			expect(snapshot.tasks.filter(task => task.state === "inflight")).toHaveLength(1);
 			expect(snapshot.tasks.filter(task => task.state === "queued")).toHaveLength(1);
 			expect(snapshot.tasks.filter(task => task.state === "done")).toHaveLength(1);

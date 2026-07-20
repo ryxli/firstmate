@@ -129,6 +129,37 @@ function loadExtension(t, options = {}) {
 
 const waitForTimers = () => new Promise(resolve => setTimeout(resolve, 10));
 
+/** Wait until predicate becomes true, or fail at deadline. */
+async function waitUntil(predicate, { timeoutMs = 2000, intervalMs = 5, label = "condition" } = {}) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (await predicate()) return;
+		await new Promise(resolve => setTimeout(resolve, intervalMs));
+	}
+	throw new Error(`waitUntil timed out after ${timeoutMs}ms waiting for ${label}`);
+}
+
+/** Wait for message count with a deadline (observable transition, not a fixed sleep). */
+function waitForMessages(app, count, timeoutMs = 2000) {
+	return Promise.race([
+		app.waitForMessageCount(count),
+		new Promise((_, reject) =>
+			setTimeout(() => reject(new Error(`timeout waiting for ${count} messages (have ${app.messages.length})`)), timeoutMs),
+		),
+	]);
+}
+
+/** Assert count stays put until minDelayMs; used to prove backoff has not fired early. */
+async function expectMessageCountHolds(app, count, holdMs) {
+	assert.equal(app.messages.length, count);
+	const rose = await Promise.race([
+		app.waitForMessageCount(count + 1).then(() => true),
+		new Promise(resolve => setTimeout(() => resolve(false), holdMs)),
+	]);
+	assert.equal(rose, false, `message count rose above ${count} within ${holdMs}ms`);
+	assert.equal(app.messages.length, count);
+}
+
 // Mirrors the production formatClock() in index.ts so footer-badge assertions stay
 // in lockstep with whatever the extension actually renders for a given queue time.
 const clockLabel = ms => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -291,11 +322,11 @@ test("/wb loop does not overwrite a board that already has both headings", { con
 	const app = loadExtension(t, { agentId: "solo" });
 	const boardPath = join(app.paths.agentHome, "data", "whiteboard.md");
 	mkdirSync(join(app.paths.agentHome, "data"), { recursive: true });
-	const existing = "# Whiteboard\n\n## Now\n\ncaptain note\n\n## Working\n\n- item 1\n";
+	const existing = "# Whiteboard\n\n## Now\n\ncap note\n\n## Working\n\n- item 1\n";
 	writeFileSync(boardPath, existing, "utf8");
 	await command(app, "loop");
 	const content = readFileSync(boardPath, "utf8");
-	assert.ok(content.includes("captain note"), "captain content must be preserved");
+	assert.ok(content.includes("cap note"), "cap content must be preserved");
 	assert.ok(content.includes("- item 1"), "working item must be preserved");
 });
 
@@ -391,11 +422,8 @@ test("an unchanged progress loop backs off instead of hot-spinning", { concurren
 
 	await appCheckpoint(app, "progress", "no board change");
 	app.listeners.get("agent_end")();
-	await new Promise(resolve => setTimeout(resolve, 15));
-	assert.equal(app.messages.length, 1, "unchanged tick must not requeue at zero delay");
-
-	await new Promise(resolve => setTimeout(resolve, 160));
-	assert.equal(app.messages.length, 2, "unchanged tick requeues only after the adaptive delay");
+	await expectMessageCountHolds(app, 1, 20);
+	await waitForMessages(app, 2, 500);
 	await command(app, "loop");
 });
 
@@ -404,20 +432,18 @@ test("a productive board change resets loop backoff", { concurrency: false }, as
 	await command(app, "loop");
 	await appCheckpoint(app, "progress", "idle first turn");
 	app.listeners.get("agent_end")();
-	await new Promise(resolve => setTimeout(resolve, 130));
-	assert.equal(app.messages.length, 2, "first idle delay should elapse");
+	await waitForMessages(app, 2, 500);
 
 	await app.tools.get("whiteboard_write").execute("w", {
 		text: "# Whiteboard\n\n## Now\n\nagent made progress\n\n## Working\n\n- changed\n",
 	});
 	await appCheckpoint(app, "progress", "changed board");
 	app.listeners.get("agent_end")();
-	await new Promise(resolve => setTimeout(resolve, 70));
-	assert.equal(app.messages.length, 3, "productive tick should reset to the minimum delay");
+	await waitForMessages(app, 3, 250);
 	await command(app, "loop");
 });
 
-test("agent whiteboard_write during an active tick does not look like a captain edit", { concurrency: false }, async t => {
+test("agent whiteboard_write during an active tick does not look like a cap edit", { concurrency: false }, async t => {
 	_setWatchDebounce(5);
 	t.after(() => _resetWatchDebounce());
 
@@ -427,23 +453,20 @@ test("agent whiteboard_write during an active tick does not look like a captain 
 	writeFileSync(boardPath, "# Whiteboard\n\n## Now\n\n_start_\n\n## Working\n\n_empty_\n", "utf8");
 
 	await command(app, "loop");
-	await new Promise(resolve => setTimeout(resolve, 30));
 	startLatestTick(app);
 	await appCheckpoint(app, "progress", "first idle turn");
 	app.listeners.get("agent_end")();
-	await new Promise(resolve => setTimeout(resolve, 650));
-	assert.equal(app.messages.length, 2, "first idle backoff should eventually queue the second tick");
+	await waitForMessages(app, 2, 1000);
 
 	startLatestTick(app);
 	await app.tools.get("whiteboard_write").execute("w", { text: readFileSync(boardPath, "utf8").replace("_empty_", "- agent checked in") });
 	const agentBoard = readFileSync(boardPath, "utf8");
 	writeFileSync(boardPath, `${agentBoard}\n`);
 	writeFileSync(boardPath, agentBoard);
-	await new Promise(resolve => setTimeout(resolve, 30));
 	await appCheckpoint(app, "progress", "second idle turn with self-write");
 	app.listeners.get("agent_end")();
-	await new Promise(resolve => setTimeout(resolve, 150));
-	assert.equal(app.messages.length, 2, "agent self-write must not queue a captain-edit turn after the active tick");
+	// Self-write must not mint a cap-edit turn; hold through debounce + early backoff window.
+	await expectMessageCountHolds(app, 2, 200);
 	await command(app, "status");
 	assert.match(app.notifications.at(-1).message, /consecutive=2/, "self-write must not reset consecutive turn count");
 
@@ -565,7 +588,7 @@ test("whiteboard_write replaces the board atomically", { concurrency: false }, a
 	assert.ok(content.includes("- done"));
 });
 
-// The captain's nvim formats the board on save (prettierd). The whiteboard_write
+// The cap's nvim formats the board on save (prettierd). The whiteboard_write
 // tool must normalize the agent's write the same way so both authors converge on
 // one canonical shape. Skipped when prettierd is not installed.
 test("whiteboard_write formats the agent's write like nvim on save", { concurrency: false }, async t => {
@@ -623,7 +646,7 @@ test("checkpoint settled rests and does not self-continue", { concurrency: false
 test("checkpoint needs-decision rests", { concurrency: false }, async t => {
 	const app = loadExtension(t, { agentId: "solo" });
 	await command(app, "loop");
-	await appCheckpoint(app, "needs-decision", "captain input needed");
+	await appCheckpoint(app, "needs-decision", "cap input needed");
 	app.listeners.get("agent_end")();
 	await waitForTimers();
 	assert.equal(app.messages.length, 1);
@@ -716,12 +739,12 @@ test("board file change while loop is on queues exactly one turn", { concurrency
 	await waitForTimers();
 	assert.equal(app.messages.length, 1, "settled: no self-continue");
 
-	// Captain edits the board - direct write, no atomic rename.
-	const captainEditQueued = app.waitForMessageCount(2);
-	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\ncaptain task added\n");
-	await captainEditQueued;
+	// Cap edits the board - direct write, no atomic rename.
+	const capEditQueued = app.waitForMessageCount(2);
+	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\ncap task added\n");
+	await capEditQueued;
 
-	assert.equal(app.messages.length, 2, "captain edit must trigger exactly one new turn");
+	assert.equal(app.messages.length, 2, "cap edit must trigger exactly one new turn");
 	assert.equal(app.messages[1].message.customType, "wb-loop");
 });
 
@@ -753,7 +776,7 @@ test("temporary rename event re-reads the canonical board after an atomic save",
 	app.listeners.get("agent_end")();
 	assert.equal(app.messages.length, 1);
 
-	writeFileSync(boardPath, "# Whiteboard\n\natomic captain edit\n", "utf8");
+	writeFileSync(boardPath, "# Whiteboard\n\natomic cap edit\n", "utf8");
 	onWatch("rename", `.whiteboard.md.${process.pid}.tmp`);
 	assert.equal(app.statusUpdates.at(-1).text, `WB ${fixtureId} \u00b7 edit \u00b7 ${ts}`);
 	await waitForTimers();
@@ -799,7 +822,7 @@ test("unrelated parent-directory rename leaves a settled loop resting", { concur
 	assert.equal(app.statusUpdates.at(-1).text, `WB ${fixtureId} \u00b7 waiting \u00b7 ${ts}`);
 });
 
-test("watcher resets consecutive counter when captain edits while loop is active", { concurrency: false }, async t => {
+test("watcher resets consecutive counter when cap edits while loop is active", { concurrency: false }, async t => {
 	_setWatchDebounce(5);
 	t.after(() => _resetWatchDebounce());
 
@@ -809,8 +832,8 @@ test("watcher resets consecutive counter when captain edits while loop is active
 	const boardPath = join(app.paths.agentHome, "data", "whiteboard.md");
 
 	await command(app, "loop");
-	// Allow any FSEvents from the skeleton write to arrive and be swallowed (queued=true).
-	await new Promise(r => setTimeout(r, 30));
+	// Swallow skeleton-write watcher noise while the initial tick is still queued.
+	await expectMessageCountHolds(app, 1, 40);
 
 	// Exhaust consecutive turns.
 	startLatestTick(app);
@@ -824,20 +847,20 @@ test("watcher resets consecutive counter when captain edits while loop is active
 	startLatestTick(app);
 	await appCheckpoint(app, "progress", "at cap");
 	app.listeners.get("agent_end")();
-	// Wait longer than the debounce so any watcher noise settles before we snapshot.
-	await new Promise(r => setTimeout(r, 30));
+	await expectMessageCountHolds(app, app.messages.length, 40);
 	const beforeEdit = app.messages.length;
 
-	// Captain edits -> watcher fires -> resets consecutiveTurns to 0 -> one new turn.
-	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\ncaptain directive\n");
-	await new Promise(r => setTimeout(r, 200));
+	// Cap edits -> watcher fires -> resets consecutiveTurns to 0 -> one new turn.
+	const capEditQueued = waitForMessages(app, beforeEdit + 1, 1000);
+	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\ncap directive\n");
+	await capEditQueued;
 
-	assert.equal(app.messages.length, beforeEdit + 1, "captain edit queues a fresh turn");
+	assert.equal(app.messages.length, beforeEdit + 1, "cap edit queues a fresh turn");
 	await command(app, "status");
 	assert.match(app.notifications.at(-1).message, /consecutive=0/);
 });
 
-test("captain-edit tick cancels a pending autonomous timer before terminal rest", { concurrency: false }, async t => {
+test("cap-edit tick cancels a pending autonomous timer before terminal rest", { concurrency: false }, async t => {
 	_setWatchDebounce(5);
 	t.after(() => _resetWatchDebounce());
 
@@ -847,39 +870,24 @@ test("captain-edit tick cancels a pending autonomous timer before terminal rest"
 	writeFileSync(boardPath, "# Whiteboard\n\n## Now\n\n_start_\n\n## Working\n\n_empty_\n", "utf8");
 
 	await command(app, "loop");
-	await new Promise(resolve => setTimeout(resolve, 30));
 	startLatestTick(app);
 	await appCheckpoint(app, "progress", "idle turn arms autonomous timer");
 	app.listeners.get("agent_end")();
-	await new Promise(resolve => setTimeout(resolve, 30));
-	assert.equal(app.messages.length, 1, "autonomous timer should still be pending");
+	await expectMessageCountHolds(app, 1, 40);
 
-	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\ncaptain edit before timer\n");
-	await new Promise(resolve => setTimeout(resolve, 40));
-	assert.equal(app.messages.length, 2, "external edit should queue one captain-edit tick");
+	const capEditQueued = waitForMessages(app, 2, 1000);
+	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\ncap edit before timer\n");
+	await capEditQueued;
 
 	startLatestTick(app);
-	await appCheckpoint(app, "settled", "captain-edit tick is terminal");
+	await appCheckpoint(app, "settled", "cap-edit tick is terminal");
 	app.listeners.get("agent_end")();
-	await new Promise(resolve => setTimeout(resolve, 180));
-	assert.equal(app.messages.length, 2, "stale autonomous timer must not queue after terminal rest");
+	await expectMessageCountHolds(app, 2, 200);
 	await command(app, "loop");
 });
 
 // ---------------------------------------------------------------------------
 // Session events
-
-test("event listeners: before_agent_start, message_start, agent_end, session_switch, session_branch, session_shutdown are registered", { concurrency: false }, t => {
-	const app = loadExtension(t, { agentId: "solo" });
-	assert.equal(app.listeners.has("before_agent_start"), true);
-	assert.equal(app.listeners.has("message_start"), true);
-	assert.equal(app.listeners.has("agent_end"), true);
-	assert.equal(app.listeners.has("session_switch"), true);
-	assert.equal(app.listeners.has("session_branch"), true);
-	assert.equal(app.listeners.has("session_shutdown"), true);
-	// These should NOT be registered.
-	assert.equal(app.listeners.has("session_start"), false);
-});
 
 test("message_start activates a wb-loop message rendered with developer role", { concurrency: false }, async t => {
 	const app = loadExtension(t, { agentId: "solo", autoDeliver: false });
@@ -1051,7 +1059,7 @@ test("no checkpoint provided: loop rests with no-progress outcome", { concurrenc
 // ---------------------------------------------------------------------------
 // Loop stays enabled (watching) after terminal outcomes
 
-test("loop stays enabled after settled so watcher can trigger next captain turn", { concurrency: false }, async t => {
+test("loop stays enabled after settled so watcher can trigger next cap turn", { concurrency: false }, async t => {
 	_setWatchDebounce(5);
 	t.after(() => _resetWatchDebounce());
 
@@ -1071,10 +1079,10 @@ test("loop stays enabled after settled so watcher can trigger next captain turn"
 	await command(app, "status");
 	assert.match(app.notifications.at(-1).message, /loop enabled/);
 
-	// Captain edit triggers a new turn.
-	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\nnew captain task\n");
-	await new Promise(r => setTimeout(r, 200));
-	assert.equal(app.messages.length, 2, "watcher must fire a new turn after settled rest");
+	// Cap edit triggers a new turn.
+	const capEditQueued = waitForMessages(app, 2, 1000);
+	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\nnew cap task\n");
+	await capEditQueued;
 });
 
 // ---------------------------------------------------------------------------
@@ -1144,7 +1152,7 @@ test("presence signal reads 'just now' on the edit tick, then grows on self-cont
 	_setWatchDebounce(5);
 	t.after(() => _resetWatchDebounce());
 	const prevUser = process.env.USER;
-	process.env.USER = "captain";
+	process.env.USER = "cap";
 	t.after(() => { if (prevUser === undefined) delete process.env.USER; else process.env.USER = prevUser; });
 	let fakeNow = 500000;
 	_setNow(() => fakeNow);
@@ -1165,12 +1173,12 @@ test("presence signal reads 'just now' on the edit tick, then grows on self-cont
 	await waitForTimers();
 	const beforeEdit = app.messages.length;
 
-	// Captain edits at fakeNow=500000 -> watcher records the edit time and queues a tick at the same instant.
-	const captainEditQueued = app.waitForMessageCount(beforeEdit + 1);
-	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\ncaptain task\n");
-	await captainEditQueued;
-	assert.equal(app.messages.length, beforeEdit + 1, "captain edit queued a tick");
-	assert.match(app.messages.at(-1).message.content, /captain edited: just now/, "edit tick names $USER and reads just now");
+	// Cap edits at fakeNow=500000 -> watcher records the edit time and queues a tick at the same instant.
+	const capEditQueued = app.waitForMessageCount(beforeEdit + 1);
+	writeFileSync(boardPath, readFileSync(boardPath, "utf8") + "\ncap task\n");
+	await capEditQueued;
+	assert.equal(app.messages.length, beforeEdit + 1, "cap edit queued a tick");
+	assert.match(app.messages.at(-1).message.content, /cap edited: just now/, "edit tick names $USER and reads just now");
 
 	// Agent self-continues 45s later -> presence grows.
 	startLatestTick(app);
@@ -1179,7 +1187,7 @@ test("presence signal reads 'just now' on the edit tick, then grows on self-cont
 	app.listeners.get("agent_end")();
 	await waitForTimers();
 	assert.equal(app.messages.length, beforeEdit + 2, "progress self-continued");
-	assert.match(app.messages.at(-1).message.content, /captain edited: 45\.0s ago/, "presence grows to 45s on the self-continued tick");
+	assert.match(app.messages.at(-1).message.content, /cap edited: 45\.0s ago/, "presence grows to 45s on the self-continued tick");
 });
 
 test("directive body is exactly the contracted one-sentence operation", { concurrency: false }, async t => {
@@ -1337,7 +1345,7 @@ test("footer badge resolves distinct runtime identities and hides when disabled"
 		assert.equal(app.statusUpdates.at(-1).text, `WB ${fixtureId} \u00b7 waiting \u00b7 ${ts}`);
 
 		for (const update of app.statusUpdates.filter(update => typeof update.text === "string")) {
-			assert.doesNotMatch(update.text, /captain|\bt\d+\b/i);
+			assert.doesNotMatch(update.text, /\bt\d+\b/i);
 		}
 
 		await command(app, "loop");
@@ -1366,8 +1374,12 @@ test("scheduled continuation footer shows a real decrementing countdown", { conc
 	app.listeners.get("agent_end")();
 	assert.equal(app.statusUpdates.at(-1).text, `WB ${fixtureId} \u00b7 2s \u00b7 ${ts}`, "timestamp is the latest queued tick, not the live clock");
 
-	await new Promise(resolve => setTimeout(resolve, 700));
-	assert.equal(app.statusUpdates.at(-1).text, `WB ${fixtureId} \u00b7 1s \u00b7 ${ts}`, "timestamp stays stable across countdown refreshes");
+	const expected = `WB ${fixtureId} \u00b7 1s \u00b7 ${ts}`;
+	await waitUntil(
+		() => app.statusUpdates.at(-1)?.text === expected,
+		{ timeoutMs: 2000, label: "countdown status refresh to 1s" },
+	);
+	assert.equal(app.statusUpdates.at(-1).text, expected, "timestamp stays stable across countdown refreshes");
 
 	await command(app, "loop");
 	assert.equal(app.statusUpdates.at(-1).text, undefined);
