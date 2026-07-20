@@ -45,6 +45,7 @@ import { fileURLToPath } from "node:url";
 import { ensureMateMiseToml } from "../lib/mise-home";
 import { linkShipExtensions } from "../lib/ship-ext";
 import { identityValue } from "../lib/identity";
+import { parseSecondmateRegistryLine } from "../lib/secondmate-registry";
 
 // Canonical repo root, resolved from this module's own physical location
 // (four directories up from .omp/extensions/cli/verbs/) - independent of
@@ -198,11 +199,6 @@ function pathIsAncestorOf(ancestor: string, path: string): boolean {
 
 // ---- registry text helpers ---------------------------------------------------
 
-function registryHomeForLine(line: string): string {
-	const m = line.match(/^[^(]*\(home: ([^;)]*);.*/);
-	return m ? m[1] : "";
-}
-
 // normalizeRegistryText(text): mirror the bash awk pipeline - strip ";" and
 // "()" to spaces, squeeze whitespace runs, trim, and join every non-empty
 // resulting line with a single space into one line.
@@ -259,11 +255,9 @@ function readRegistryEntries(reg: string): RegEntry[] {
 	if (!existsSync(reg)) return [];
 	const entries: RegEntry[] = [];
 	for (const line of splitLinesNoTrailing(readFileSync(reg, "utf8"))) {
-		if (!line.startsWith("- ")) continue;
-		const id = line.slice(2).split(" ")[0] ?? "";
-		const registeredHome = registryHomeForLine(line);
-		if (!registeredHome) continue;
-		entries.push({ homeKey: resolvedPath(registeredHome), id });
+		const parsed = parseSecondmateRegistryLine(line);
+		if (!parsed || !parsed.home) continue;
+		entries.push({ homeKey: resolvedPath(parsed.home), id: parsed.id });
 	}
 	return entries;
 }
@@ -335,11 +329,10 @@ function registryHomeConflictForAssignment(
 	if (!existsSync(reg)) return null;
 	const target = resolvedPath(home);
 	for (const line of splitLinesNoTrailing(readFileSync(reg, "utf8"))) {
-		if (!line.startsWith("- ")) continue;
-		const registeredId = line.slice(2).split(" ")[0] ?? "";
-		const registeredHome = registryHomeForLine(line);
-		if (!registeredHome) continue;
-		const registeredKey = resolvedPath(registeredHome);
+		const parsed = parseSecondmateRegistryLine(line);
+		if (!parsed || !parsed.home) continue;
+		const registeredId = parsed.id;
+		const registeredKey = resolvedPath(parsed.home);
 		if (registeredKey === target) {
 			if (registeredId === id) continue;
 			return { type: "exact", owner: registeredId, home: registeredKey };
@@ -355,12 +348,11 @@ function registryIdConflictForAssignment(reg: string, id: string, home: string):
 	if (!existsSync(reg)) return null;
 	const target = resolvedPath(home);
 	for (const line of splitLinesNoTrailing(readFileSync(reg, "utf8"))) {
-		if (!line.startsWith("- ")) continue;
-		const registeredId = line.slice(2).split(" ")[0] ?? "";
+		const parsed = parseSecondmateRegistryLine(line);
+		if (!parsed || !parsed.home) continue;
+		const registeredId = parsed.id;
 		if (registeredId !== id) continue;
-		const registeredHome = registryHomeForLine(line);
-		if (!registeredHome) continue;
-		const registeredKey = resolvedPath(registeredHome);
+		const registeredKey = resolvedPath(parsed.home);
 		if (registeredKey === target) continue;
 		return registeredKey;
 	}

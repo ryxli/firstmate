@@ -20,6 +20,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpat
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseSecondmateRegistryLine } from "../lib/secondmate-registry";
 
 // Physical location of this repo (unaffected by FM_ROOT_OVERRIDE), mirroring the
 // original script's SCRIPT_DIR (derived from BASH_SOURCE, not from any override).
@@ -192,11 +193,6 @@ function checkCurrentHome(expectedId: string, home: string, fmRoot: string): boo
 	return true;
 }
 
-function fieldValue(line: string, key: string): string {
-	const match = new RegExp(`${key}:\\s*([^;)]+)`).exec(line);
-	return match ? match[1].trim() : "";
-}
-
 // Depth-first registry walk: `- <ident> - ... (home: <path>[; workspace: ...][; name: ...])`.
 // A registered home may itself register children via its own data/secondmates.md.
 function walkRegistry(regPath: string, seenRegs: Set<string>, seenHomes: Set<string>, out: SecondmateEntry[]): void {
@@ -212,14 +208,12 @@ function walkRegistry(regPath: string, seenRegs: Set<string>, seenHomes: Set<str
 	seenRegs.add(abs);
 	const text = readTextOrNull(abs) ?? "";
 	for (const rawLine of text.split(/\r?\n/)) {
-		const line = rawLine.replace(/\s+$/, "");
-		const match = /^- ([^ ]+) - .*\(home: ([^;)]+)[;)].*/.exec(line);
-		if (!match) continue;
-		const ident = match[1];
-		const home = expandHome(match[2].trim());
+		const parsed = parseSecondmateRegistryLine(rawLine);
+		if (!parsed || !parsed.home) continue;
+		const home = expandHome(parsed.home);
 		if (seenHomes.has(home)) continue;
 		seenHomes.add(home);
-		out.push({ ident, home, workspace: fieldValue(line, "workspace"), name: fieldValue(line, "name") });
+		out.push({ ident: parsed.id, home, workspace: parsed.workspace, name: parsed.name });
 		walkRegistry(join(home, "data", "secondmates.md"), seenRegs, seenHomes, out);
 	}
 }

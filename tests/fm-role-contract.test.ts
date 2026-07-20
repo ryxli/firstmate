@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { crewRoleContract, mainRoleContract, roleContractForHome, secondmateRoleContract } from "../.omp/extensions/cli/lib/role-contract";
+import { parseSecondmateRegistryLine } from "../.omp/extensions/cli/lib/secondmate-registry";
 import { injectOmpRoleContract } from "../.omp/extensions/cli/verbs/spawn";
 
 const REPO_ROOT = import.meta.dir.replace(/\/tests$/, "");
@@ -56,6 +57,23 @@ describe("runtime role contracts", () => {
 		}
 	});
 
+	it("keeps secondmate identity and authority in the runtime role contract", () => {
+		const main = tempHome("fm-role-main-");
+		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=firstmate\nparent=captain\n");
+		const kodiak = secondmateHome("kodiak", "Kodiak", "frontend", "Keel");
+		try {
+			const contract = secondmateRoleContract({ home: kodiak, mainHome: main });
+			const charter = readFileSync(join(kodiak, "data", "charter.md"), "utf8");
+			expect(contract).toContain("You are Kodiak, a secondmate reporting to Keel.");
+			expect(contract).toContain("authority: own-home and charter-domain only");
+			expect(charter).not.toContain("You are Kodiak");
+			expect(charter).not.toContain("authority:");
+		} finally {
+			rmSync(main, { recursive: true, force: true });
+			rmSync(kodiak, { recursive: true, force: true });
+		}
+	});
+
 	it("updates stale generated secondmate parent when main identity is known", () => {
 		const main = tempHome("fm-role-main-");
 		writeFileSync(join(main, "config", "identity"), "schema_version=1\nname=Keel\nrole=Main firstmate crew supervisor\nparent=captain\n");
@@ -97,6 +115,64 @@ describe("shared AGENTS role neutrality", () => {
 		expect(agents).toContain("This file defines shared procedure, never active identity.");
 		expect(agents).toContain("`kind:secondmate` or `kind:crew`");
 		expect(agents).toContain("Captain-facing communication (conditional on `kind:firstmate`)");
+		expect(agents).toContain("Resolve the registered project and current secondmate scope before starting background execution");
+	});
+});
+
+describe("mate-home local surfaces", () => {
+	it("ignores declared work and tmp directories", () => {
+		const gitignore = readFileSync(join(REPO_ROOT, ".gitignore"), "utf8");
+		expect(gitignore).toContain("work/\n");
+		expect(gitignore).toContain("tmp/\n");
+	});
+});
+
+describe("secondmate registry parser", () => {
+	it("parses full, no-workspace, home-only, and partial keyed forms", () => {
+		expect(
+			parseSecondmateRegistryLine(
+				"- full - Full summary (home: /mates/full; workspace: ws-1; name: Full; scope: domain; keeps bare; semicolons; projects: alpha, beta; added 2026-07-20)",
+			),
+		).toEqual({
+			id: "full",
+			summary: "Full summary",
+			home: "/mates/full",
+			workspace: "ws-1",
+			name: "Full",
+			scope: "domain; keeps bare; semicolons",
+			projects: "alpha, beta",
+			added: "2026-07-20",
+		});
+		expect(parseSecondmateRegistryLine("- now - No workspace (home: /mates/now; name: Now; scope: now; projects: app; added 2026-07-20)")).toEqual({
+			id: "now",
+			summary: "No workspace",
+			home: "/mates/now",
+			workspace: "",
+			name: "Now",
+			scope: "now",
+			projects: "app",
+			added: "2026-07-20",
+		});
+		expect(parseSecondmateRegistryLine("- homeonly - Home only (home: /mates/homeonly)")).toEqual({
+			id: "homeonly",
+			summary: "Home only",
+			home: "/mates/homeonly",
+			workspace: "",
+			name: "",
+			scope: "",
+			projects: "",
+			added: "",
+		});
+		expect(parseSecondmateRegistryLine("- partial - Partial (home: /mates/partial; scope: partial; projects: (none))")).toEqual({
+			id: "partial",
+			summary: "Partial",
+			home: "/mates/partial",
+			workspace: "",
+			name: "",
+			scope: "partial",
+			projects: "(none)",
+			added: "",
+		});
 	});
 });
 

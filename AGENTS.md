@@ -233,7 +233,7 @@ The skill owns the exact registries, delivery modes, commands, state transitions
 
 Hot invariants remain always on:
 
-- Resolve the project independently for every request, then route by the current secondmate scope.
+- Resolve the registered project and current secondmate scope before starting background execution; route the request before any execution begins.
 - When FM is required, changes use ship tasks and read-only work uses scout tasks.
 - Serialize work that overlaps in the same repository area; otherwise run independent critical-path work in parallel.
 - Freeze shared contracts and file ownership before implementation fanout.

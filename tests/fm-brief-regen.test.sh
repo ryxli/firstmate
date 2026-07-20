@@ -37,48 +37,57 @@ run() {
 BRIEF_PATH="$HOME_DIR/data/mates/plum/brief.md"
 CHARTER_PATH="$MATE_HOME/data/charter.md"
 
-# (a) generation fills registry fields and resolves the escalation name from a
-# fixture config/identity.
+# (a) generation fills only registry-derived domain fields.
 run --regen plum >/dev/null || fail "fm brief --regen plum failed"
 [ -f "$BRIEF_PATH" ] || fail "regen did not write $BRIEF_PATH"
 [ -f "$CHARTER_PATH" ] || fail "regen did not write $CHARTER_PATH"
 for f in "$BRIEF_PATH" "$CHARTER_PATH"; do
   grep -qF 'generated from data/secondmates.md via fm brief; do not hand-edit' "$f" \
     || fail "$f is missing the generated-projection marker line"
-  grep -qF 'You are Plum, a persistent secondmate' "$f" \
-    || fail "$f did not fill the registry charter/name field"
-  grep -qF 'Harness research engine - conducts research' "$f" \
+  grep -qF '# Charter
+Independent evaluator and quality-guardian for firstmate self-improvement' "$f" \
+    || fail "$f did not fill the registry charter summary"
+  grep -qF '# Routing scope
+Harness research engine - conducts research' "$f" \
     || fail "$f did not fill the registry scope field"
   grep -qF -- '- alpha' "$f" || fail "$f did not fill the registry project clone list (alpha)"
   grep -qF -- '- beta' "$f" || fail "$f did not fill the registry project clone list (beta)"
-  grep -qF 'addressed to Riggs' "$f" \
-    || fail "$f did not resolve the escalation name from the fixture config/identity"
-  grep -qF '/peer send riggs ' "$f" \
-    || fail "$f did not resolve the escalation routing slug from the fixture config/identity"
-  ! grep -qF 'Keel' "$f" || fail "$f still hard-codes the Keel escalation name"
-  grep -qF '# Lean-loop discipline' "$f" \
-    || fail "$f is missing the generated Lean-loop discipline block"
-  grep -qF '# House tooling conventions' "$f" \
-    || fail "$f is missing the generated House tooling conventions block"
-  grep -qF 'Use bun/bunx' "$f" \
-    || fail "$f House tooling conventions block did not name bun/bunx"
+  ! grep -qF 'You are Plum' "$f" || fail "$f restated runtime identity"
+  ! grep -qF 'authority:' "$f" || fail "$f restated runtime authority"
+  ! grep -qF '# Operating model' "$f" || fail "$f retained generic operating prose"
+  ! grep -qF '# Escalation to main firstmate' "$f" || fail "$f retained generic escalation prose"
+  ! grep -qF '# Definition of done' "$f" || fail "$f retained generic completion prose"
+  ! grep -qF '# Lean-loop discipline' "$f" || fail "$f retained generic lean-loop prose"
+  ! grep -qF '# House tooling conventions' "$f" || fail "$f retained generic tool-policy prose"
 done
-pass "regen fills registry fields and resolves the escalation name from config/identity"
+pass "regen emits domain charter, routing scope, projects, and owned block only"
 
-# (b) a mate-owned section survives regeneration verbatim.
+# (b) a mate-owned section survives regeneration byte-for-byte, including
+# CRLF line endings and trailing whitespace inside the block.
 python3 - "$CHARTER_PATH" <<'PY'
 import sys
 path = sys.argv[1]
-text = open(path).read()
-text = text.replace("(no mate-owned notes yet)", "Plum's own note: prefers terse verdicts.")
-open(path, "w").write(text)
+begin = b"<!-- BEGIN MATE-OWNED NOTES: preserved verbatim across regeneration; edit only inside this block -->"
+end = b"<!-- END MATE-OWNED NOTES -->"
+raw = open(path, "rb").read()
+start = raw.index(begin) + len(begin)
+stop = raw.index(end, start)
+owned = b"\r\nPlum's own note: prefers terse verdicts.  \r\nsecond owned line\t\r\n"
+open(path, "wb").write(raw[:start] + owned + raw[stop:])
 PY
-grep -qF "Plum's own note: prefers terse verdicts." "$CHARTER_PATH" \
-  || fail "test setup did not write the mate-owned note"
 run --regen plum >/dev/null || fail "second fm brief --regen plum failed"
-grep -qF "Plum's own note: prefers terse verdicts." "$CHARTER_PATH" \
-  || fail "regeneration did not preserve the mate-owned section verbatim"
-pass "a mate-owned section survives regeneration verbatim"
+python3 - "$CHARTER_PATH" <<'PY'
+import sys
+path = sys.argv[1]
+begin = b"<!-- BEGIN MATE-OWNED NOTES: preserved verbatim across regeneration; edit only inside this block -->"
+end = b"<!-- END MATE-OWNED NOTES -->"
+raw = open(path, "rb").read()
+owned = raw[raw.index(begin) + len(begin):raw.index(end)]
+expected = b"\r\nPlum's own note: prefers terse verdicts.  \r\nsecond owned line\t\r\n"
+if owned != expected:
+    raise SystemExit(f"owned block changed: {owned!r}")
+PY
+pass "mate-owned section survives regeneration byte-for-byte"
 
 # (c) --check passes right after regen.
 run --check plum >/dev/null || fail "fm brief --check plum did not pass right after regen"
@@ -112,6 +121,25 @@ pass "regen restores the scaffold and --check passes again"
 cat >> "$HOME_DIR/data/secondmates.md" <<EOF
 - fresh - Fresh domain secondmate (home: $TMP/mates/fresh; name: Fresh; scope: fresh domain scope; projects: (none); added 2026-06-25)
 EOF
+
+# A one-shot --secondmate scaffold is the same domain-only overlay shape.
+FM_HOME="$HOME_DIR" FM_SECONDMATE_CHARTER='overlay charter' FM_SECONDMATE_SCOPE='overlay scope' \
+  "${BRIEF[@]}" scaffold --secondmate alpha >/dev/null \
+  || fail "fm brief --secondmate scaffold failed"
+SCAFFOLD_PATH="$HOME_DIR/data/mates/scaffold/brief.md"
+grep -qF $'# Charter\noverlay charter' "$SCAFFOLD_PATH" \
+  || fail "initial scaffold did not retain the domain charter"
+grep -qF $'# Routing scope\noverlay scope' "$SCAFFOLD_PATH" \
+  || fail "initial scaffold did not retain the routing scope"
+grep -qF -- '- alpha' "$SCAFFOLD_PATH" \
+  || fail "initial scaffold did not retain the registered project"
+! grep -qF 'You are a secondmate' "$SCAFFOLD_PATH" \
+  || fail "initial scaffold restated runtime identity"
+! grep -qF '# Operating model' "$SCAFFOLD_PATH" \
+  || fail "initial scaffold retained generic operating prose"
+grep -qF '<!-- BEGIN MATE-OWNED NOTES:' "$SCAFFOLD_PATH" \
+  || fail "initial scaffold omitted the mate-owned block"
+pass "initial --secondmate scaffold emits a domain-only overlay"
 mkdir -p "$TMP/mates/fresh/data"
 run --regen fresh >/dev/null || fail "fm brief --regen fresh failed"
 grep -qF '(no mate-owned notes yet)' "$HOME_DIR/data/mates/fresh/brief.md" \

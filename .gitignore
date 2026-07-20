@@ -9,6 +9,8 @@ bin/
 config/crew-harness
 config/identity
 worktrees/
+work/
+tmp/
 node_modules/
 .omp/settings.json
 __pycache__/

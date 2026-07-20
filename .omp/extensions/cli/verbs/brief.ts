@@ -45,7 +45,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { identityValue, supervisorSlug } from "../lib/identity";
+import { parseSecondmateRegistryLine, type SecondmateRegistryEntry } from "../lib/secondmate-registry";
 import { shellQuote } from "../lib/spawn";
 
 // Equivalent of the former script's SCRIPT_DIR/.. (sbin's parent = repo root),
@@ -108,89 +108,16 @@ const MATE_SECTION_BEGIN = "<!-- BEGIN MATE-OWNED NOTES: preserved verbatim acro
 const MATE_SECTION_END = "<!-- END MATE-OWNED NOTES -->";
 const MATE_SECTION_DEFAULT = "(no mate-owned notes yet)";
 
-// findSecondmateLine(id, regPath): the raw registry line for id, or null if the
-// registry or id is absent.
-function findSecondmateLine(id: string, regPath: string): string | null {
+// findSecondmateEntry(id, regPath): the parsed registry entry for id, or null
+// if the registry or id is absent.
+function findSecondmateEntry(id: string, regPath: string) {
 	if (!existsSync(regPath)) return null;
 	const lines = readFileSync(regPath, "utf8").split(/\r?\n/);
 	for (const line of lines) {
-		if (!line.startsWith("- ")) continue;
-		const rest = line.slice(2);
-		const rid = rest.split(" ")[0];
-		if (rid === id) return line;
+		const entry = parseSecondmateRegistryLine(line);
+		if (entry?.id === id) return entry;
 	}
 	return null;
-}
-
-// secondmateSummary(line, id): the charter-summary text between "<id> - " and
-// " (home:" on a registry line.
-function secondmateSummary(line: string, id: string): string {
-	let rest = line.startsWith("- ") ? line.slice(2) : line;
-	if (rest.startsWith(id)) rest = rest.slice(id.length);
-	if (rest.startsWith(" - ")) rest = rest.slice(3);
-	const idx = rest.indexOf(" (home:");
-	if (idx !== -1) rest = rest.slice(0, idx);
-	return rest;
-}
-
-interface SecondmateFields {
-	home: string;
-	workspace: string;
-	name: string;
-	scope: string;
-	projects: string;
-	added: string;
-}
-
-function cutBefore(s: string, sep: string): string {
-	const idx = s.indexOf(sep);
-	return idx === -1 ? s : s.slice(0, idx);
-}
-
-function cutAfter(s: string, sep: string): string {
-	const idx = s.indexOf(sep);
-	return idx === -1 ? s : s.slice(idx + sep.length);
-}
-
-// secondmateParseFields(line): the registry line's parenthesized field block,
-// anchored on fixed literal "; <field>: " separators (not a naive "; " split),
-// so a semicolon inside a field's own free text (e.g. the scope prose) never
-// misparses as a field boundary.
-function secondmateParseFields(line: string): SecondmateFields {
-	const openIdx = line.indexOf("(");
-	let inner = openIdx === -1 ? "" : line.slice(openIdx + 1);
-	if (inner.endsWith(")")) inner = inner.slice(0, -1);
-	let rest = inner;
-	if (rest.startsWith("home: ")) rest = rest.slice("home: ".length);
-
-	let home: string;
-	let workspace: string;
-	if (rest.includes("; workspace: ")) {
-		home = cutBefore(rest, "; workspace: ");
-		rest = cutAfter(rest, "; workspace: ");
-		workspace = cutBefore(rest, "; name: ");
-		rest = cutAfter(rest, "; name: ");
-	} else {
-		home = cutBefore(rest, "; name: ");
-		workspace = "";
-		rest = cutAfter(rest, "; name: ");
-	}
-	const name = cutBefore(rest, "; scope: ");
-	rest = cutAfter(rest, "; scope: ");
-	const scope = cutBefore(rest, "; projects: ");
-	rest = cutAfter(rest, "; projects: ");
-	const projects = cutBefore(rest, "; added ");
-	rest = cutAfter(rest, "; added ");
-	const added = rest;
-	return { home, workspace, name, scope, projects, added };
-}
-
-// resolveEscalationName(configDir): the main firstmate's display name for prose
-// escalation text, resolved from config/identity name= at generation time.
-// Falls back to "the main firstmate" (not identity.ts's generic "firstmate"
-// default) so a generated charter never hard-codes a specific mate's name.
-function resolveEscalationName(configDir: string): string {
-	return identityValue(configDir, "name") ?? "the main firstmate";
 }
 
 // formatProjectLines(csv): a registry "projects:" csv field rendered as a
@@ -206,97 +133,47 @@ function formatProjectLines(csv: string): string {
 		.join("\n");
 }
 
-// extractMateOwned(file): the verbatim content between the mate-owned markers
-// in file, or the empty scaffold placeholder when file is missing or lacks
-// both markers.
+// extractMateOwned(file): the exact bytes between the mate-owned markers in
+// file, or an empty scaffold body when file is missing or lacks a valid pair.
 function extractMateOwned(file: string): string {
-	if (!existsSync(file)) return MATE_SECTION_DEFAULT;
+	if (!existsSync(file)) return `\n${MATE_SECTION_DEFAULT}\n`;
 	const content = readFileSync(file, "utf8");
-	if (!content.includes(MATE_SECTION_BEGIN) || !content.includes(MATE_SECTION_END)) {
-		return MATE_SECTION_DEFAULT;
-	}
-	const lines = content.split(/\r?\n/);
-	let capture = false;
-	const out: string[] = [];
-	for (const line of lines) {
-		if (line === MATE_SECTION_BEGIN) {
-			capture = true;
-			continue;
+	const beginIdx = content.indexOf(MATE_SECTION_BEGIN);
+	if (beginIdx === -1) return `\n${MATE_SECTION_DEFAULT}\n`;
+	const beginEnd = beginIdx + MATE_SECTION_BEGIN.length;
+	if (!/^\r?\n/.test(content.slice(beginEnd))) return `\n${MATE_SECTION_DEFAULT}\n`;
+	let endIdx = content.indexOf(MATE_SECTION_END, beginEnd);
+	while (endIdx !== -1) {
+		const before = endIdx === 0 ? "" : content[endIdx - 1];
+		const after = content.slice(endIdx + MATE_SECTION_END.length);
+		if ((endIdx === 0 || before === "\n") && /^(?:\r?\n|$)/.test(after)) {
+			return content.slice(beginEnd, endIdx);
 		}
-		if (line === MATE_SECTION_END) {
-			capture = false;
-			continue;
-		}
-		if (capture) out.push(line);
+		endIdx = content.indexOf(MATE_SECTION_END, endIdx + MATE_SECTION_END.length);
 	}
-	return out.join("\n");
+	return `\n${MATE_SECTION_DEFAULT}\n`;
 }
 
-// renderSecondmateProjection(id, line, configDir, priorMateOwned): the full
-// generated charter/brief text for a registered secondmate.
-function renderSecondmateProjection(id: string, line: string, configDir: string, priorMateOwned: string): string {
-	const fields = secondmateParseFields(line);
-	const charterText = secondmateSummary(line, id);
-	const escalationName = resolveEscalationName(configDir);
-	const escalationSlug = supervisorSlug(configDir);
-	const projectLines = formatProjectLines(fields.projects);
+// renderSecondmateProjection(entry, priorMateOwned): the domain-only generated
+// charter/brief text for a registered secondmate.
+function renderSecondmateProjection(entry: SecondmateRegistryEntry, priorMateOwned: string): string {
+	const projectLines = formatProjectLines(entry.projects);
 
-	return `You are a secondmate: a persistent domain supervisor managed by the main firstmate. Work on your own; do not wait for a human.
-
-<!-- fm-charter: schema-version=1; generated from data/secondmates.md via fm brief; do not hand-edit outside the mate-owned section below -->
+	return `<!-- fm-charter: schema-version=1; generated from data/secondmates.md via fm brief; do not hand-edit outside the mate-owned section below -->
 
 # Charter
-You are ${fields.name}, a persistent secondmate managed by the main firstmate.
-${charterText}
+${entry.summary}
 
 # Routing scope
-${fields.scope}
+${entry.scope}
 
 # Project clones
 ${projectLines}
 
-# Operating model
-You are in an isolated firstmate home.
-Your local \`data/\`, \`state/\`, \`config/\`, and \`projects/\` directories are yours to operate.
-The projects above are local clones for work you supervise; they are not an exclusive ownership claim.
-OMP injects the applicable \`AGENTS.md\` at session start.
-Do not tool-read it during ordinary boot or recovery.
-At startup, read only this charter, compact \`data/cap.md\`, \`data/backlog.md:1-20\`, the local \`state/\` listing plus active \`.meta\` and \`.status\` files, pending peer messages, and the current whiteboard diff.
-Use selectors and persisted artifacts instead of whole-file evidence reads or broad directory searches.
-Delegate investigation after three primary-thread tool calls unless the next call conclusively closes the decision.
-Delegate project work to your own crewmates with the normal firstmate lifecycle: brief, spawn, direct crewmate status-file reporting, \`fm send\` pane steering, teardown, and recovery.
-Do not invent a second delegation system.
-When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
-Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
-You do not generate your own work.
-Act only on tasks the main firstmate routes to you.
-Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
-Supervision is automatic and in-process; there is no watcher, wake-queue, beacon, or separate supervisor process.
-Relevant fleet changes coalesce into one non-visible attention edge; on that edge, read \`fm fleet\` once for the authoritative snapshot rather than expecting event payloads or per-event continuations.
-
-${LEAN_LOOP_BLOCK}
-
-${HOUSE_TOOLING_BLOCK}
-
-# Escalation to main firstmate
-Handle routine work yourself.
-Escalate only cap-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
-Use the agent tool peer_send when available, or type /peer send ${escalationSlug} "{state}: {one short line}" from the composer, addressed to ${escalationName}; set priority only for cap-blocking decisions, failures, or work ready for review.
-States: needs-decision, blocked, done, failed.
-Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
-
-# Definition of done
-You are persistent by default. Do not exit just because your queue is empty.
-On startup and restart, run normal firstmate bootstrap and recovery for your own home, but only to RECONCILE work that is already yours: in-flight crewmates, tracked backlog items, and durable watches recorded in this home.
-When you have no assigned or in-flight work after that reconciliation, go idle and wait silently for the main firstmate to route you a task.
-An empty queue is a healthy resting state, not a cue to invent work: never spawn a survey, audit, or any self-directed "find work" task on your own initiative.
-If this charter cannot be carried out, send blocked: {why} or failed: {why} to the main firstmate through the fleet peer bus and stop.
-
 # Mate-owned notes
-${MATE_SECTION_BEGIN}
-${priorMateOwned}
-${MATE_SECTION_END}`;
+${MATE_SECTION_BEGIN}${priorMateOwned}${MATE_SECTION_END}`;
 }
+
 
 // checkProjection(path, expected): missing (message to stderr, false) / missing
 // either mate-owned marker (message, false) / differs from expected (message,
@@ -323,19 +200,18 @@ function checkProjection(path: string, expected: string): boolean {
 // projections (each preserving its own current mate-owned section verbatim),
 // then either writes them (regen) or diffs them against what is on disk (check).
 function cmdRegenOrCheck(mode: "regen" | "check", id: string, paths: Paths): number {
-	const line = findSecondmateLine(id, joinPath(paths.data, "secondmates.md"));
-	if (line === null) {
+	const entry = findSecondmateEntry(id, joinPath(paths.data, "secondmates.md"));
+	if (entry === null) {
 		process.stderr.write(`error: no registered secondmate '${id}' in ${joinPath(paths.data, "secondmates.md")}\n`);
 		return 1;
 	}
-	const fields = secondmateParseFields(line);
 	const briefPath = joinPath(paths.data, "mates", id, "brief.md");
-	const charterPath = joinPath(fields.home, "data", "charter.md");
+	const charterPath = joinPath(entry.home, "data", "charter.md");
 
 	const briefPrior = extractMateOwned(briefPath);
 	const charterPrior = extractMateOwned(charterPath);
-	const briefContent = renderSecondmateProjection(id, line, paths.config, briefPrior);
-	const charterContent = renderSecondmateProjection(id, line, paths.config, charterPrior);
+	const briefContent = renderSecondmateProjection(entry, briefPrior);
+	const charterContent = renderSecondmateProjection(entry, charterPrior);
 
 	if (mode === "regen") {
 		mkdirSync(dirname(briefPath), { recursive: true });
@@ -503,11 +379,9 @@ ${HOUSE_TOOLING_BLOCK}
 ${dod}`;
 }
 
-function secondmateScaffold(id: string, projects: string[], charter: string, scope: string, supervisorId: string): string {
+function secondmateScaffold(projects: string[], charter: string, scope: string): string {
 	const projectList = projects.map(p => `- ${p}`).join("\n");
-	return `You are a secondmate: a persistent domain supervisor managed by the main firstmate. Work on your own; do not wait for a human.
-
-# Charter
+	return `# Charter
 ${charter}
 
 # Routing scope
@@ -516,38 +390,10 @@ ${scope}
 # Project clones
 ${projectList}
 
-# Operating model
-You are in an isolated firstmate home. The local \`AGENTS.md\` is your job description, and your local \`data/\`, \`state/\`, \`config/\`, and \`projects/\` dirs are yours to operate.
-The projects above are local clones for work you supervise; they are not an exclusive ownership claim.
-Delegate project work to your own crewmates with the normal firstmate lifecycle: brief, spawn, direct crewmate status-file reporting, \`fm send\` pane steering, teardown, and recovery.
-Do not invent a second delegation system.
-When driving a visible pane or remote machine, state the diagnostic intent first, then send short human-legible expert commands one by one.
-Do not paste chained shell blobs, printf sentinels, or noisy echo scaffolding into the pane.
-You do not generate your own work.
-Act only on tasks the main firstmate routes to you.
-Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
-Supervision is automatic and in-process; there is no watcher, wake-queue, beacon, or separate supervisor process.
-Relevant fleet changes coalesce into one non-visible attention edge; on that edge, read \`fm fleet\` once for the authoritative snapshot rather than expecting event payloads or per-event continuations.
-
-${LEAN_LOOP_BLOCK}
-
-${HOUSE_TOOLING_BLOCK}
-
-# Escalation to main firstmate
-Handle routine work yourself.
-Escalate only cap-actionable transition states - \`done\`, \`blocked\`, \`needs-decision\`, \`failed\`, or a material phase change - through the fleet peer bus.
-Use the agent tool peer_send when available, or type /peer send ${supervisorId} "{state}: {one short line}" from the composer; set priority only for cap-blocking decisions, failures, or work ready for review.
-States: needs-decision, blocked, done, failed.
-Use this only for material phase changes, a cap decision, a real blocker, a failure, or work ready for review.
-Derive decisions from evidence before escalating: for a config, parameter, or design choice, first consult relevant papers/sources, project docs, and prior fleet research (other mates' worktrees, reports, decision journals). If the evidence points to a clearly better option, take it and justify it - escalate a decision ONLY for a genuine toss-up between equally good options or a destructive/irreversible/live-capital-risk action. Never punt a solvable decision upward.
-Routine internal supervision, heartbeats, retries, and crewmate churn stay inside your own home and must not touch the supervisor channel.
-
-# Definition of done
-You are persistent by default. Do not exit just because your queue is empty.
-On startup and restart, run normal firstmate bootstrap and recovery for your own home, but only to RECONCILE work that is already yours: in-flight crewmates, tracked backlog items, and durable watches recorded in this home.
-When you have no assigned or in-flight work after that reconciliation, go idle and wait silently for the main firstmate to route you a task.
-An empty queue is a healthy resting state, not a cue to invent work: never spawn a survey, audit, or any self-directed "find work" task on your own initiative.
-If this charter cannot be carried out, send blocked: {why} or failed: {why} to the main firstmate through the fleet peer bus and stop.`;
+# Mate-owned notes
+${MATE_SECTION_BEGIN}
+${MATE_SECTION_DEFAULT}
+${MATE_SECTION_END}`;
 }
 
 // resolveProjectMode(repo, fmRoot): reads the project's delivery mode by
@@ -618,8 +464,7 @@ async function run(argv: string[]): Promise<number> {
 		const envCharter = envOrUndefined("FM_SECONDMATE_CHARTER");
 		const charter = envCharter ?? "{TASK}";
 		const scope = envOrUndefined("FM_SECONDMATE_SCOPE") ?? charter;
-		const supervisorId = supervisorSlug(paths.config);
-		const content = secondmateScaffold(id, secondmateProjects, charter, scope, supervisorId);
+		const content = secondmateScaffold(secondmateProjects, charter, scope);
 		writeFileSync(briefPath, `${content}\n`);
 		if (charter === "{TASK}") {
 			process.stdout.write(`scaffolded: ${briefPath} (secondmate charter; replace {TASK})\n`);
