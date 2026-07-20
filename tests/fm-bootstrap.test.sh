@@ -67,7 +67,7 @@ SH
   printf '%s\n' "$fakebin"
 }
 
-OMP_EXTENSIONS="whiteboard fleet-bus lavish textguard thinking-tag-guard agent-effectiveness capture"
+OMP_EXTENSIONS="fleet-bus textguard thinking-tag-guard agent-effectiveness capture"
 
 make_ext_fixture() {
   local dir=$1 ext
@@ -190,7 +190,7 @@ test_bootstrap_reports_missing_omp_extension() {
   case_dir="$TMP_ROOT/ext-one-missing"
   mkdir -p "$case_dir/home"
   fakebin=$(make_fake_toolchain "$case_dir")
-  extdir=$(make_ext_fixture "$case_dir/ext" whiteboard fleet-bus lavish thinking-tag-guard agent-effectiveness capture)
+  extdir=$(make_ext_fixture "$case_dir/ext" fleet-bus thinking-tag-guard agent-effectiveness capture)
 
   out=$(run_bootstrap "$case_dir/home" "$fakebin" "$extdir")
   expected='MISSING_EXT: textguard (provision: chezmoi apply - dotfiles repo is the canonical owner)

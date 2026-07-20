@@ -1,0 +1,8 @@
+A farmer has 17 sheep; all but 9 run away. Reason it out, echo the number left.
+If 5 machines take 5 minutes to make 5 widgets, how long for 100 machines to make 100 widgets? Reason, echo minutes.
+A bat and ball cost $1.10; the bat costs $1 more than the ball. Reason, echo the ball price in cents.
+Three boxes (apples, oranges, both) all labeled wrong; you draw one fruit from the box labeled 'both'. Reason how many draws to fix all labels, echo the number.
+Count the letter r in 'strawberry raspberry cranberry'. Reason, echo the count.
+A snail climbs 3 ft/day up a 10 ft well, slips 2 ft each night. Reason, echo the day it escapes.
+With a 3-liter and 5-liter jug, reason the steps to measure exactly 4 liters, echo the number of pour steps.
+Three friends split a $30 bill, get $5 back, keep $1 each, tip the waiter $2. Where's the missing dollar? Reason, echo a one-word verdict.

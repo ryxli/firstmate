@@ -40,9 +40,7 @@ const TOOLS = ["herdr", "node", "gh", "gh-axi", "chrome-devtools-axi", "lavish-a
 // Per-machine provisioned OMP extensions, owned by the dotfiles repo (chezmoi).
 // Bootstrap declares a missing one; it never vendors or installs extensions.
 const OMP_EXTENSIONS = [
-	"whiteboard",
 	"fleet-bus",
-	"lavish",
 	"textguard",
 	"thinking-tag-guard",
 	"agent-effectiveness",

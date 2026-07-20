@@ -1,0 +1,8 @@
+{
+  "name": "whiteboard-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test test/*.test.js"
+  }
+}
