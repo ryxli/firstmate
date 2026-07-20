@@ -13,8 +13,17 @@ import { harnessPid, holderAlive, lockSnapshot, readLockRaw, resolveLockPaths, w
 
 const CLAIM_TIMEOUT_MS = 5_000;
 
+const USAGE = `Usage: fm lock
+       fm lock status
+       fm lock release
+`;
+
 async function run(argv: string[]): Promise<number> {
 	const args = argv.slice(1);
+	if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
+		process.stdout.write(USAGE);
+		return 0;
+	}
 	const paths = resolveLockPaths();
 
 	if (args[0] === "status") {

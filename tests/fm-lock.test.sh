@@ -55,6 +55,14 @@ run_lock() {
   PATH="$TMP_ROOT/bin:$PATH" FM_HOME="$TMP_ROOT/home" "$ROOT/sbin/fm" lock "$@" 2>&1
 }
 
+out=$(run_lock --help) || fail "lock help failed: $out"
+case "$out" in
+  *'Usage: fm lock'*'fm lock status'*'fm lock release'*) : ;;
+  *) fail "lock help omitted supported commands: $out" ;;
+esac
+[ ! -e "$TMP_ROOT/home/state/.lock" ] || fail "lock help acquired the session lock"
+pass "fm-lock help lists commands without acquiring"
+
 out=$(run_lock) || true
 case "$out" in
   *'lock acquired: harness pid 222'*) : ;;
