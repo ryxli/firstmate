@@ -545,3 +545,57 @@ export function landAfterFfMerge(taskId: string, detail: { trunkSha: string; bra
 	saveArtifact(record, dataDir);
 	return record;
 }
+
+/**
+ * Land from a remote merge SHA (PR observation). Does not require local default
+ * branch to be current - only that mergeSha is present and carries the accepted patch-id.
+ */
+export function landAtMergeSha(
+	taskId: string,
+	detail: { mergeSha: string; branch: string; repo: string; method?: LandProof["method"] },
+	dataDir = resolveDataDir(),
+): ArtifactRecord {
+	const record = loadArtifact(taskId, dataDir);
+	if (!record?.acceptedRevision || !record.delivery) {
+		throw new ArtifactError(`landAtMergeSha requires accepted artifact for ${taskId}`);
+	}
+	if (record.delivery.state === "landed") return record;
+	const proj = detail.repo;
+	const accepted = record.acceptedRevision;
+	if (!gitOk(proj, ["cat-file", "-e", `${detail.mergeSha}^{commit}`])) {
+		throw new ArtifactError(`mergeSha missing from repo: ${detail.mergeSha}`);
+	}
+	const want = accepted.patchId;
+	let found = false;
+	if (detail.mergeSha === accepted.candidateSha || gitOk(proj, ["merge-base", "--is-ancestor", accepted.candidateSha, detail.mergeSha])) {
+		found = true;
+	} else {
+		const mergePid = patchIdForCommit(proj, detail.mergeSha);
+		if (mergePid === want) found = true;
+		else {
+			const log = git(proj, ["log", "--format=%H", `${accepted.parentSha}..${detail.mergeSha}`]);
+			for (const sha of log.stdout.split(/\r?\n/).filter(Boolean)) {
+				if (patchIdForCommit(proj, sha) === want) {
+					found = true;
+					break;
+				}
+			}
+		}
+	}
+	if (!found) {
+		throw new ArtifactError(`accepted patch-id ${want} not found in merge ${detail.mergeSha}`);
+	}
+	const proof: LandProof = {
+		candidateSha: accepted.candidateSha,
+		patchId: accepted.patchId,
+		trunkSha: detail.mergeSha,
+		method: detail.method ?? "merge-commit",
+		patchEquivalent: true,
+		repo: proj,
+		branch: detail.branch,
+	};
+	appendReceipt(record, "landed", `landed:${taskId}:${accepted.patchId}`, { ...proof });
+	record.delivery.state = "landed";
+	saveArtifact(record, dataDir);
+	return record;
+}

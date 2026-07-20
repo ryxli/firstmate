@@ -64,21 +64,10 @@ Idle with an all-blocked list is legitimate; idle with claimed work is the failu
 - On REJECT: relay the minimum fix; the delta re-review scopes to the rejected finding only, so fix cycles take minutes.
 - Everything below the blast-radius bar ships on the project's native gates — review is not a default tax.
 
-## Parallel work (ownership, or corruption)
+## Parallel work and escalation
 
-- Before dispatching any implementation agent, read every crewmate's active-lanes list for overlap; announcing is bidirectional (crewmates announce their spawns too).
-- Deconfliction is complete only on CONFIRMED stand-down (the lane visibly gone), not on a sent message — two writers in the same files can corrupt mid-edit.
-- Give every worker an explicit do-not-touch list and pathspec-limited commits; workers run the narrowest native gate that could catch their regression.
-- The first cross-boundary desync (producer/consumer, schema/API) buys the GENERAL enforcement test immediately — never a per-section patch; the class recurs until the catch-all exists.
-- Landing hygiene (format, stale test pins) does not improve via reminders; put it in the committer's own pre-commit gates.
-
-## Authority and escalation
-
-- Operator-owned dials (risk values, spend): relay decisions with the operator's words quoted verbatim under an explicit OPERATOR DECISION label; mechanisms stay sacred, values are the operator's.
-- When exercising delegated authority (attestations, arming), state the evidence basis and an explicit scope limit ("recurrence = fresh incident, not pre-cleared").
-- When a crewmate freezes on something the system itself classifies as benign, issue justify-or-proceed: "ONE concrete reason this is unsafe now, otherwise do X and report."
-  This pattern requires explicitly granted authority — set that boundary with the operator consciously.
-- Escalate only at the agreed bar; route crewmate-answerable questions to crewmates, decide the rest yourself.
+Ownership, deconfliction, peer bus, and turn legal-moves: `skill://lane-governance`.
+This skill adds crew-supervisor specifics only: read active-lanes before dispatch; deconfliction needs confirmed stand-down; high-blast-radius work gets a named fresh-context reviewer; escalate only at the agreed bar.
 
 ## Memory discipline
 

@@ -41,7 +41,7 @@ import {
 	type Task,
 	type TaskState,
 } from "../lib/backlog-store";
-import { collectSnapshot, findTask, normalizeTaskState, rankedTasks } from "../../bridge/collect";
+import { actionableFleetView, collectSnapshot, findTask, normalizeTaskState, rankedTasks } from "../../bridge/collect";
 import type { FleetSnapshot, TaskRow } from "../../bridge/fleet";
 import { didYouMean } from "../common";
 import {
@@ -52,6 +52,7 @@ import {
 	canonicalizeDeliveryMode,
 	deriveCandidateFromGit,
 	ensureArtifact,
+	isLanded,
 	loadArtifact,
 	projectRepo,
 	reconcileLanded,
@@ -60,7 +61,26 @@ import {
 	submitCandidate,
 	supersede,
 } from "../lib/artifact";
+import { receiptLine, releaseWorkerPane as releasePane, shortSha } from "../lib/operator";
 import { spawnSync } from "node:child_process";
+
+function shipHint(id: string): string {
+	const art = loadArtifact(id);
+	const mode = art?.delivery?.mode ?? canonicalizeDeliveryMode(
+		(() => {
+			try {
+				const meta = readFileSync(join(resolveHome(), "state", `${id}.meta`), "utf8");
+				const line = meta.split(/\r?\n/).find(l => l.startsWith("mode="));
+				return line ? line.slice(5) : "pr";
+			} catch {
+				return "pr";
+			}
+		})(),
+	);
+	return mode === "trunk"
+		? `Run \`fm accept ${id}\` when ready, then \`fm finish ${id}\` to land`
+		: `Run \`fm accept ${id}\` when ready, then \`fm finish ${id}\` after the PR merges`;
+}
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -320,7 +340,7 @@ function cmdAdd(rest: string[]): number {
 	const all = store.list();
 	const attrs = [kind, repo ? `repo ${repo}` : undefined].filter(Boolean).join(", ");
 	const blocks = [confirm(`added ${id}${attrs ? ` (${attrs})` : ""} -> ${stateLabel(state)}`), renderList("task", [toRow(task, all)])];
-	const hints = state === "inflight" ? [`Run \`fm tasks done ${id} --pr <url>\` when it ships`] : [`Run \`fm tasks start ${id}\` to move it to in flight`, `Run \`fm tasks block ${id} --by <other>\` to record a dependency`];
+	const hints = state === "inflight" ? [shipHint(id)] : [`Run \`fm tasks start ${id}\` to move it to in flight`, `Run \`fm tasks block ${id} --by <other>\` to record a dependency`];
 	blocks.push(renderHelp(hints));
 	process.stdout.write(`${renderOutput(blocks)}\n`);
 	return 0;
@@ -395,7 +415,7 @@ function cmdStart(rest: string[]): number {
 	const all = store.list();
 	const blocks = [confirm(already ? `start ${id} already in flight` : `start ${id} -> ${stateLabel(task.state)}`)];
 	if (already) blocks.push("already: true");
-	if (!already) blocks.push(renderHelp([`Run \`fm tasks done ${id} --pr <url>\` when it ships`]));
+	if (!already) blocks.push(renderHelp([shipHint(id)]));
 	process.stdout.write(`${renderOutput(blocks)}\n`);
 	return 0;
 }
@@ -852,15 +872,21 @@ async function cmdFleet(rest: string[]): Promise<number> {
 		return 0;
 	}
 	let state: TaskRow["state"] | undefined;
-	if (args.length === 2) {
-		if (args[0] !== "--state") return errorOut(`unexpected argument: ${args[0]}`, "VALIDATION_ERROR", ["Use `--state` to filter tasks."]);
-		state = normalizeTaskState(args[1]);
-		if (!state) return errorOut(`invalid task state: ${args[1]}`, "VALIDATION_ERROR", ["Choose in-flight, queued, or done."]);
-	} else if (args.length !== 0) {
-		return errorOut("invalid fleet arguments", "VALIDATION_ERROR", ["Use `fm tasks fleet [--state <in-flight|queued|done>]` or `fm tasks fleet get <id>`."]);
+	const full = args.includes("--full");
+	const filtered = args.filter(a => a !== "--full");
+	if (filtered.length === 2) {
+		if (filtered[0] !== "--state") return errorOut(`unexpected argument: ${filtered[0]}`, "VALIDATION_ERROR", ["Use `--state` to filter tasks."]);
+		state = normalizeTaskState(filtered[1]);
+		if (!state) return errorOut(`invalid task state: ${filtered[1]}`, "VALIDATION_ERROR", ["Choose in-flight, queued, or done."]);
+	} else if (filtered.length !== 0) {
+		return errorOut("invalid fleet arguments", "VALIDATION_ERROR", ["Use `fm tasks fleet [--state <in-flight|queued|done>] [--full]` or `fm tasks fleet get <id>`."]);
 	}
 	const snapshot = await collectSnapshot();
-	process.stdout.write(`${toon({ command: "tasks fleet", result: rankedTasks(snapshot, state) })}\n`);
+	if (!state && !full) {
+		process.stdout.write(`${toon({ command: "tasks fleet", result: actionableFleetView(snapshot) })}\n`);
+	} else {
+		process.stdout.write(`${toon({ command: "tasks fleet", result: rankedTasks(snapshot, state, { full }) })}\n`);
+	}
 	return 0;
 }
 
@@ -870,17 +896,30 @@ async function cmdFleet(rest: string[]): Promise<number> {
 function cmdDashboard(): number {
 	const store = BacklogStore.load(resolveBacklogPath());
 	const all = store.list();
-	const inFlight = all.filter(t => t.state === "inflight");
-	const queued = all.filter(t => t.state === "queued");
-	const doneCount = all.filter(t => t.state === "done").length;
-	const readyCount = readyTasks(all).length;
-	const blocked = blockedIds(all);
+	// Migrate-on-read: landed artifacts are not active even if backlog lags.
+	let migrated = 0;
+	for (const t of all.filter(x => x.state === "inflight")) {
+		const art = loadArtifact(t.id);
+		if (art && isLanded(art)) {
+			const proof =
+				String(art.delivery?.receipts.find(r => r.type === "landed")?.detail?.trunkSha ?? art.acceptedRevision?.candidateSha ?? "landed");
+			store.transition(t.id, "done", { proof: `landed:${proof.slice(0, 12)}` });
+			migrated++;
+		}
+	}
+	if (migrated > 0) store.save();
+	const refreshed = store.list();
+	const inFlight = refreshed.filter(t => t.state === "inflight");
+	const queued = refreshed.filter(t => t.state === "queued");
+	const doneCount = refreshed.filter(t => t.state === "done").length;
+	const readyCount = readyTasks(refreshed).length;
+	const blocked = blockedIds(refreshed);
 
 	const blocks: string[] = [];
-	blocks.push(inFlight.length > 0 ? renderList("in_flight", inFlight.map(t => toRow(t, all))) : "in_flight: 0 tasks");
+	blocks.push(inFlight.length > 0 ? renderList("in_flight", inFlight.map(t => toRow(t, refreshed))) : "in_flight: 0 tasks");
 	if (queued.length > 0) {
 		blocks.push(toon({ summary: { queued: queued.length, ready: readyCount } }));
-		blocks.push(renderList("queued", queued.slice(0, 10).map(t => toRow(t, all))));
+		blocks.push(renderList("queued", queued.slice(0, 10).map(t => toRow(t, refreshed))));
 	} else {
 		blocks.push("queued: 0 tasks");
 	}
@@ -904,18 +943,7 @@ function flagVal(args: string[], name: string): string | undefined {
 	return i >= 0 ? args[i + 1] : undefined;
 }
 
-function releaseWorkerPane(taskId: string): void {
-	const metaPath = join(resolveHome(), "state", `${taskId}.meta`);
-	if (!existsSync(metaPath)) return;
-	let pane = "";
-	for (const line of readFileSync(metaPath, "utf8").split(/\r?\n/)) {
-		if (line.startsWith("pane=")) pane = line.slice(5);
-	}
-	if (!pane) return;
-	spawnSync("herdr", ["pane", "close", pane], { stdio: ["ignore", "ignore", "ignore"] });
-}
-
-/** Thin WorkerLoop on data/artifacts/<id>.json; land proves patch-id on trunk. */
+/** Deprecated diagnostic aliases - prefer fm accept / revise / finish / artifact show. */
 function cmdArtifact(rest: string[]): number {
 	const op = rest[0];
 	const id = rest[1];
@@ -923,28 +951,32 @@ function cmdArtifact(rest: string[]): number {
 		process.stdout.write(
 			`${toon({
 				command: "tasks artifact",
-				usage: "fm tasks artifact <candidate|revise|accept|abandon|supersede|land|discard|show> <id> ...",
-				notes: [
-					"durable record: data/artifacts/<id>.json",
-					"land proves patch-id equivalence on trunk (no note-as-proof)",
-					"teardown dispose only when landed or discard-authorized",
-					"deps resolve only when landed (or successor chain landed)",
-				],
+				usage: "deprecated: use fm accept|revise|finish <id>; fm artifact show <id> [--full]",
+				legacy: "fm tasks artifact <candidate|revise|accept|abandon|supersede|land|discard|show> <id> ...",
 			})}\n`,
 		);
 		return 0;
 	}
 	if (!id) return errorOut("usage: fm tasks artifact <op> <id> ...", "VALIDATION_ERROR");
+	receiptLine(`warn: fm tasks artifact is deprecated; prefer fm accept|revise|finish / fm artifact show`);
 	try {
 		if (op === "show") {
 			const record = loadArtifact(id);
 			if (!record) return errorOut(`no artifact for ${id}`, "NOT_FOUND");
-			process.stdout.write(`${toon({ command: "tasks artifact show", result: record })}\n`);
+			if (rest.includes("--full")) {
+				process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
+			} else {
+				const sha = shortSha(record.acceptedRevision?.candidateSha ?? record.revisions.at(-1)?.candidateSha ?? "-");
+				receiptLine(
+					`${id} review=${record.reviewState} delivery=${record.delivery?.state ?? "none"} mode=${record.delivery?.mode ?? "-"} sha=${sha}`,
+				);
+			}
 			return 0;
 		}
 		if (op === "land" || op === "landed") {
 			const record = reconcileLanded(id);
-			process.stdout.write(`${toon({ command: "tasks artifact land", result: record })}\n`);
+			const trunk = String(record.delivery?.receipts.find(r => r.type === "landed")?.detail?.trunkSha ?? "");
+			receiptLine(`landed ${id} as ${shortSha(trunk)}; patch-equivalent`);
 			return 0;
 		}
 		const project = flagVal(rest, "--project") ?? loadArtifact(id)?.project ?? "unknown";
@@ -965,6 +997,9 @@ function cmdArtifact(rest: string[]): number {
 				filesChanged: derived.filesChanged,
 				evidence,
 			});
+			saveArtifact(record);
+			receiptLine(`candidate ${id} ${shortSha(derived.candidateSha)}`);
+			return 0;
 		} else if (op === "revise") {
 			const why = flagVal(rest, "--why");
 			const bar = flagVal(rest, "--bar");
@@ -976,19 +1011,23 @@ function cmdArtifact(rest: string[]): number {
 				nextAcceptanceBar: bar,
 				priorPatchIds: record.revisions.map(r => r.patchId),
 			});
+			saveArtifact(record);
+			receiptLine(`revise ${id}: ${why}`);
+			return 0;
 		} else if (op === "accept") {
 			const by = flagVal(rest, "--by") ?? "supervisor";
 			const criteria = rest.includes("--criterion")
 				? rest.filter((_, i, a) => a[i - 1] === "--criterion")
 				: ["candidate-review"];
-			accept(record, canonicalizeDeliveryMode(flagVal(rest, "--mode") ?? "pr"), {
+			const mode = canonicalizeDeliveryMode(flagVal(rest, "--mode") ?? "pr");
+			accept(record, mode, {
 				by,
 				criteria,
 				note: flagVal(rest, "--note"),
 			});
 			saveArtifact(record);
-			releaseWorkerPane(id);
-			process.stdout.write(`${toon({ command: "tasks artifact accept", result: loadArtifact(id) })}\n`);
+			releasePane(id);
+			receiptLine(`accepted ${id} ${shortSha(record.acceptedRevision?.candidateSha ?? "")} -> queued for ${mode}`);
 			return 0;
 		} else if (op === "abandon") {
 			const reason = flagVal(rest, "--reason");
@@ -1008,7 +1047,7 @@ function cmdArtifact(rest: string[]): number {
 			return errorOut(`unknown artifact op: ${op}`, "VALIDATION_ERROR");
 		}
 		saveArtifact(record);
-		process.stdout.write(`${toon({ command: `tasks artifact ${op}`, result: loadArtifact(id) })}\n`);
+		receiptLine(`${op} ${id}`);
 		return 0;
 	} catch (error) {
 		if (error instanceof ArtifactError) return errorOut(error.message, "VALIDATION_ERROR");

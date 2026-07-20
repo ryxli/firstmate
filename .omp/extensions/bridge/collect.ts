@@ -132,11 +132,14 @@ export function resolveMainHome(cwd?: string): string | null {
 		const explicit = findHome(explicitPath);
 		if (explicit) return explicit;
 	}
-	const envCandidates = [process.env.FM_HOME, process.env.FIRSTMATE_HOME, process.env.FM_ROOT_OVERRIDE]
-		.map(value => value?.trim())
-		.filter((value): value is string => Boolean(value));
-	for (const env of envCandidates) {
-		const envPath = env.replace(/\/+$/, "");
+	// FM_HOME / FIRSTMATE_HOME pin the sole discovery root - never fall through
+	// to cwd walk-up or hardcoded clone paths (sandbox isolation for finish/fleet).
+	const pinnedHome = (process.env.FM_HOME?.trim() || process.env.FIRSTMATE_HOME?.trim() || "").replace(/\/+$/, "");
+	if (pinnedHome) return pinnedHome;
+
+	const rootOverride = process.env.FM_ROOT_OVERRIDE?.trim();
+	if (rootOverride) {
+		const envPath = rootOverride.replace(/\/+$/, "");
 		if (isExplicitMainHome(envPath)) return envPath;
 		const envHome = findHome(envPath);
 		if (envHome) return envHome;
@@ -1021,16 +1024,43 @@ function taskAttentionKey(task: TaskRow): string {
  * surface before ordinary state ordering), then by state, then id. Shared by
  * `fm fleet tasks`/`fm fleet task get` and the `fm tasks fleet` facet so both
  * surfaces stay byte-identical.
+ *
+ * Default (no state, full=false): actionable-only - excludes Done history.
+ * Pass state=done or full=true to include retained Done rows.
  */
-export function rankedTasks(snapshot: FleetSnapshot, state?: TaskRow["state"]): TaskRow[] {
+export function rankedTasks(
+	snapshot: FleetSnapshot,
+	state?: TaskRow["state"],
+	opts: { full?: boolean } = {},
+): TaskRow[] {
 	const attention = new Map((snapshot.attention ?? snapshot.pending).map((row, index) => [row.key ?? `${row.home}/${row.id}`, { rank: row.clsRank, index }]));
 	const stateRank: Record<TaskRow["state"], number> = { inflight: 3, queued: 2, done: 1 };
 	return snapshot.tasks
-		.filter(task => !state || task.state === state)
+		.filter(task => {
+			if (state) return task.state === state;
+			if (opts.full) return true;
+			return task.state !== "done";
+		})
 		.slice()
 		.sort((a, b) => {
 			const aa = attention.get(taskAttentionKey(a));
 			const bb = attention.get(taskAttentionKey(b));
 			return (bb?.rank ?? stateRank[b.state]) - (aa?.rank ?? stateRank[a.state]) || (aa?.index ?? 9999) - (bb?.index ?? 9999) || taskAttentionKey(a).localeCompare(taskAttentionKey(b));
 		});
+}
+
+/** Compact default fleet board: attention + active artifacts + non-done tasks. */
+export function actionableFleetView(snapshot: FleetSnapshot): Record<string, unknown> {
+	const attention = snapshot.attention ?? snapshot.pending;
+	return {
+		schema: "fleet-actionable/1",
+		generatedAt: snapshot.generatedAt,
+		home: snapshot.home,
+		activation: snapshot.activation,
+		health: snapshot.health,
+		attention,
+		artifacts: snapshot.artifacts ?? [],
+		tasks: rankedTasks(snapshot),
+		notes: snapshot.notes,
+	};
 }

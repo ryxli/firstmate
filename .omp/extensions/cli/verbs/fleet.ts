@@ -2,6 +2,7 @@
 // Migrated verbatim (behavior-preserving) out of the former sbin/fm monolith.
 
 import {
+	actionableFleetView,
 	collectSnapshot,
 	findAgent,
 	findTask,
@@ -14,10 +15,11 @@ import { ambiguous, missing, operationalError, output, validationError } from ".
 import { commandHelp } from "../help";
 
 async function run(argv: string[]): Promise<number> {
-	if (argv.length === 1) {
+	if (argv.length === 1 || (argv.length === 2 && argv[1] === "--full")) {
 		try {
 			const snapshot = await collectSnapshot();
-			output({ command: "fleet", result: snapshot });
+			const full = argv[1] === "--full";
+			output({ command: "fleet", result: full ? snapshot : actionableFleetView(snapshot) });
 			return 0;
 		} catch (error) {
 			return operationalError("fleet", error);

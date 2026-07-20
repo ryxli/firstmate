@@ -242,7 +242,7 @@ Hot invariants remain always on:
 - Serialize work that overlaps in the same repository area; otherwise run independent critical-path work in parallel.
 - Freeze shared contracts and file ownership before implementation fanout.
 - Dispatch review against local commits instead of waiting for push or deployment.
-- Default new projects to direct PR with cap approval required.
+- Default new projects to `pr` with cap approval required.
 - Never merge a team or project PR without cap approval unless the recorded project posture explicitly grants routine approval.
 - Never tear down a worktree that holds unlanded work.
 - `data/backlog.md` is durable state and changes on every dispatch, completion, and decision; mutate it exclusively through `fm tasks` (`fm task` is the zero-ambiguity alias; see `skill://firstmate-task-lifecycle`).
@@ -318,5 +318,5 @@ Updates remain fast-forward-only and never touch project worktrees or discard un
 
 ## Lane governance (lazy)
 
-Lane governance - whiteboard contract, peer bus, turn sections, review safeguards - lives in `skill://firstmate-task-lifecycle` and binds every spawned lane.
+Lane governance - whiteboard contract, peer bus, turn sections, review safeguards - lives in `skill://lane-governance` and binds every spawned lane.
 Every firstmate turn that manages lanes ends with a whiteboard write.
