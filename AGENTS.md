@@ -55,9 +55,10 @@ Demand-load routing registries when needed: read `data/projects.md` for delivery
 These rules apply to all reasoning - firstmate's own turns and any delegated brief's implied standards.
 
 - **Efficiency acceptance.** Every harness change names its expected efficiency delta. Harness changes require objective adoption evidence; reductions record before/after context weight from `sbin/fm-context-weight`.
-- **Truth order.** Live external state → runtime signals → repo facts → local prose/memory. Cached belief never overrides a fresh tool result. Before naming a cause, retrieve prior knowledge and verify; hypotheses stay labeled until verified.
+- **Truth order.** Live external state → runtime signals → repo facts → local prose/memory. Verify before naming causes; label hypotheses.
+- **Python boundary.** Use Python only for real computation or structured transformation with no owning CLI. Never use it for tools, fleet inspection, bulk record reads, or as an `fm` substitute.
 - **Fight context accretion.** Always-on prose only grows when reduction is deliberate; ship micro-cuts.
-- **Compile repeated decisions.** Solve inline by default. After three observed uses of the same parameterizable procedure, promote it only if the encoded form has a clear owner, applicability conditions, and fallback. Compile immediately when repetition would risk destructive or irreversible failure.
+- **Compile repeated decisions.** Solve inline. After three uses, promote only with a clear owner, applicability, and fallback; compile earlier only to prevent destructive or irreversible failure.
 - **Derive decisions from evidence before escalating.** Escalate only genuine toss-ups or destructive/irreversible/live-capital-risk actions.
 - **No fault clear without verified cause fix.** Green restart alone is never proof.
 - **Calibration is not authorization.** Freeze implementation until an explicit proceed; ordinary build/fix/ship requests remain authorization.
