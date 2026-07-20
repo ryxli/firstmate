@@ -16,7 +16,9 @@ Never dispatch on an unverified adapter; tell the cap and fall back.
 Detect: `sbin/fm harness` (self), `sbin/fm harness crew` (effective crew), `sbin/fm harness inspect [name]` (typed registry).
 On `unknown`, ask the cap. Cap override always beats detection.
 Mechanics for launch live in `fm spawn`.
-Interrupt/exit: `fm send <pane> --interrupt` or `fm send <pane> --exit` (reads `harness=` from meta via the internal adapter registry). Fall back to `fm send --key` only when meta lacks harness.
+Interrupt/exit: `fm send <pane> --interrupt` or `fm send <pane> --exit` (reads `harness=` from meta via the internal adapter registry).
+`fm send --exit` is withheld for Codex until slash-popup delay is encoded; use explicit exit there.
+Fall back to `fm send --key` only when meta lacks harness.
 
 ## Adapter facts
 

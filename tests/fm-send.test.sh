@@ -49,11 +49,12 @@ SH
 }
 
 make_home() {
-  local home=$1
+  local home=$1 harness=${2:-omp}
   mkdir -p "$home/state"
   cat > "$home/state/task.meta" <<EOF
 pane=w1:p1
 kind=ship
+harness=$harness
 EOF
 }
 
@@ -296,6 +297,28 @@ test_sendq_runtime_is_removed() {
   pass "background send queue is removed"
 }
 
+test_codex_adapter_exit_is_withheld() {
+  local dir home fb rc
+  dir="$TMP_ROOT/codex-exit"
+  home="$dir/home"
+  mkdir -p "$dir"
+  make_home "$home" codex
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_HERDR_LOG="$dir/herdr.log" \
+    FM_FAKE_AGENT_STATUS="idle" FM_FAKE_PANE_LINES="" \
+    "$ROOT/sbin/fm" send fm-task --exit >/dev/null 2>"$dir/err" || rc=$?
+
+  [ "$rc" = "1" ] || fail "codex --exit returned rc $rc, want 1"
+  grep -F "not supported for harness 'codex'" "$dir/err" >/dev/null \
+    || fail "codex --exit did not explain withhold: $(cat "$dir/err")"
+  if [ -f "$dir/herdr.log" ] && grep -qF 'pane run' "$dir/herdr.log"; then
+    fail "codex --exit must not pane-run exit: $(cat "$dir/herdr.log")"
+  fi
+  pass "fm send --exit withholds Codex until delay is encoded"
+}
+
 test_send_submits_once
 test_send_blocks_human_draft
 test_send_proceeds_on_empty_current_claude_code_composer
@@ -307,3 +330,4 @@ test_sequential_sends_do_not_amplify
 test_key_bypasses_composer_guard
 test_missing_home_metadata_uses_cwd_home
 test_sendq_runtime_is_removed
+test_codex_adapter_exit_is_withheld

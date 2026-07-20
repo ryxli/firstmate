@@ -11,6 +11,11 @@ export interface HarnessAdapter {
 	interruptKeys: string[];
 	/** How many Escape presses (or key sequence length) for interrupt. */
 	interruptCount: number;
+	/**
+	 * Whether `fm send --exit` may deliver exitCommand via atomic pane run.
+	 * False when exit needs harness-specific timing (e.g. Codex slash popup delay).
+	 */
+	adapterAwareExit: boolean;
 	skillInvocation: string;
 	envMarker?: string;
 	notes: string[];
@@ -22,6 +27,7 @@ export const HARNESS_ADAPTERS: Record<HarnessName, HarnessAdapter> = {
 		exitCommand: "/quit",
 		interruptKeys: ["Escape"],
 		interruptCount: 1,
+		adapterAwareExit: true,
 		skillInvocation: "/skill:<name>",
 		envMarker: "OMPCODE=1",
 		notes: [
@@ -35,6 +41,7 @@ export const HARNESS_ADAPTERS: Record<HarnessName, HarnessAdapter> = {
 		exitCommand: "/exit",
 		interruptKeys: ["Escape"],
 		interruptCount: 1,
+		adapterAwareExit: true,
 		skillInvocation: "/<skill>",
 		envMarker: "CLAUDECODE=1",
 		notes: [
@@ -47,9 +54,10 @@ export const HARNESS_ADAPTERS: Record<HarnessName, HarnessAdapter> = {
 		exitCommand: "/quit",
 		interruptKeys: ["Escape"],
 		interruptCount: 1,
+		adapterAwareExit: false,
 		skillInvocation: "$<skill>",
 		notes: [
-			"Slash popup needs ~1s between text and Enter; fm-send handles it.",
+			"Slash popup needs ~1s between text and Enter; fm send --exit is withheld until that delay is encoded.",
 			"Directory trust on first run per repo root.",
 			"Resume: codex resume <session-id>.",
 		],
@@ -59,6 +67,7 @@ export const HARNESS_ADAPTERS: Record<HarnessName, HarnessAdapter> = {
 		exitCommand: "/exit",
 		interruptKeys: ["Escape", "Escape"],
 		interruptCount: 2,
+		adapterAwareExit: true,
 		skillInvocation: "(harness-native)",
 		notes: [
 			"Double Escape interrupt; flaky during long shells - may need exit + relaunch.",
@@ -70,6 +79,7 @@ export const HARNESS_ADAPTERS: Record<HarnessName, HarnessAdapter> = {
 		exitCommand: "/quit",
 		interruptKeys: ["Escape"],
 		interruptCount: 1,
+		adapterAwareExit: true,
 		skillInvocation: "(none)",
 		envMarker: "PI_CODING_AGENT=true",
 		notes: [
@@ -96,4 +106,9 @@ export function interruptPlan(name: string): { keys: string[]; count: number } |
 
 export function exitCommand(name: string): string | undefined {
 	return getHarnessAdapter(name)?.exitCommand;
+}
+
+/** Whether `fm send --exit` may use atomic pane-run delivery for this harness. */
+export function adapterAwareExitSupported(name: string): boolean {
+	return getHarnessAdapter(name)?.adapterAwareExit === true;
 }

@@ -15,8 +15,6 @@ Authoritative state is the whiteboard and Working list, not pane memory.
 
 Write the board only when lane state, evidence, disposition, decision, or wake condition changes.
 
-Behavioral cases (compile-checked by `fm whiteboard-write-gate`):
-
 - Duplicate reviewer completion → no write
 - No-op system notice → no write
 - New rejection → one write with the new disposition

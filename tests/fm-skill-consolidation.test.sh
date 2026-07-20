@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavioral contract for fm afk and whiteboard-write-gate.
+# Behavioral contract for fm afk and harness registry after skill consolidation.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FM="$ROOT/sbin/fm"
@@ -24,19 +24,25 @@ case "$out" in *active*) pass "afk enter active";; *) fail "expected active: $ou
 
 # half-exit prevention: digest present must clear with exit
 printf '# While you were away\n\n## Needs you\n- demo\n' > "$FM_STATE_OVERRIDE/.idle-digest.md"
-# idle-digest clear expects its format; begin first if needed
 "$FM" idle-digest begin >/dev/null 2>&1 || true
 "$FM" afk exit >/dev/null || fail "afk exit failed"
 [ ! -f "$FM_STATE_OVERRIDE/.afk" ] || fail "afk exit left flag"
 [ ! -f "$FM_STATE_OVERRIDE/.idle-digest.md" ] || fail "afk exit left digest"
 pass "afk exit clears flag and digest"
 
-# --- whiteboard-write-gate ---
-"$FM" whiteboard-write-gate --self-test || fail "whiteboard-write-gate self-test"
-pass "whiteboard-write-gate behavioral cases"
+# enter must not leave .afk if digest resume fails
+rm -f "$FM_STATE_OVERRIDE/.afk"
+mkdir -p "$FM_STATE_OVERRIDE/.idle-digest.md"  # invalid: path is a directory
+rc=0
+"$FM" afk enter >/dev/null 2>"$TMP/afk-enter.err" || rc=$?
+[ "$rc" -ne 0 ] || fail "afk enter should fail when idle-digest begin fails"
+[ ! -f "$FM_STATE_OVERRIDE/.afk" ] || fail "afk enter left .afk after digest begin failure"
+rm -rf "$FM_STATE_OVERRIDE/.idle-digest.md"
+pass "afk enter does not commit flag when digest begin fails"
 
 # --- harness registry ---
 "$FM" harness inspect omp | grep -q '"exitCommand": "/quit"' || fail "harness inspect omp"
+"$FM" harness inspect codex | grep -q '"adapterAwareExit": false' || fail "codex withholds adapter-aware exit"
 "$FM" harness interrupt-keys opencode | grep -q 'Escape Escape' || fail "opencode double escape"
 "$FM" harness exit-command claude | grep -q '/exit' || fail "claude exit"
 pass "harness adapter registry inspect"

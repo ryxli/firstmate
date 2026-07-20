@@ -29,7 +29,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadArtifact } from "../lib/artifact";
-import { exitCommand, interruptPlan } from "../lib/harness-adapters";
+import { adapterAwareExitSupported, exitCommand, interruptPlan } from "../lib/harness-adapters";
 import { paneInputPending, resolveLivePane } from "../lib/herdr";
 import { homeFromCwd } from "../lib/root";
 
@@ -135,6 +135,12 @@ async function run(argv: string[]): Promise<number> {
 		const cmd = exitCommand(harness);
 		if (!cmd) {
 			process.stderr.write(`error: no exit command for harness '${harness}'\n`);
+			return 1;
+		}
+		if (!adapterAwareExitSupported(harness)) {
+			process.stderr.write(
+				`error: fm send --exit is not supported for harness '${harness}' (exit delivery needs harness-specific timing); use fm send --key / explicit slash exit until encoded\n`,
+			);
 			return 1;
 		}
 		if (paneInputPending(pane)) {

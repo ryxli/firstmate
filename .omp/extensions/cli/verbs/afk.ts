@@ -61,14 +61,16 @@ async function run(argv: string[]): Promise<number> {
 	}
 
 	if (sub === "enter") {
-		writeFileSync(paths.afk, `${Math.floor(Date.now() / 1000)}\n`);
+		// Resume digest before committing the flag so a begin failure cannot leave
+		// away-mode half-entered.
 		if (existsSync(paths.digest)) {
 			const began = runIdleDigest(paths.fmBin, "begin");
 			if (began.status !== 0) {
-				process.stderr.write(`error: afk enter set flag but idle-digest begin failed\n${began.stderr}`);
+				process.stderr.write(`error: afk enter: idle-digest begin failed; flag not set\n${began.stderr}`);
 				return 1;
 			}
 		}
+		writeFileSync(paths.afk, `${Math.floor(Date.now() / 1000)}\n`);
 		process.stdout.write(statusLine(paths));
 		return 0;
 	}
