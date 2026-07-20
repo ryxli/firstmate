@@ -13,8 +13,9 @@ export function commandHelp(command = "fm", options: { secondmate?: boolean } = 
 		{ command: "fleet agent get <id>", description: "Full agent record; bare ids must be unique." },
 		{ command: "fleet metrics", description: "Optional cost and productivity metrics." },
 		{ command: "fleet snapshot", description: "Raw FleetSnapshot JSON for visual consumers (--json), optionally with metrics." },
+		{ command: "fleet view", description: "Read-only visual fleet dashboard rendered from the shared FleetSnapshot collector." },
 	];
-	const fleetUsage = "fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics|snapshot [--json] [--metrics] [--home <path>]]";
+	const fleetUsage = "fleet [--check] [update|tasks [--state <in-flight|queued|done>]|task get <id>|agent get <id>|metrics|snapshot [--json] [--metrics] [--home <path>]|view [--no-open]]";
 	return {
 		command,
 		usage: home ? "fm home <check|repair> <mate|--all>" : root ? options.secondmate ? `fm ${fleetUsage}` : `fm ${fleetUsage} | home <check|repair> <mate|--all>` : `fm ${fleetUsage}`,

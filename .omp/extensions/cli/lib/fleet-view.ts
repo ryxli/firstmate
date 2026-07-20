@@ -1,7 +1,5 @@
-// fm verb: fleet-view - read-only visual fleet dashboard for the firstmate crew.
-// Migrated verbatim (behavior-preserving) out of sbin/fm fleet-view, with the
-// shared sbin/fm view-lib helpers it used inlined here (that lib file is not
-// ported; sbin/fm kpi-view keeps its own copy of the same helpers).
+// fm fleet view - read-only visual fleet dashboard for the firstmate crew.
+// Migrated from the former parent-level `fm fleet-view` command.
 //
 // Runs the shared typed FleetSnapshot collector and embeds its topology-rich
 // snapshot into a self-contained HTML artifact (default .lavish/fleet.html).
@@ -16,14 +14,14 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectSnapshot } from "../../bridge/collect";
 
-const PROG = "fm-fleet-view";
+const PROG = "fm fleet view";
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/+$/, "");
 const TEMPLATE = `${REPO_ROOT}/sbin/fm-fleet-view.template.html`;
 const MARKER = "__FLEET_PAYLOAD__";
 const LINE_SEPARATOR = String.fromCharCode(0x2028);
 const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029);
 
-const USAGE = `usage: fm fleet-view [--output <path>] [--input <json>] [--home <path>] [--no-open]
+const USAGE = `usage: fm fleet view [--output <path>] [--input <json>] [--home <path>] [--no-open]
   Read-only visual dashboard rendered from the shared FleetSnapshot collector.
 
   --output <path>  HTML artifact path (default: <repo>/.lavish/fleet.html).
@@ -98,7 +96,7 @@ function embed(templateText: string, payload: unknown): string {
 	return templateText.split(MARKER).join(text);
 }
 
-async function run(argv: string[]): Promise<number> {
+export async function runFleetView(argv: string[]): Promise<number> {
 	const parsed = parseArgs(argv.slice(1));
 	if (parsed.exit !== undefined) return parsed.exit;
 	const { out, input, home, open } = parsed.parsed;
@@ -154,8 +152,3 @@ async function run(argv: string[]): Promise<number> {
 	return 0;
 }
 
-export default {
-	name: "fleet-view",
-	describe: "Read-only visual fleet dashboard rendered from the shared FleetSnapshot collector.",
-	run,
-};

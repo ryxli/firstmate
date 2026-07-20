@@ -13,6 +13,7 @@ import type { TaskRow } from "../../bridge/fleet";
 import { updateFleet } from "../../bridge/update";
 import { ambiguous, missing, operationalError, output, validationError } from "../common";
 import { commandHelp } from "../help";
+import { runFleetView } from "../lib/fleet-view";
 
 async function run(argv: string[]): Promise<number> {
 	if (argv.length === 1 || (argv.length === 2 && argv[1] === "--full")) {
@@ -43,6 +44,7 @@ async function run(argv: string[]): Promise<number> {
 	const command = argv[1];
 	if (command === "fleet") return validationError(`Unexpected argument: ${argv.slice(1).join(" ")}`, ["Run `fm fleet --help` for available commands."]);
 	try {
+		if (command === "view") return runFleetView(argv.slice(1));
 		if (command === "update") {
 			if (argv.length === 3 && (argv[2] === "--help" || argv[2] === "-h")) {
 				output({ command: "fleet update", usage: "fm fleet update", description: "Selectively fast-forward registered homes and prove live-session reloads." });
@@ -138,7 +140,7 @@ async function run(argv: string[]): Promise<number> {
 			output({ command: "fleet snapshot", result: snapshot });
 			return 0;
 		}
-		if (!["fleet", "update", "tasks", "task", "agent", "metrics", "snapshot"].includes(command)) {
+		if (!["fleet", "update", "tasks", "task", "agent", "metrics", "snapshot", "view"].includes(command)) {
 			return validationError(`Unknown fleet command: ${command}`, ["Run `fm fleet --help` for available commands."]);
 		}
 		if (command !== "fleet" || argv.length > 2) return validationError(`Unexpected argument: ${argv.slice(2).join(" ")}`, ["Run `fm fleet --help` for available commands."]);
