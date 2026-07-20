@@ -559,7 +559,7 @@ function parsePanes(value: unknown): RawPane[] {
 			pane_id: stringValue(record.pane_id) ?? stringValue(record.id),
 			session_id: sessionId,
 			session_path: sessionPath,
-			agent: stringValue(record.agent),
+			agent: stringValue(record.agent) ?? stringValue(legacy?.agent),
 			agent_status: stringValue(record.agent_status) ?? stringValue(record.status),
 			cwd: stringValue(record.cwd) ?? stringValue(record.foreground_cwd),
 		};

@@ -49,7 +49,7 @@ function fixtureHome(): { home: string; panes: string } {
 		"## Done",
 		"- [x] **old** - shipped (repo: app)",
 	].join("\n"));
-	writeFileSync(panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session_id: "session-1", agent: "omp" }] } }));
+	writeFileSync(panes, JSON.stringify({ result: { panes: [{ pane_id: "w1:p1", cwd: home, agent_status: "working", workspace_id: "w1", tab_id: "t1", agent_session: { agent: "omp", kind: "path", value: "/sessions/session-1.jsonl" } }] } }));
 	writeFileSync(join(home, "state", "self.meta"), "pane=w1:p1\nkind=ship\nworker=self\n");
 	writeFileSync(join(home, "state", "self.status"), "working: building\n");
 	return { home, panes };
@@ -68,6 +68,7 @@ describe("canonical FleetSnapshot collector", () => {
 				manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST),
 				pane_id: "w1:p1",
 				session_id: "session-1",
+				session_path: "/sessions/session-1.jsonl",
 				started_at: "2026-07-13T00:00:00Z",
 				manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)],
 			}));

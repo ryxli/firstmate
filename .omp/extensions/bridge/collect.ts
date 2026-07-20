@@ -227,7 +227,7 @@ function paneFromRecord(value: unknown): HerdrAgent | null {
 		tab_id: text("tab_id"),
 		tab_label: text("tab_label"),
 		label: text("label"),
-		agent: text("agent"),
+		agent: text("agent") ?? stringValue(legacy?.agent),
 		agent_session_path: text("agent_session_path") ?? legacyPath,
 		agent_session_id: text("agent_session_id") ?? legacyId,
 		agent_session: record.agent_session,
@@ -528,7 +528,7 @@ function validActivationReceipt(value: unknown): value is Record<string, unknown
 	}
 	if (!paths.has("AGENTS.md")) return false;
 	const hash = createHash("sha256");
-	for (const entry of entries.sort((a, b) => a.path.localeCompare(b.path))) {
+	for (const entry of entries.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) {
 		hash.update(entry.path);
 		hash.update("\0");
 		hash.update(entry.sha256);

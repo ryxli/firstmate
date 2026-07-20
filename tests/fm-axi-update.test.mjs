@@ -82,6 +82,8 @@ try {
   git(["remote", "add", "origin", origin], seed);
   git(["push", "-q", "origin", "main"], seed);
   run("git", ["clone", "-q", origin, source]);
+  mkdirSync(join(source, "config"), { recursive: true });
+  writeFileSync(join(source, "config", "identity"), "role=firstmate\n");
   run("git", ["clone", "-q", origin, target]);
   run("git", ["clone", "-q", origin, other]);
   run("git", ["clone", "-q", origin, legacy]);
@@ -119,7 +121,7 @@ try {
   if (working.status !== 1) throw new Error(`working target was not pending: ${working.stdout}`);
   if (git(["rev-parse", "HEAD"], target) !== oldRevision || existsSync(reloadLog)) throw new Error("working target was changed");
   writeFileSync(panes, JSON.stringify({ result: { panes: [
-    { pane_id: "w1:p1", cwd: target, agent: "omp", agent_status: "idle", agent_session_id: "session-target" },
+    { pane_id: "w1:p1", cwd: target, agent_status: "idle", agent_session_id: "session-target", agent_session: { agent: "omp" } },
     { pane_id: "w1:p2", cwd: other, agent: "omp", agent_status: "working", agent_session_id: "session-other" },
   ] } }));
   const first = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
@@ -257,6 +259,10 @@ try {
   writeFileSync(join(source, ".omp", "extensions", "linked", "entry.ts"), "export const linked = true;\n");
   mkdirSync(join(seeded, ".omp", "extensions"), { recursive: true });
   mkdirSync(join(seeded, "state"), { recursive: true });
+  mkdirSync(join(seeded, ".omp", "skills"), { recursive: true });
+  mkdirSync(join(seeded, "config"), { recursive: true });
+  writeFileSync(join(seeded, "config", "shared-skills"), "");
+  writeFileSync(join(seeded, "config", "local-skills"), "");
   writeFileSync(join(seeded, ".fm-secondmate-home"), "seeded\n");
   writeFileSync(join(seeded, "AGENTS.md"), "v2\n");
   symlinkSync(join(source, ".omp", "extensions", "bridge.ts"), join(seeded, ".omp", "extensions", "bridge.ts"));
@@ -282,9 +288,9 @@ try {
   mkdirSync(gitGuardDir, { recursive: true });
   writeFileSync(join(gitGuardDir, "git"), `#!/bin/sh\ncase "$*" in\n  *"${seeded}"*) printf '%s\\n' "$*" >> '${gitGuardLog}'; exit 99;;\nesac\nexec '${realGit}' "$@"\n`);
   chmodSync(join(gitGuardDir, "git"), 0o755);
-  const seededEnv = { ...process.env, FM_HOME: seeded, FM_FLEET_UPDATE_STATE: seededTransaction, FM_FLEET_RELOAD_SCRIPT: seededReload, FM_FLEET_PANES_FILE: seededPanes, PATH: `${gitGuardDir}:${process.env.PATH}` };
+  const seededEnv = { ...process.env, FM_HOME: source, FM_FLEET_UPDATE_STATE: seededTransaction, FM_FLEET_RELOAD_SCRIPT: seededReload, FM_FLEET_PANES_FILE: seededPanes, PATH: `${gitGuardDir}:${process.env.PATH}` };
   for (const key of ["FM_FLEET_SOURCE_HOME", "FM_FLEET_SOURCE_REVISION", "FM_FLEET_CAPABILITY_REGISTRY", "FM_ROOT_OVERRIDE", "FM_ROOT"]) delete seededEnv[key];
-  const seededRun = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: seeded, encoding: "utf8", env: seededEnv });
+  const seededRun = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: source, encoding: "utf8", env: seededEnv });
   if (seededRun.status !== 0) throw new Error(`seeded non-Git update failed: ${seededRun.stdout}`);
   const seededPayload = decode(seededRun.stdout, { expandPaths: "safe" });
   const seededResult = seededPayload.result.results.find(row => row.target === "seeded");
@@ -305,9 +311,9 @@ try {
   ] } }));
   writeFileSync(wholeReload, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${wholeReloadLog}'\n`);
   chmodSync(wholeReload, 0o755);
-  const wholeEnv = { ...process.env, FM_HOME: wholeSeeded, FM_FLEET_UPDATE_STATE: wholeTransaction, FM_FLEET_RELOAD_SCRIPT: wholeReload, FM_FLEET_PANES_FILE: wholePanes, PATH: `${gitGuardDir}:${process.env.PATH}` };
+  const wholeEnv = { ...process.env, FM_HOME: source, FM_FLEET_UPDATE_STATE: wholeTransaction, FM_FLEET_RELOAD_SCRIPT: wholeReload, FM_FLEET_PANES_FILE: wholePanes, PATH: `${gitGuardDir}:${process.env.PATH}` };
   for (const key of ["FM_FLEET_SOURCE_HOME", "FM_FLEET_SOURCE_REVISION", "FM_FLEET_CAPABILITY_REGISTRY", "FM_ROOT_OVERRIDE", "FM_ROOT"]) delete wholeEnv[key];
-  const wholeRun = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: wholeSeeded, encoding: "utf8", env: wholeEnv });
+  const wholeRun = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: source, encoding: "utf8", env: wholeEnv });
   if (wholeRun.status !== 1 || wholeRun.stdout.includes("OPERATIONAL_ERROR")) throw new Error(`whole-.omp symlink update failed: ${wholeRun.stdout}`);
   const wholePayload = decode(wholeRun.stdout, { expandPaths: "safe" });
   const wholeResult = wholePayload.result.results.find(row => row.target === "whole-seeded");
@@ -326,7 +332,7 @@ try {
   mkdirSync(join(seeded, ".omp", "extensions", "linked"), { recursive: true });
   writeFileSync(join(seeded, ".omp", "extensions", "linked", "entry.ts"), "export const linked = true;\n");
   const beforeDivergedReloads = readFileSync(seededReloadLog, "utf8");
-  const divergedRun = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: seeded, encoding: "utf8", env: seededEnv });
+  const divergedRun = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: source, encoding: "utf8", env: seededEnv });
   if (divergedRun.status !== 1) throw new Error(`diverged seeded target did not return pending: ${divergedRun.stdout}`);
   const divergedPayload = decode(divergedRun.stdout, { expandPaths: "safe" });
   const divergedResult = divergedPayload.result.results.find(row => row.target === "seeded");
@@ -336,7 +342,7 @@ try {
   if (existsSync(gitGuardLog)) throw new Error(`diverged seeded target invoked Git: ${readFileSync(gitGuardLog, "utf8")}`);
   console.log("ok - changed non-Git registered surface divergence remains pending before reload");
   const beforeRetryReloads = readFileSync(seededReloadLog, "utf8");
-  const retryRun = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: seeded, encoding: "utf8", env: seededEnv });
+  const retryRun = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: source, encoding: "utf8", env: seededEnv });
   if (retryRun.status !== 1) throw new Error(`same-head divergence retry did not return pending: ${retryRun.stdout}`);
   const retryPayload = decode(retryRun.stdout, { expandPaths: "safe" });
   const retryResult = retryPayload.result.results.find(row => row.target === "seeded");
