@@ -459,6 +459,19 @@ function topologyFor(home: ParsedHome, meta: Meta | undefined, herdr: HerdrAgent
 		degraded: meta?.pane && herdr?.pane_id ? undefined : meta?.pane ? "missing-pane" : "state-only",
 	};
 }
+/** Coarse ArtifactRecord axes for active-only fleet views. */
+export interface ArtifactRow {
+	id: string;
+	taskId: string;
+	project: string;
+	reviewState: string;
+	deliveryState: string | null;
+	mode: string | null;
+	workerBound: boolean;
+	active: boolean;
+	updatedAt: string;
+}
+
 export interface FleetSnapshot {
 	schema?: "fleet-snapshot/1";
 	identity?: IdentitySummary;
@@ -472,6 +485,8 @@ export interface FleetSnapshot {
 	mates: MateRow[];
 	tasks: TaskRow[];
 	agents?: AgentRow[];
+	/** Active state/<id>.artifact.json rows (review/delivery axes). */
+	artifacts?: ArtifactRow[];
 	homePaths?: string[];
 	otherLivePanes: LivePane[];
 	notes: string[];

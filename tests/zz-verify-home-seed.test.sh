@@ -208,12 +208,12 @@ test_fm_home_parameterization() {
   home_one="$TMP_ROOT/home one"
   home_two="$TMP_ROOT/home-two"
   mkdir -p "$home_one/data" "$home_one/state" "$home_two/data" "$home_two/state"
-  printf '%s\n' '- app [local-only +yolo] - test app (added 2026-06-22)' > "$home_one/data/projects.md"
+  printf '%s\n' '- app [trunk +yolo] - test app (added 2026-06-22)' > "$home_one/data/projects.md"
 
   out=$(FM_HOME="$home_one" "$ROOT/sbin/fm" project-mode app)
-  [ "$out" = "local-only on" ] || fail "fm-project-mode did not read projects.md from FM_HOME"
+  [ "$out" = "trunk on" ] || fail "fm-project-mode did not read projects.md from FM_HOME"
   out=$(FM_HOME="$home_two" "$ROOT/sbin/fm" project-mode app 2>/dev/null)
-  [ "$out" = "direct-PR off" ] || fail "unconfigured project did not default to direct-PR with yolo off"
+  [ "$out" = "pr off" ] || fail "unconfigured project did not default to pr with yolo off"
 
   FM_HOME="$home_one" "$ROOT/sbin/fm" brief task-a app >/dev/null || fail "brief scaffold failed under FM_HOME"
   brief="$home_one/data/task-a/brief.md"
@@ -263,8 +263,8 @@ test_home_seed_registry_scope_and_overlapping_projects() {
   add_file_origin "$home/projects/beta" "$TMP_ROOT/remotes/beta.git"
   add_file_origin "$home/projects/gamma" "$TMP_ROOT/remotes/gamma.git"
   cat > "$home/data/projects.md" <<EOF
-- alpha [direct-PR +yolo] - alpha project (added 2026-06-22)
-- beta [direct-PR] - beta project (added 2026-06-22)
+- alpha [pr +yolo] - alpha project (added 2026-06-22)
+- beta [pr] - beta project (added 2026-06-22)
 - gamma - gamma project (added 2026-06-22)
 EOF
 
@@ -282,13 +282,13 @@ EOF
   [ -d "$subhome/projects/alpha/.git" ] || fail "alpha was not cloned into subhome"
   [ -d "$subhome/projects/beta/.git" ] || fail "beta was not cloned into subhome"
   [ -d "$subhome/projects/gamma/.git" ] || fail "gamma was not cloned into subhome"
-  git -C "$subhome/projects/beta" remote get-url origin >/dev/null 2>&1 || fail "direct-PR beta did not keep an origin remote"
+  git -C "$subhome/projects/beta" remote get-url origin >/dev/null 2>&1 || fail "pr beta did not keep an origin remote"
   [ ! -e "$subhome/projects/gamma/.no-mistakes-init" ] || fail "seed must not run no-mistakes init"
   [ ! -e "$subhome/projects/gamma/.no-mistakes-doctor" ] || fail "seed must not run no-mistakes doctor"
   out=$(FM_HOME="$subhome" "$ROOT/sbin/fm" project-mode alpha)
-  [ "$out" = "direct-PR on" ] || fail "seed did not preserve alpha delivery mode in subhome registry"
+  [ "$out" = "pr on" ] || fail "seed did not preserve alpha delivery mode in subhome registry"
   out=$(FM_HOME="$subhome" "$ROOT/sbin/fm" project-mode beta)
-  [ "$out" = "direct-PR off" ] || fail "seed did not preserve beta delivery mode in subhome registry"
+  [ "$out" = "pr off" ] || fail "seed did not preserve beta delivery mode in subhome registry"
   grep -F -- '- design - feature design and implementation for alpha beta gamma' "$home/data/secondmates.md" >/dev/null || fail "registry line was not written"
   grep -F 'scope: feature design and implementation for alpha beta gamma' "$home/data/secondmates.md" >/dev/null || fail "registry line did not record scope"
   grep -F 'projects: alpha, beta, gamma' "$home/data/secondmates.md" >/dev/null || fail "registry line did not record project clone list"
@@ -316,7 +316,7 @@ test_home_seed_registry_reads_scope_from_filled_brief() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/brief-scope-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   FM_SECONDMATE_SCOPE='customer onboarding from brief' \
     scaffold_secondmate_charter "$home" design 'customer onboarding charter' alpha \
     || fail "filled secondmate charter scaffold failed"
@@ -404,7 +404,7 @@ test_home_seed_uses_herdr_worktree_create() {
   sm_base_abs=$(cd "$sm_base" && pwd -P)
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/dash-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   fakebin=$(make_fake_herdr "$TMP_ROOT/dash-fake")
   log="$TMP_ROOT/dash-fake/herdr.log"
 
@@ -437,7 +437,7 @@ test_home_seed_removes_herdr_workspace_on_assignment_failure() {
   sm_base_abs=$(cd "$sm_base" && pwd -P)
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/dash-fail-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   # Pre-mark the auto-path for another secondmate so validate_home_assignment fails.
   auto_home="$sm_base_abs/fm-sm-dash"
   mkdir -p "$auto_home"
@@ -471,7 +471,7 @@ test_home_seed_warns_when_herdr_workspace_remove_fails() {
   sm_base_abs=$(cd "$sm_base" && pwd -P)
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/dash-return-fail-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   # Pre-mark the auto-path for another secondmate so validate_home_assignment fails.
   auto_home="$sm_base_abs/fm-sm-dash"
   mkdir -p "$auto_home"
@@ -506,7 +506,7 @@ test_home_seed_does_not_remove_herdr_workspace_for_unsafe_home() {
   err="$TMP_ROOT/dash-active.err"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/dash-active-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   fakebin=$(make_fake_herdr "$TMP_ROOT/dash-active-fake")
   log="$TMP_ROOT/dash-active-fake/herdr.log"
 
@@ -528,7 +528,7 @@ test_home_seed_does_not_remove_herdr_workspace_for_unsafe_home() {
   sm_base_inside=$(cd "$TMP_ROOT/dash-inside-home/sm" && pwd -P)
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/dash-inside-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   : > "$log"
 
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_HERDR_SM_BASE="$sm_base_inside" \
@@ -554,8 +554,8 @@ test_home_seed_rolls_back_failed_clone() {
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/rollback-alpha.git"
   git -C "$home/projects/beta" remote add origin "file://$missing_remote"
   cat > "$home/data/projects.md" <<EOF
-- alpha [direct-PR] - alpha project (added 2026-06-22)
-- beta [direct-PR] - beta project (added 2026-06-22)
+- alpha [pr] - alpha project (added 2026-06-22)
+- beta [pr] - beta project (added 2026-06-22)
 EOF
 
   if FM_HOME="$home" FM_SECONDMATE_CHARTER='rollback scope' FM_SECONDMATE_SCOPE='rollback scope' \
@@ -583,7 +583,7 @@ test_home_seed_refuses_missing_filled_charter() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/missing-charter-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
 
   if FM_HOME="$home" "$ROOT/sbin/fm" home-seed design "$subhome" alpha >/dev/null 2>"$err"; then
     fail "seed accepted a direct seed without a filled charter"
@@ -603,7 +603,7 @@ test_home_seed_refuses_placeholder_charter() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/placeholder-charter-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   FM_HOME="$home" "$ROOT/sbin/fm" brief design --secondmate alpha >/dev/null \
     || fail "placeholder charter scaffold failed"
 
@@ -625,7 +625,7 @@ test_home_seed_refuses_empty_charter_fields() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/empty-charter-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
 
   if FM_HOME="$home" FM_SECONDMATE_CHARTER='   ' "$ROOT/sbin/fm" home-seed design "$subhome" alpha >/dev/null 2>"$err"; then
     fail "seed accepted a whitespace-only charter"
@@ -653,15 +653,15 @@ test_home_seed_refuses_local_only_project() {
   err="$TMP_ROOT/local-only-seed.err"
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
-  printf '%s\n' '- alpha [local-only] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [trunk] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
 
   if FM_HOME="$home" "$ROOT/sbin/fm" home-seed design "$subhome" alpha >/dev/null 2>"$err"; then
-    fail "seed allowed a local-only project into a secondmate home"
+    fail "seed allowed a trunk project into a secondmate home"
   fi
-  grep -F 'project alpha is local-only; secondmate routes support only direct-PR projects' "$err" >/dev/null \
-    || fail "seed did not explain local-only project rejection"
-  [ ! -e "$subhome" ] || fail "seed created a subhome before rejecting a local-only project"
-  pass "home seeding refuses local-only projects"
+  grep -F 'project alpha is trunk; secondmate routes support only pr projects' "$err" >/dev/null \
+    || fail "seed did not explain trunk project rejection"
+  [ ! -e "$subhome" ] || fail "seed created a subhome before rejecting a trunk project"
+  pass "home seeding refuses trunk projects"
 }
 
 test_home_seed_refuses_registry_delimiter_home() {
@@ -672,7 +672,7 @@ test_home_seed_refuses_registry_delimiter_home() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/delimiter-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
 
   if FM_HOME="$home" FM_SECONDMATE_CHARTER='delimiter charter' "$ROOT/sbin/fm" home-seed design "$subhome" alpha >/dev/null 2>"$err"; then
     fail "seed accepted a home path with registry delimiters"
@@ -700,7 +700,7 @@ test_home_seed_refuses_active_home_and_root() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/active-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for active-home seed test"
 
   if FM_HOME="$home" "$ROOT/sbin/fm" home-seed design "$home" alpha >/dev/null 2>"$err"; then
@@ -758,7 +758,7 @@ test_home_seed_refuses_home_marked_for_another_id() {
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/marked-alpha.git"
   git clone --quiet "$ROOT" "$subhome"
   printf 'other\n' > "$subhome/.fm-secondmate-home"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for marked-home seed test"
 
   if FM_HOME="$home" "$ROOT/sbin/fm" home-seed design "$subhome" alpha >/dev/null 2>"$err"; then
@@ -779,7 +779,7 @@ test_home_seed_refuses_home_registered_to_another_id() {
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/registered-alpha.git"
   git clone --quiet "$ROOT" "$subhome"
   subhome_abs=$(cd "$subhome" && pwd -P)
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   printf '%s\n' '- other - other domain (home: '"$subhome_abs"'; scope: other domain; projects: beta; added 2026-06-22)' > "$home/data/secondmates.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for registered-home seed test"
 
@@ -800,7 +800,7 @@ test_home_seed_refuses_reassigning_existing_id_to_different_home() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/reassign-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
 
   FM_HOME="$home" FM_SECONDMATE_CHARTER='design domain' FM_SECONDMATE_SCOPE='design domain' \
     "$ROOT/sbin/fm" home-seed design "$first" alpha >/dev/null \
@@ -836,7 +836,7 @@ test_home_seed_refuses_home_overlapping_registered_home() {
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/overlap-alpha.git"
   git clone --quiet "$ROOT" "$registered_parent"
   git clone --quiet "$ROOT" "$registered_child"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   cat > "$home/data/secondmates.md" <<EOF
 - parent - parent domain (home: $registered_parent; scope: parent domain; projects: beta; added 2026-06-22)
 - child - child domain (home: $registered_child; scope: child domain; projects: gamma; added 2026-06-22)
@@ -865,13 +865,13 @@ test_home_seed_refuses_remote_backed_project_without_origin() {
   err="$TMP_ROOT/no-origin.err"
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for no-origin seed test"
 
   if FM_HOME="$home" "$ROOT/sbin/fm" home-seed design "$subhome" alpha >/dev/null 2>"$err"; then
     fail "seed allowed remote-backed project without origin"
   fi
-  grep -F 'project alpha is direct-PR but has no origin remote' "$err" >/dev/null || fail "seed did not explain missing origin for remote-backed project"
+  grep -F 'project alpha is pr but has no origin remote' "$err" >/dev/null || fail "seed did not explain missing origin for remote-backed project"
   pass "remote-backed subhome seeding requires a source origin"
 }
 
@@ -887,7 +887,7 @@ test_home_seed_refuses_existing_remote_backed_project_with_wrong_origin() {
   subhome_abs=$(cd "$subhome" && pwd -P)
   mkdir -p "$subhome/projects"
   git clone --quiet "$home/projects/alpha" "$subhome/projects/alpha"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for wrong-origin seed test"
 
   if FM_HOME="$home" "$ROOT/sbin/fm" home-seed design "$subhome" alpha >/dev/null 2>"$err"; then
@@ -909,7 +909,7 @@ test_home_seed_resolves_relative_source_origins() {
   make_git_project "$home/projects/alpha"
   git clone --quiet --bare "$home/projects/alpha" "$home/remotes/relative-alpha.git"
   git -C "$home/projects/alpha" remote add origin ../../remotes/relative-alpha.git
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for relative origin seed test"
 
   out=$(FM_HOME="$home" "$ROOT/sbin/fm" home-seed design "$subhome" alpha)
@@ -937,7 +937,7 @@ test_home_seed_refuses_project_destinations_outside_subhome() {
   git clone --quiet "$ROOT" "$subhome"
   rm -rf "$subhome/projects"
   ln -s "$sink" "$subhome/projects"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for symlink destination seed test"
 
   if FM_HOME="$home" "$ROOT/sbin/fm" home-seed design "$subhome" alpha >/dev/null 2>"$err"; then
@@ -957,7 +957,7 @@ test_home_seed_refuses_operational_dirs_outside_subhome() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/symlink-opdir-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for symlink operational dir seed test"
 
   for opdir in data state config; do
@@ -985,7 +985,7 @@ test_home_seed_refuses_symlinked_leaf_files() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/symlink-leaf-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   scaffold_secondmate_charter "$home" design 'design domain' alpha || fail "charter scaffold failed for symlink leaf seed test"
 
   for leaf in data/projects.md data/charter.md .fm-secondmate-home; do
@@ -2156,7 +2156,7 @@ test_home_seed_ship_extensions_linked() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/ext-link-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   fakebin=$(make_fake_no_mistakes "$TMP_ROOT/ext-link-nm-fake")
 
   # Pre-create a minimal firstmate home without .omp/extensions/ so ensure_home
@@ -2194,7 +2194,7 @@ test_home_seed_ship_extensions_idempotent() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/ext-idem-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   fakebin=$(make_fake_no_mistakes "$TMP_ROOT/ext-idem-nm-fake")
   mkdir -p "$subhome/sbin"
   printf '# Firstmate\n' > "$subhome/AGENTS.md"
@@ -2230,7 +2230,7 @@ test_home_seed_ship_extensions_skips_real_file() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/alpha"
   add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/ext-skip-alpha.git"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
   fakebin=$(make_fake_no_mistakes "$TMP_ROOT/ext-skip-nm-fake")
 
   ext_src="$ROOT/.omp/extensions"
@@ -2311,7 +2311,7 @@ test_home_seed_writes_versioned_identity() {
   mkdir -p "$home/projects" "$home/data" "$home/state"
   make_git_project "$home/projects/delta"
   add_file_origin "$home/projects/delta" "$TMP_ROOT/remotes/seed-ident-delta.git"
-  printf '%s\n' '- delta [direct-PR] - delta project (added 2026-07-10)' > "$home/data/projects.md"
+  printf '%s\n' '- delta [pr] - delta project (added 2026-07-10)' > "$home/data/projects.md"
   fakebin=$(make_fake_no_mistakes "$TMP_ROOT/seed-ident-nm")
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" \
     FM_SECONDMATE_CHARTER='design and implementation domain' \

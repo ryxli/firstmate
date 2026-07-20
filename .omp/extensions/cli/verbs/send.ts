@@ -1,6 +1,10 @@
 // fm verb: send - send one line of literal text to a crewmate pane, then Enter.
 // Ported behavior-preserving from the former sbin/fm send.
 //
+// Artifact spine: allowed for WorkerLoop revise/steer only. Never use fm send
+// on post-accept land paths. After accept, worker ownership is released;
+// land via fm merge-local (trunk) or fm pr-check + merge (pr).
+//
 // Usage: fm send <pane> [--steer] <text...>
 //   <pane> may be a bare firstmate pane name (fm-xyz), resolved through this
 //   home's state/<id>.meta, or an explicit herdr pane id (e.g. w8:p3).
@@ -21,6 +25,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadArtifact } from "../lib/artifact";
 import { paneInputPending, resolveLivePane } from "../lib/herdr";
 import { homeFromCwd } from "../lib/root";
 
@@ -66,6 +71,19 @@ async function run(argv: string[]): Promise<number> {
 		rest = rest.slice(1);
 	}
 	const steerText = rest.join(" ");
+
+	// Post-accept send ban: once WorkerLoop accepts (or abandons/supersedes),
+	// the implementation pane is released - land via merge-local / pr-check / artifact land.
+	if (target.startsWith("fm-")) {
+		const taskId = target.slice("fm-".length);
+		const art = loadArtifact(taskId);
+		if (art && (art.reviewState === "accepted" || art.reviewState === "abandoned" || art.reviewState === "superseded")) {
+			process.stderr.write(
+				`error: artifact ${taskId} reviewState=${art.reviewState}; fm send refused (revise is pre-accept only; land via merge-local/pr-check/artifact land)\n`,
+			);
+			return 1;
+		}
+	}
 
 	// Dispatch gate: block new work during a freeze or focus lock.
 	// Bypass with FM_DISPATCH_OVERRIDE=1 or --steer.

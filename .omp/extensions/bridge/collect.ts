@@ -37,7 +37,9 @@ import {
 	parseMeta,
 	parseSecondmateHomes,
 	render,
+	type ArtifactRow,
 } from "./fleet";
+import { listActiveArtifacts, resolveDataDir } from "../cli/lib/artifact";
 
 export interface CollectOptions {
 	includeMetrics?: boolean;
@@ -910,6 +912,52 @@ export async function collectSnapshot(now = new Date().toISOString(), cwd?: stri
 	const owners = resolveOwnerByHome(homes);
 	const agents = buildAgents(homes, live.panes, owners);
 	const attention = attentionFor(agents, homes, now);
+	// Thin artifact spine: active state/<id>.artifact.json rows only (no parallel history API).
+	try {
+		const dataDir = main ? join(main, "data") : resolveDataDir();
+		const active = listActiveArtifacts(dataDir);
+		base.artifacts = active.map(
+			(r): ArtifactRow => ({
+				id: r.taskId,
+				taskId: r.taskId,
+				project: r.project,
+				reviewState: r.reviewState,
+				deliveryState: r.delivery?.state ?? null,
+				mode: r.delivery?.mode ?? null,
+				workerBound: r.workerBound,
+				active: true,
+				updatedAt: r.updatedAt,
+			}),
+		);
+		const mainHome = homes.find(h => h.isMain);
+		const owner =
+			(mainHome && owners.get(mainHome.pathKey ?? normalizeHomePath(mainHome.path))) ||
+			mainHome?.label ||
+			"firstmate";
+		for (const row of base.artifacts) {
+			if (row.reviewState === "candidate" || row.reviewState === "revise") {
+				attention.push({
+					key: `${owner}/${row.taskId}`,
+					cls: "REVIEW-READY",
+					clsRank: 3,
+					home: owner,
+					id: row.taskId,
+					reason: `ARTIFACT (${row.reviewState})`,
+				});
+			} else if (row.deliveryState === "blocked") {
+				attention.push({
+					key: `${owner}/${row.taskId}`,
+					cls: "CAP-BLOCKED",
+					clsRank: 4,
+					home: owner,
+					id: row.taskId,
+					reason: "ARTIFACT (delivery blocked)",
+				});
+			}
+		}
+	} catch {
+		notes.push("artifact records unavailable");
+	}
 	base.schema = "fleet-snapshot/1";
 	base.home = main;
 	base.homePaths = homePaths;

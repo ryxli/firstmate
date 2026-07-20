@@ -25,7 +25,7 @@ make_home() {
   local name=$1 home
   home="$TMP_ROOT/$name"
   mkdir -p "$home/data" "$home/worktrees"
-  printf '%s\n' '- alpha [no-mistakes] - test project (added 2026-06-25)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - test project (added 2026-06-25)' > "$home/data/projects.md"
   printf '%s\n' "$home"
 }
 

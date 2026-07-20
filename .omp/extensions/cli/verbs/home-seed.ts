@@ -536,8 +536,8 @@ function validateSeedProject(ctx: Ctx, project: string): void {
 	if (!existsSync(src)) fail(`error: project ${project} not found at ${src}`);
 	if (!isGitRepo(src)) fail(`error: project ${project} is not a git repo`);
 	const mode = queryProjectMode(ctx, project);
-	if (mode === "local-only") {
-		fail(`error: project ${project} is local-only; secondmate routes support only direct-PR projects`);
+	if (mode === "trunk") {
+		fail(`error: project ${project} is trunk; secondmate routes support only pr projects`);
 	}
 	const url = gitRemoteUrl(src);
 	if (!url) fail(`error: project ${project} is ${mode} but has no origin remote`);
@@ -549,8 +549,8 @@ function cloneProject(ctx: Ctx, project: string, home: string): void {
 	if (!existsSync(src)) fail(`error: project ${project} not found at ${src}`);
 	if (!isGitRepo(src)) fail(`error: project ${project} is not a git repo`);
 	const mode = queryProjectMode(ctx, project);
-	if (mode === "local-only") {
-		fail(`error: project ${project} is local-only; secondmate routes support only direct-PR projects`);
+	if (mode === "trunk") {
+		fail(`error: project ${project} is trunk; secondmate routes support only pr projects`);
 	}
 	if (existsSync(dst)) {
 		if (!isDir(dst)) fail(`error: seeded project ${project} exists at ${dst} but is not a directory`);

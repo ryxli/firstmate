@@ -4,11 +4,10 @@
 // then print a backlog-refresh reminder.
 // Ported behavior-preserving from the former sbin/fm teardown.
 //
-// REFUSES if the worktree holds work not on any remote. A fork counts as a
-// remote, so upstream-contribution PRs pushed to a fork satisfy this in any
-// mode. local-only projects additionally accept work merged into the local
-// default branch (firstmate performs that merge on the cap's approval) as a
-// fallback for the common case where there is no remote at all.
+// REFUSES if the worktree holds work not on any remote, unless an ArtifactRecord
+// for the task is already landed / abandoned / superseded (canonical spine proof).
+// A fork counts as a remote. trunk projects additionally accept work merged into
+// the local default branch as a fallback when no artifact exists yet.
 //
 // Scout tasks (kind=scout in meta) carve out of that check: their worktree is
 // declared scratch and the report at data/<task-id>/report.md is the work
@@ -48,6 +47,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { isTrunkMode, loadArtifact, safeToDispose } from "../lib/artifact";
 import { fileURLToPath } from "node:url";
 import { ffResolveDefaultBranch } from "../lib/ff";
 import { metaValue, resolveLivePane } from "../lib/herdr";
@@ -176,7 +176,7 @@ function backlogRefreshReminder(id: string, kind: string, mode: string, prUrl: s
 			doneCmd = `fm tasks done ${id} --note "retired"`;
 			break;
 		default:
-			if (mode === "local-only") {
+			if (isTrunkMode(mode)) {
 				doneCmd = `fm tasks done ${id} --note "local main"`;
 			} else {
 				doneCmd = `fm tasks done ${id} --pr ${prUrl || "PR_URL"}`;
@@ -580,7 +580,7 @@ async function runInner(argv: string[]): Promise<number> {
 	let kind = metaValue(meta, "kind");
 	if (!kind) kind = "ship";
 	let mode = metaValue(meta, "mode");
-	if (!mode) mode = "direct-PR";
+	if (!mode) mode = "pr";
 
 	if (kind === "secondmate") {
 		if (validateFirstmateHomeForRemoval(homePath, "secondmate home", id) === null) return 1;
@@ -622,6 +622,13 @@ async function runInner(argv: string[]): Promise<number> {
 				);
 				return 1;
 			}
+		} else if (
+			(() => {
+				const art = loadArtifact(id);
+				return art ? safeToDispose(art) : false;
+			})()
+		) {
+			// Dispose only when landed or explicitly discard-authorized - never abandoned/superseded alone.
 		} else {
 			const statusOut = git(wt, ["status", "--porcelain"]).stdout;
 			const dirty = statusOut.split(/\r?\n/).find(line => line.length > 0 && !/^\?\? \.claude\//.test(line)) ?? "";
@@ -631,7 +638,7 @@ async function runInner(argv: string[]): Promise<number> {
 				.slice(0, 5);
 			const unpushed = unpushedLines.join("\n");
 
-			if (unpushed && mode === "local-only") {
+			if (unpushed && isTrunkMode(mode)) {
 				const branch = defaultBranch(proj);
 				if (!branch) {
 					process.stderr.write(`REFUSED: cannot determine default branch for ${proj}; expected origin/HEAD, main, or master.\n`);
@@ -643,11 +650,11 @@ async function runInner(argv: string[]): Promise<number> {
 					.slice(0, 5);
 				const unmerged = unmergedLines.join("\n");
 				if (dirty || unmerged) {
-					process.stderr.write(`REFUSED: local-only worktree ${wt} has work not yet merged into ${branch} and not on any remote.\n`);
+					process.stderr.write(`REFUSED: trunk worktree ${wt} has work not yet merged into ${branch} and not on any remote.\n`);
 					if (dirty) process.stderr.write("uncommitted changes present\n");
 					if (unmerged) process.stderr.write(`commits not yet on ${branch}:\n${unmerged}\n`);
 					process.stderr.write(
-						`Merge the branch into local ${branch} first (sbin/fm merge-local after the cap approves), or push to a fork/remote, or get the cap's explicit OK to discard, then --force.\n`,
+						`Land via fm merge-local / fm tasks artifact landed, or push to a fork/remote, or --force with cap OK to discard.\n`,
 					);
 					return 1;
 				}
@@ -655,7 +662,7 @@ async function runInner(argv: string[]): Promise<number> {
 				process.stderr.write(`REFUSED: worktree ${wt} has work not on any remote.\n`);
 				if (dirty) process.stderr.write("uncommitted changes present\n");
 				if (unpushed) process.stderr.write(`unpushed commits:\n${unpushed}\n`);
-				process.stderr.write("Push the branch (or get the cap's explicit OK to discard, then --force).\n");
+				process.stderr.write("Push the branch, land via pr-check/merge, or get the cap's explicit OK to discard, then --force.\n");
 				return 1;
 			}
 		}
@@ -686,7 +693,7 @@ async function runInner(argv: string[]): Promise<number> {
 		rmIfExists(join(STATE, `${prefix}${paneKey}`));
 	}
 
-	if (kind !== "scout" && kind !== "secondmate" && mode !== "local-only") {
+	if (kind !== "scout" && kind !== "secondmate" && !isTrunkMode(mode)) {
 		spawnSync(join(FM_ROOT, "sbin", "fm"), ["fleet-sync", proj], { stdio: ["ignore", "inherit", "inherit"] });
 	}
 

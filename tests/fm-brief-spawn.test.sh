@@ -15,7 +15,7 @@ BIN_DIR="$TMP_ROOT/bin"
 HERDR_LOG="$TMP_ROOT/herdr.log"
 mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config" "$PROJECT" "$BIN_DIR"
 : > "$HERDR_LOG"
-printf '%s\n' '- app [direct-PR] - test app (added 2026-07-14)' > "$HOME_DIR/data/projects.md"
+printf '%s\n' '- app [pr] - test app (added 2026-07-14)' > "$HOME_DIR/data/projects.md"
 
 git -C "$PROJECT" init -q
 git -C "$PROJECT" config user.name 'Firstmate Tests'

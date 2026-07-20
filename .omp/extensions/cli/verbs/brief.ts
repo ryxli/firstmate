@@ -20,11 +20,10 @@
 //   Set FM_SECONDMATE_CHARTER='<charter>' to fill the charter text.
 //   Set FM_SECONDMATE_SCOPE='<scope>' to write a routing scope distinct from the charter text.
 // For ship tasks, the definition of done is shaped by the project's delivery mode
-// (data/projects.md via fm project-mode; see AGENTS.md section 6):
-//   direct-PR    implement, focused review + tests, push + open PR via gh-axi -> cap merge (default)
-//   direct-main  implement, focused review + tests, guarded non-force push to origin/main, no PR
-//   local-only   implement on branch, stop and report "ready in branch" (no push/PR);
-//                firstmate reviews, cap approves, firstmate merges to local main
+// (data/projects.md via fm project-mode; trunk|pr only):
+//   pr     implement, focused review + tests, push + open PR via gh-axi -> cap merge (default)
+//   trunk  implement on branch, stop and report "ready in branch" (no push/PR);
+//          firstmate reviews, cap approves, firstmate merges to local default
 // Scout tasks ignore mode - their deliverable is a report, not a merge.
 // Ship tasks include a project-memory section so durable project-intrinsic
 // learnings can be committed to AGENTS.md through the project's delivery path.
@@ -435,62 +434,31 @@ interface ShipModeText {
 }
 
 function shipModeText(mode: string, id: string): ShipModeText {
-	switch (mode) {
-		case "local-only":
-			return {
-				setup2: "",
-				rule1: `1. Never push to any remote and never open a PR. Work only on your \`fm/${id}\` branch; firstmate handles the merge into local \`main\`.`,
-				dod: `# Definition of done
-This project ships **local-only**: no remote, no PR, no pipeline.
-The task is complete only when committed on your branch \`fm/${id}\`. Do NOT push, do NOT open a PR, do NOT merge.
+	if (mode === "trunk") {
+		return {
+			setup2: "",
+			rule1: `1. Never push to any remote and never open a PR. Work only on your \`fm/${id}\` branch; produce a candidate for trunk land.`,
+			dod: `# Definition of done
+This project ships **trunk**: consolidated local default branch, no GitHub review surface required.
+The worker task is complete when a candidate is committed on \`fm/${id}\` with focused checks green. Do NOT push, do NOT open a PR, do NOT merge.
 Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass; fix anything you broke.
-Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
+Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so integrate stays a fast-forward.
 When it is implemented and committed, append \`done: ready in branch fm/${id}; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
-Firstmate then reviews your branch diff, the cap approves, and firstmate merges it into local \`main\`.`,
-			};
-		case "direct-main":
-			return {
-				setup2: "",
-				rule1: `1. Never open a PR, never force-push, and never push any commit except the reviewed \`fm/${id}\` head to \`origin/main\` after every direct-main delivery check below passes.`,
-				dod: `# Definition of done
-This project ships **direct-main**: the cap has authorized this project to land by guarded direct push to \`origin/main\`. Do NOT open a PR under any circumstances. Do NOT force-push.
-The task is complete only when your \`fm/${id}\` branch is clean, reviewed by you, committed, delivered as the exact remote \`origin/main\` SHA, and fetch-back verified. The \`+yolo\` flag never relaxes these safeguards.
-Before delivery, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
-Deliver with exactly one writer and a fresh remote proof. Acquire the shared delivery lock, fetch \`origin/main\` immediately before the ancestry check, prove that fetched \`origin/main\` is an ancestor of your intended head, push that exact head normally to \`origin/main\`, fetch back, and verify the remote SHA:
-\`\`\`sh
-test -z "$(git status --porcelain)"
-branch=$(git branch --show-current)
-test "$branch" = "fm/${id}"
-head=$(git rev-parse HEAD)
-lock_dir="$(git rev-parse --git-common-dir)/fm-direct-main-delivery.lock"
-if ! mkdir "$lock_dir"; then
-  echo "direct-main delivery already in progress" >&2
-  exit 1
-fi
-trap 'rmdir "$lock_dir"' EXIT
-git fetch origin main
-base=$(git rev-parse origin/main)
-git merge-base --is-ancestor "$base" "$head"
-git push origin "$head:refs/heads/main"
-git fetch origin main
-remote=$(git rev-parse origin/main)
-test "$remote" = "$head"
-\`\`\`
-If any command fails, stop and report blocked with the failed safeguard; do not retry by forcing. When delivery is verified, append \`done: direct-main origin/main $head; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.`,
-			};
-		default: // direct-PR (default)
-			return {
-				setup2: "",
-				rule1: `1. Never push to the default branch (push only your \`fm/${id}\` branch). Never merge a PR.`,
-				dod: `# Definition of done
-This project ships **direct-PR**: you raise the PR yourself, backed by focused review and tests. There is no separate validation pipeline to run.
-The task is complete only when committed on your branch.
-Before you push, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
-When it is implemented, checked, and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop. The status file is the supervisor signal; do not require peer-bus access from a disposable worker.
-Write the PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
-The cap reviews and merges the PR; firstmate relays it.`,
-			};
+Firstmate reviews the candidate (\`fm tasks artifact\`), and on accept lands via \`fm merge-local\`.`,
+		};
 	}
+	// pr (default)
+	return {
+		setup2: "",
+		rule1: `1. Never push to the default branch (push only your \`fm/${id}\` branch). Never merge a PR.`,
+		dod: `# Definition of done
+This project ships **pr**: collaborative delivery via GitHub PR against a moving upstream HEAD.
+Prefer a candidate for supervisor review (\`fm tasks artifact\`); after accept, firstmate lands via \`fm pr-check\` + merge observe. You may still push and open the PR yourself when the brief requires it.
+Before you finish, run the focused checks the project already uses (the tests and lints that cover your change) and confirm they pass, then review your own diff for correctness and scope.
+When it is implemented and committed, either (a) append \`done: ready in branch fm/${id}; ...\` for supervisor accept, or (b) push, open a PR with \`gh-axi\`, then append \`done: PR {url}; goal <falsifiable goal>; deliverable <named deliverable path>; evidence <source-ref,...>; acceptance <criterion=pass|fail,...>; blocker <none|...>; next action <none|...>\` to the status file, then stop.
+Write any PR body in the standard format: a 1-2 line summary, then \`## Summary\` with a concrete visualize-the-change example - a command and its output, or a short before/after - then \`## Refs\` with the PR/issue/report links. The publish guard requires this.
+The supervisor owns accept/revise; \`fm send\` is for revise/steer only, never post-accept landing.`,
+	};
 }
 
 function shipBrief(id: string, repo: string, mode: string, reportHelper: string, statusFile: string, fmRoot: string): string {

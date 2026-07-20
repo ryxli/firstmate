@@ -5,7 +5,7 @@
 // Ported behavior-preserving from the former sbin/fm fleet-sync, using the
 // shared cli/lib/ff.ts fast-forward core (ported from sbin/fm-ff-lib.sh).
 //
-// Skips local-only/no-origin projects, dirty clones, non-default checkouts,
+// Skips trunk/no-origin projects, dirty clones, non-default checkouts,
 // diverged branches, and fetch/fast-forward failures without forcing or
 // stashing.
 // Pruning never deletes the checked-out branch or a branch that still has a
@@ -71,13 +71,13 @@ function defaultBranch(proj: string): string | null {
 }
 
 // Mirrors project_mode(): shell out to `fm project-mode <label>`, discarding
-// stderr, falling back to "direct-PR off" only if the subcommand itself fails.
+// stderr, falling back to "pr off" only if the subcommand itself fails.
 function projectMode(fmRoot: string, label: string): string {
 	const res = spawnSync(join(fmRoot, "sbin", "fm"), ["project-mode", label], {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],
 	});
-	const line = !res.error && res.status === 0 ? (res.stdout ?? "").trim() : "direct-PR off";
+	const line = !res.error && res.status === 0 ? (res.stdout ?? "").trim() : "pr off";
 	return line.split(/\s+/)[0] ?? "";
 }
 
@@ -126,8 +126,8 @@ function syncProject(proj: string, fmRoot: string, projectsDir: string): void {
 	}
 
 	const mode = projectMode(fmRoot, label);
-	if (mode === "local-only") {
-		process.stdout.write(`${label}: skipped: local-only project\n`);
+	if (mode === "trunk") {
+		process.stdout.write(`${label}: skipped: trunk project\n`);
 		return;
 	}
 	if (!git(proj, ["remote", "get-url", "origin"]).ok) {

@@ -73,7 +73,7 @@ make_supervisor_home() {
   home="$TMP_ROOT/$name-supervisor"
   mkdir -p "$home/config" "$home/data" "$home/projects" "$home/state" "$home/worktrees"
   printf 'name=Test Supervisor\n' > "$home/config/identity"
-  printf '%s\n' '- demo [direct-PR] - test project' > "$home/data/projects.md"
+  printf '%s\n' '- demo [pr] - test project' > "$home/data/projects.md"
   printf '%s\n' "$home"
 }
 

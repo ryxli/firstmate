@@ -70,7 +70,7 @@ make_main_home() {
   local home=$1
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
   printf 'omp\n' > "$home/config/crew-harness"
-  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-07-08)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-07-08)' > "$home/data/projects.md"
 }
 
 make_git_project_with_origin() {
@@ -411,10 +411,10 @@ test_home_link_repairs_shared_code_without_moving_operational_dirs() {
     || fail "second fm-home-link --repair failed"
   [ "$(readlink "$home/sbin")" = "$before" ] || fail "idempotent repair changed sbin target"
 
-  printf '%s\n' '- alpha [local-only +yolo] - alpha project (added 2026-07-08)' > "$home/data/projects.md"
+  printf '%s\n' '- alpha [trunk +yolo] - alpha project (added 2026-07-08)' > "$home/data/projects.md"
   out=$(FM_HOME="$home" FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$home/sbin/fm" project-mode alpha 2>&1) \
     || fail "project mode through symlinked sbin failed: $out"
-  [ "$out" = 'local-only on' ] || fail "symlinked sbin did not read mate-home data/projects.md: $out"
+  [ "$out" = 'trunk on' ] || fail "symlinked sbin did not read mate-home data/projects.md: $out"
 
   mkdir -p "$conflict/data" "$conflict/state" "$conflict/config" "$conflict/projects"
   printf '%s\n' conflict > "$conflict/.fm-secondmate-home"

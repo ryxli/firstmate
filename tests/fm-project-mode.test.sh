@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Verifies the legacy no-mistakes registry token canonicalizes to direct-PR,
-# so mode consumers only ever see direct-PR|local-only.
+# Verifies delivery modes are trunk|pr only - no legacy aliases.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,49 +13,53 @@ pass() { printf 'ok - %s\n' "$1"; }
 mkdir -p "$TMP/home/data"
 cat > "$TMP/home/data/projects.md" <<'EOF'
 - defaulted - Default project (added 2026-07-16)
-- pr [direct-PR] - PR project (added 2026-07-16)
-- main [direct-main] - Direct main project (added 2026-07-16)
-- main-yolo [direct-main +yolo] - Direct main yolo project (added 2026-07-16)
-- legacy [no-mistakes] - pipeline-era project (added 2026-06-25)
-- legacy-yolo [no-mistakes +yolo] - pipeline-era project with yolo (added 2026-06-25)
-- offline [local-only] - purely local project (added 2026-06-25)
+- prproj [pr] - PR project (added 2026-07-16)
+- trunkproj [trunk] - Trunk project (added 2026-07-16)
+- trunk-yolo [trunk +yolo] - Trunk yolo (added 2026-07-16)
+- legacy [no-mistakes] - stale alias (added 2026-06-25)
+- oldpr [direct-PR] - stale alias (added 2026-06-25)
+- oldtrunk [local-only] - stale alias (added 2026-06-25)
 - typo [direct-mainn +yolo] - Typo project (added 2026-07-16)
 EOF
 
-run_mode() { FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' "$MODE" project-mode "$1"; }
-
-out=$(run_mode legacy)
-[ "$out" = "direct-PR off" ] || fail "[no-mistakes] must resolve to 'direct-PR off', got: $out"
-pass "legacy no-mistakes token canonicalizes to direct-PR off"
-
-out=$(run_mode legacy-yolo)
-[ "$out" = "direct-PR on" ] || fail "[no-mistakes +yolo] must resolve to 'direct-PR on', got: $out"
-pass "yolo flag survives no-mistakes canonicalization"
-
-out=$(run_mode offline)
-[ "$out" = "local-only off" ] || fail "[local-only] must stay 'local-only off', got: $out"
-pass "local-only resolution is unchanged"
+run_mode() { FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' "$MODE" project-mode "$1" 2>/dev/null; }
+run_mode_err() { FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' "$MODE" project-mode "$1" 2>&1; }
 
 out=$(run_mode defaulted)
-[ "$out" = "direct-PR off" ] || fail "missing bracket must default to 'direct-PR off', got: $out"
-pass "missing bracket defaults to direct-PR"
+[ "$out" = "pr off" ] || fail "missing bracket must default to 'pr off', got: $out"
+pass "missing bracket defaults to pr"
 
-out=$(run_mode pr)
-[ "$out" = "direct-PR off" ] || fail "explicit direct-PR must parse, got: $out"
-pass "direct-PR parses"
+out=$(run_mode prproj)
+[ "$out" = "pr off" ] || fail "[pr] must parse, got: $out"
+pass "pr parses"
 
-out=$(run_mode main)
-[ "$out" = "direct-main off" ] || fail "direct-main must parse, got: $out"
-pass "direct-main parses"
+out=$(run_mode trunkproj)
+[ "$out" = "trunk off" ] || fail "[trunk] must parse, got: $out"
+pass "trunk parses"
 
-out=$(run_mode main-yolo)
-[ "$out" = "direct-main on" ] || fail "direct-main must keep yolo flag, got: $out"
-pass "direct-main keeps yolo flag"
+out=$(run_mode trunk-yolo)
+[ "$out" = "trunk on" ] || fail "[trunk +yolo] must keep yolo, got: $out"
+pass "trunk keeps yolo"
+
+err=$(run_mode_err legacy)
+echo "$err" | grep -q 'only trunk|pr are valid' || fail "stale no-mistakes must warn about valid modes"
+echo "$err" | grep -q '^pr off$' || fail "stale no-mistakes must fall back to pr off"
+pass "stale no-mistakes falls back to pr with warn"
+
+err=$(run_mode_err oldpr)
+echo "$err" | grep -q 'only trunk|pr are valid' || fail "stale direct-PR must warn"
+echo "$err" | grep -q '^pr off$' || fail "stale direct-PR must fall back to pr off"
+pass "stale direct-PR falls back to pr with warn"
+
+err=$(run_mode_err oldtrunk)
+echo "$err" | grep -q 'only trunk|pr are valid' || fail "stale local-only must warn (not map to trunk)"
+echo "$err" | grep -q '^pr off$' || fail "stale local-only must fall back to pr off, not trunk"
+pass "stale local-only does not map to trunk"
 
 out=$(run_mode typo)
-[ "$out" = "direct-PR off" ] || fail "unknown mode must fall back safely, got: $out"
+[ "$out" = "pr off" ] || fail "unknown mode must fall back safely, got: $out"
 pass "unknown mode falls back safely"
 
 out=$(run_mode missing)
-[ "$out" = "direct-PR off" ] || fail "missing project must fall back safely, got: $out"
+[ "$out" = "pr off" ] || fail "missing project must fall back safely, got: $out"
 pass "missing project falls back safely"

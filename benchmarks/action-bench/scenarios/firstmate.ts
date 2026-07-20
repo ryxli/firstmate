@@ -268,9 +268,9 @@ function clsOracle(d: string): Trace {
 // ===========================================================================
 // 3. fm-routing-decision : ambiguous supervision/routing (aspirational)
 // ===========================================================================
-const RT_PROJECTS = `- webapp [no-mistakes] - customer-facing web app (added 2026-05-01)
-- api [no-mistakes] - backend REST API (added 2026-05-01)
-- infra [local-only] - deploy and ops scripts (added 2026-05-02)
+const RT_PROJECTS = `- webapp [pr] - customer-facing web app (added 2026-05-01)
+- api [pr] - backend REST API (added 2026-05-01)
+- infra [trunk] - deploy and ops scripts (added 2026-05-02)
 `;
 const RT_SECONDMATES = `- triage - incident and bug response (home: /homes/triage; scope: reproducing and fixing reported bugs, regressions, and incidents in webapp and api; projects: webapp, api; added 2026-05-03)
 - feature - feature delivery (home: /homes/feature; scope: designing and building brand-new features and enhancements in webapp; projects: webapp; added 2026-05-03)
@@ -293,7 +293,7 @@ Given the fleet state and a new request, produce decision.json with EXACTLY thes
                 otherwise "dispatchable".
   blocked_by  - the id of the overlapping in-flight task, or null when dispatchable.
 Rules:
-- A local-only project is always owner "main".
+- A trunk project is always owner "main".
 - Only "## In flight" tasks can block; "## Queued" tasks never block.
 - Overlap means the same file or the same top-level subsystem directory under src/.
 `;

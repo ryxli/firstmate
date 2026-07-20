@@ -2,7 +2,7 @@
 # Verifies generated ship briefs match spawn mechanics: fm-spawn creates the
 # worktree already on fm/<id>, so the brief must say so and must not instruct
 # the crewmate to run `git checkout -b`.
-# shellcheck disable=SC2016  # grep -qF assertions match literal backticks (`peer_send`, `supervisor=`) in generated brief text; single quotes are intentional
+# shellcheck disable=SC2016
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,10 +15,9 @@ pass() { printf 'ok - %s\n' "$1"; }
 
 mkdir -p "$TMP/home/data"
 cat > "$TMP/home/data/projects.md" <<'EOF'
-- app - default direct-PR project (added 2026-06-25)
-- legacy [no-mistakes] - pipeline-era project (added 2026-06-25)
-- local [local-only] - local delivery project (added 2026-06-25)
-- main [direct-main +yolo] - Direct main project (added 2026-07-16)
+- app - default pr project (added 2026-06-25)
+- collab [pr] - collaborative project (added 2026-06-25)
+- local [trunk] - trunk delivery project (added 2026-06-25)
 EOF
 
 scaffold() {
@@ -74,40 +73,6 @@ check_assignment_completion() {
     || fail "$brief does not use the assignment completion return"
 }
 
-check_direct_main() {
-  local brief=$1
-  grep -qF 'This project ships **direct-main**' "$brief" \
-    || fail "$brief has no direct-main mode text"
-  grep -qF 'Do NOT open a PR' "$brief" \
-    || fail "$brief does not forbid PRs for direct-main"
-  grep -qF 'Do NOT force-push' "$brief" \
-    || fail "$brief does not forbid force pushes for direct-main"
-  grep -qF 'The `+yolo` flag never relaxes these safeguards.' "$brief" \
-    || fail "$brief has no direct-main yolo safeguard"
-  grep -qF 'reviewed by you' "$brief" \
-    || fail "$brief does not require a branch reviewed by you"
-  grep -qF 'test -z "$(git status --porcelain)"' "$brief" \
-    || fail "$brief does not require a clean branch"
-  grep -qF 'lock_dir="$(git rev-parse --git-common-dir)/fm-direct-main-delivery.lock"' "$brief" \
-    || fail "$brief has no direct-main shared writer lock"
-  grep -qF 'git fetch origin main' "$brief" \
-    || fail "$brief does not fetch before delivery"
-  grep -qF 'git merge-base --is-ancestor "$base" "$head"' "$brief" \
-    || fail "$brief does not prove ancestry"
-  grep -qF 'git push origin "$head:refs/heads/main"' "$brief" \
-    || fail "$brief does not push the exact head normally"
-  grep -qF 'remote=$(git rev-parse origin/main)' "$brief" \
-    || fail "$brief does not read the remote SHA back"
-  grep -qF 'test "$remote" = "$head"' "$brief" \
-    || fail "$brief does not verify the remote SHA"
-  ! grep -qF 'open a PR with `gh-axi`' "$brief" \
-    || fail "$brief has a PR creation path for direct-main"
-  ! grep -qF 'done: PR {url}' "$brief" \
-    || fail "$brief has a PR completion path for direct-main"
-  ! grep -qF -- '--force' "$brief" \
-    || fail "$brief has a force push flag for direct-main"
-}
-
 check_house_blocks() {
   local brief=$1
   grep -qF '# Lean-loop discipline' "$brief" \
@@ -127,27 +92,23 @@ check_assignment_completion "$brief" 'done: PR {url}'
   || fail "ordinary ship brief required unavailable peer bus"
 check_ship_setup "$brief" task-a1
 check_house_blocks "$brief"
-pass "direct-PR ship brief has the evidence-first assignment contract and status completion"
+grep -qF 'This project ships **pr**' "$brief" || fail "default project did not produce a pr ship brief"
+pass "pr ship brief has the evidence-first assignment contract and status completion"
 
-brief=$(scaffold task-b2 legacy)
+brief=$(scaffold task-b2 collab)
 check_ship_setup "$brief" task-b2
 check_assignment_contract "$brief"
 check_assignment_completion "$brief" 'done: PR {url}'
-grep -qF 'This project ships **direct-PR**' "$brief" \
-  || fail "no-mistakes registry entry did not produce a direct-PR ship brief"
-pass "legacy no-mistakes project scaffolds a direct-PR ship brief"
-
-brief=$(scaffold task-main main)
-check_ship_setup "$brief" task-main
-check_direct_main "$brief"
-pass "direct-main ship brief forbids PRs and force-push, and requires a guarded delivery"
+grep -qF 'This project ships **pr**' "$brief" || fail "pr registry entry did not produce a pr ship brief"
+pass "explicit pr project scaffolds a pr ship brief"
 
 brief=$(scaffold task-local local)
 check_assignment_contract "$brief"
 check_assignment_completion "$brief" 'done: ready in branch fm/task-local'
+grep -qF 'This project ships **trunk**' "$brief" || fail "trunk registry entry did not produce a trunk ship brief"
 ! grep -qF 'use `peer_send` to send' "$brief" \
-  || fail "local-only brief required unavailable peer bus"
-pass "local-only ship brief has the evidence-first assignment contract and status completion"
+  || fail "trunk brief required unavailable peer bus"
+pass "trunk ship brief has the evidence-first assignment contract and status completion"
 
 scout="$TMP/home/data/scout-d4/brief.md"
 FM_HOME="$TMP/home" FM_ROOT_OVERRIDE='' FM_DATA_OVERRIDE='' FM_STATE_OVERRIDE='' \
@@ -159,22 +120,3 @@ check_assignment_completion "$scout" "done: report $TMP/home/data/scout-d4/repor
   || fail "scout brief required unavailable peer bus"
 check_house_blocks "$scout"
 pass "scout brief has the evidence-first assignment contract and status completion"
-
-secondmate="$TMP/home/data/secondmate-c3/brief.md"
-FM_HOME="$TMP/home" FM_SECONDMATE_CHARTER='operations supervision' \
-  "${BRIEF[@]}" secondmate-c3 --secondmate app >/dev/null 2>&1 \
-  || fail "secondmate charter scaffold failed"
-grep -qF 'Supervision is automatic and in-process; there is no watcher, wake-queue, beacon' "$secondmate" \
-  || fail "secondmate charter did not describe automatic in-process supervision"
-grep -qF 'direct crewmate status-file reporting' "$secondmate" \
-  || fail "secondmate charter dropped direct status-file reporting"
-grep -qF 'fm send' "$secondmate" \
-  || fail "secondmate charter dropped fm send pane steering"
-grep -qF 'Escalate only cap-actionable transition states' "$secondmate" \
-  || fail "secondmate charter did not restrict escalation states"
-grep -qF 'through the fleet peer bus' "$secondmate" \
-  || fail "secondmate charter dropped peer-bus escalation"
-grep -qF 'type /peer send fm "{state}: {one short line}"' "$secondmate" \
-  || fail "secondmate charter did not use canonical lowercase routing id"
-check_house_blocks "$secondmate"
-pass "secondmate charter uses automatic supervision and canonical peer-bus escalation"

@@ -1,20 +1,14 @@
-// fm verb: merge-local - perform the approved local merge for a local-only ship
-// task: fast-forward the project's default branch to the crewmate's fm/<id>
-// branch.
-// Ported behavior-preserving from the former sbin/fm merge-local.
+// fm verb: merge-local - trunk-mode land: fast-forward the project's default
+// branch to the crewmate's fm/<id> branch after approval.
 //
-// This is firstmate's merge gate-action (the cap's merge authority applied
-// locally instead of via a GitHub PR). It is the one sanctioned exception to hard
-// rule #1 "never run state-changing git in projects/", and it is narrow: it only
-// runs for mode=local-only tasks, only after the cap approves (or yolo=on
-// auto-approves), and only as a clean fast-forward - it refuses a diverged branch
-// and tells you to have the crewmate rebase. See AGENTS.md sections 1 and 6.
-// Usage: fm merge-local <task-id>
+// Narrow exception to hard rule #1: only mode=trunk, only after cap/yolo
+// approval, clean fast-forward only. Usage: fm merge-local <task-id>
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { landAfterFfMerge } from "../lib/artifact";
 import { ffResolveDefaultBranch } from "../lib/ff";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -75,8 +69,8 @@ async function run(argv: string[]): Promise<number> {
 
 	const proj = metaField(metaContents, "project=");
 	const mode = metaField(metaContents, "mode=");
-	if (mode !== "local-only") {
-		process.stderr.write(`error: task ${id} is mode=${mode}, not local-only; merge it the normal way (gh-axi pr merge / cap)\n`);
+	if (mode !== "trunk") {
+		process.stderr.write(`error: task ${id} is mode=${mode}, not trunk; use gh-axi pr merge / pr-check\n`);
 		return 1;
 	}
 
@@ -119,12 +113,18 @@ async function run(argv: string[]): Promise<number> {
 	if ((mergeRes.status ?? 1) !== 0) return mergeRes.status ?? 1;
 	const after = gitCapture(proj, ["rev-parse", "--short", def]).stdout;
 
+	const afterFull = gitCapture(proj, ["rev-parse", def]).stdout;
+	try {
+		landAfterFfMerge(id, { trunkSha: afterFull, branch: def, repo: proj });
+	} catch {
+		// No accepted artifact yet - legacy merge-local without spine record remains valid.
+	}
 	process.stdout.write(`merged ${branch} into local ${def} (${before} -> ${after}) in ${proj}\n`);
 	return 0;
 }
 
 export default {
 	name: "merge-local",
-	describe: "Fast-forward a local-only project's default branch to the crewmate's fm/<id> branch after cap approval.",
+	describe: "Fast-forward a trunk-mode project's default branch to the crewmate's fm/<id> branch after cap approval.",
 	run,
 };

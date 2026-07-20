@@ -47,12 +47,18 @@ async function run(argv: string[]): Promise<number> {
 	}
 
 	const checkUrl = shellQuote(url);
+	// On MERGED: wake supervisor and idempotently mark state/<id>.artifact.json landed.
+	const fmBin = shellQuote(join(REPO_ROOT, "sbin", "fm"));
+	const homeExport = process.env.FM_HOME?.trim() ? `FM_HOME=${shellQuote(process.env.FM_HOME.trim())} ` : "";
 	const checkScript = `URL=${checkUrl}
 PR_REF=\${URL#https://github.com/}
 PR_REPO=\${PR_REF%%/pull/*}
 PR_NUMBER=\${PR_REF##*/pull/}
 state=$(gh-axi pr view "$PR_NUMBER" --repo "$PR_REPO" 2>/dev/null | awk -F': *' '/^[[:space:]]*state:/{print toupper($2); exit}')
-[ "$state" = "MERGED" ] && echo "merged"
+if [ "$state" = "MERGED" ]; then
+  echo "merged"
+  ${homeExport}${fmBin} tasks artifact land ${shellQuote(id)} >/dev/null 2>&1 || true
+fi
 `;
 	writeFileSync(join(state, `${id}.check.sh`), checkScript);
 

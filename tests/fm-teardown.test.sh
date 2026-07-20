@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Tests for the fm teardown verb's unpushed-work safety check.
 #
-# Covers the local-only fork-remote fix: a local-only-registered project whose
+# Covers the trunk fork-remote fix: a trunk-registered project whose
 # task pushes its work to a fork (upstream-contribution PRs) must be teardown-
 # eligible because a fork IS a remote. The pre-fix code short-circuited to a
 # strict local-main check and false-refused legitimate fork-pushed work.
 #
 # Matrix:
-#   (a) local-only + HEAD on a fork remote-tracking branch     -> ALLOW  (the fix)
-#   (b) local-only + truly unpushed work (no remote, not main) -> REFUSE (safety)
-#   (c) local-only + merged into local main, no remote         -> ALLOW  (no regression)
-#   (d) no-mistakes  + HEAD on origin remote-tracking branch   -> ALLOW  (no regression)
-#   (e) no-mistakes  + truly unpushed work                     -> REFUSE (no regression)
-#   (f) local-only + truly unpushed + --force                  -> ALLOW  (escape hatch)
+#   (a) trunk + HEAD on a fork remote-tracking branch     -> ALLOW  (the fix)
+#   (b) trunk + truly unpushed work (no remote, not main) -> REFUSE (safety)
+#   (c) trunk + merged into local main, no remote         -> ALLOW  (no regression)
+#   (d) pr  + HEAD on origin remote-tracking branch   -> ALLOW  (no regression)
+#   (e) pr  + truly unpushed work                     -> REFUSE (no regression)
+#   (f) trunk + truly unpushed + --force                  -> ALLOW  (escape hatch)
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -128,7 +128,7 @@ expect_code() {
 test_local_only_fork_remote_allows() {
   local case_dir rc
   case_dir=$(make_case fork-allow)
-  write_meta "$case_dir" local-only ship
+  write_meta "$case_dir" trunk ship
   wt_commit "$case_dir" "fix the thing"
   add_fork_with_pushed_branch "$case_dir"
 
@@ -139,13 +139,13 @@ test_local_only_fork_remote_allows() {
 
   expect_code 0 "$rc" "fork-allow: teardown should succeed when HEAD is on a fork remote"
   ! grep -q REFUSED "$case_dir/stderr" || fail "fork-allow: teardown printed a REFUSED line"
-  pass "local-only worktree with HEAD on a fork remote is torn down (fix holds)"
+  pass "trunk worktree with HEAD on a fork remote is torn down (fix holds)"
 }
 
 test_teardown_prompts_fm_tasks_done_with_pr() {
   local case_dir out
   case_dir=$(make_case fm-task-reminder)
-  write_meta "$case_dir" no-mistakes ship
+  write_meta "$case_dir" pr ship
   printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$case_dir/state/task-x1.meta"
 
   out=$(run_teardown "$case_dir") || fail "teardown failed"
@@ -163,7 +163,7 @@ test_teardown_prompts_fm_tasks_done_with_pr() {
 test_local_only_truly_unpushed_refuses() {
   local case_dir rc
   case_dir=$(make_case truly-unpushed)
-  write_meta "$case_dir" local-only ship
+  write_meta "$case_dir" trunk ship
   wt_commit "$case_dir" "unpushed work"
   # No fork, no push to origin, not merged into main.
 
@@ -174,13 +174,13 @@ test_local_only_truly_unpushed_refuses() {
 
   expect_code 1 "$rc" "truly-unpushed: teardown should refuse"
   grep -q REFUSED "$case_dir/stderr" || fail "truly-unpushed: no REFUSED line in stderr"
-  pass "local-only worktree with truly unpushed work is refused (safety preserved)"
+  pass "trunk worktree with truly unpushed work is refused (safety preserved)"
 }
 
 test_local_only_merged_to_local_main_allows() {
   local case_dir rc
   case_dir=$(make_case merged-main)
-  write_meta "$case_dir" local-only ship
+  write_meta "$case_dir" trunk ship
   wt_commit "$case_dir" "merged work"
   # Fast-forward the project's main to the worktree's HEAD commit so HEAD is
   # reachable from main. update-ref works whether or not main is checked out,
@@ -196,13 +196,13 @@ test_local_only_merged_to_local_main_allows() {
 
   expect_code 0 "$rc" "merged-main: teardown should succeed when work is merged into local main"
   ! grep -q REFUSED "$case_dir/stderr" || fail "merged-main: teardown printed a REFUSED line"
-  pass "local-only worktree with work merged into local main is torn down (no regression)"
+  pass "trunk worktree with work merged into local main is torn down (no regression)"
 }
 
 test_no_mistakes_origin_remote_allows() {
   local case_dir rc
   case_dir=$(make_case nm-origin)
-  write_meta "$case_dir" no-mistakes ship
+  write_meta "$case_dir" pr ship
   wt_commit "$case_dir" "shippable work"
   # Push the task branch to origin and fetch so the worktree sees it.
   git -C "$case_dir/wt" push -q origin fm/task-x1
@@ -217,13 +217,13 @@ test_no_mistakes_origin_remote_allows() {
   ! grep -q REFUSED "$case_dir/stderr" || fail "nm-origin: teardown printed a REFUSED line"
   grep -F 'blockers are gone and date is due' "$case_dir/stdout" >/dev/null \
     || fail "nm-origin: teardown manual prompt did not preserve date-gate check"
-  pass "no-mistakes worktree with HEAD on origin is torn down (no regression)"
+  pass "pr worktree with HEAD on origin is torn down (no regression)"
 }
 
 test_no_mistakes_truly_unpushed_refuses() {
   local case_dir rc
   case_dir=$(make_case nm-unpushed)
-  write_meta "$case_dir" no-mistakes ship
+  write_meta "$case_dir" pr ship
   wt_commit "$case_dir" "unpushed work"
 
   set +e
@@ -233,13 +233,13 @@ test_no_mistakes_truly_unpushed_refuses() {
 
   expect_code 1 "$rc" "nm-unpushed: teardown should refuse"
   grep -q REFUSED "$case_dir/stderr" || fail "nm-unpushed: no REFUSED line in stderr"
-  pass "no-mistakes worktree with truly unpushed work is refused (no regression)"
+  pass "pr worktree with truly unpushed work is refused (no regression)"
 }
 
 test_local_only_force_overrides_unpushed() {
   local case_dir rc
   case_dir=$(make_case force-override)
-  write_meta "$case_dir" local-only ship
+  write_meta "$case_dir" trunk ship
   wt_commit "$case_dir" "unpushed work"
 
   set +e
@@ -249,7 +249,7 @@ test_local_only_force_overrides_unpushed() {
 
   expect_code 0 "$rc" "force-override: --force should bypass the unpushed-work check"
   ! grep -q REFUSED "$case_dir/stderr" || fail "force-override: REFUSED printed despite --force"
-  pass "local-only worktree with unpushed work is torn down under --force (escape hatch)"
+  pass "trunk worktree with unpushed work is torn down under --force (escape hatch)"
 }
 
 test_local_only_fork_remote_allows

@@ -13,13 +13,14 @@
 // every other entry and every free-form (no-id) line is emitted verbatim, so
 // `render(parse(src))` equals `src` byte-for-byte on a file nobody mutated.
 //
-// Dependency truth for `ready`/`blocked` is the backlog's own `## Done`
-// section, never a live status signal - this is what "distinguishes worker
-// completion from delivery-mode landing": a task only counts as resolved for
-// another task's `blocked-by` edge once it is actually recorded Done here.
+// Dependency truth for `ready`/`blocked` is the backlog's `## Done` section
+// OR a terminal ArtifactRecord (landed/abandoned/superseded). Done remains a
+// read-only compatibility projection during cutover; Artifact is canonical
+// for new terminals. Never use a live status signal as dependency truth.
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { dependencySatisfied } from "./artifact";
 
 export type TaskState = "inflight" | "queued" | "done";
 export const HOLD_KINDS = ["captain", "external", "load", "parked", "future"] as const;
@@ -639,21 +640,25 @@ export class BacklogStore {
 // blocked/ready/held are computed here, not stored).
 // ---------------------------------------------------------------------------
 
-/** Ids blocked by an unresolved `blocked-by` edge. Dependency truth is `## Done` only. */
+function isResolvedDep(id: string, doneIds: Set<string>): boolean {
+	return doneIds.has(id) || dependencySatisfied(id);
+}
+
+/** Ids blocked by an unresolved `blocked-by` edge. Done section + Artifact terminals. */
 export function blockedIds(tasks: Task[]): Set<string> {
 	const doneIds = new Set(tasks.filter(t => t.state === "done").map(t => t.id));
 	const blocked = new Set<string>();
 	for (const task of tasks) {
 		if (task.state === "done") continue;
-		if (task.deps.some(dep => !doneIds.has(dep.id))) blocked.add(task.id);
+		if (task.deps.some(dep => !isResolvedDep(dep.id, doneIds))) blocked.add(task.id);
 	}
 	return blocked;
 }
 
-/** Unresolved blocker ids for one task (subset of its deps not yet Done). */
+/** Unresolved blocker ids for one task (subset of its deps not yet Done/Artifact-terminal). */
 export function unresolvedBlockers(task: Task, tasks: Task[]): string[] {
 	const doneIds = new Set(tasks.filter(t => t.state === "done").map(t => t.id));
-	return task.deps.map(d => d.id).filter(id => !doneIds.has(id));
+	return task.deps.map(d => d.id).filter(id => !isResolvedDep(id, doneIds));
 }
 
 export function isHoldActive(task: Task, today = todayLocal()): boolean {

@@ -243,7 +243,7 @@ async function fleetSync(fmRoot: string, projects: string): Promise<string[]> {
 	const lines: string[] = [];
 	for (const line of stdout.split(/\r?\n/)) {
 		if (!line) continue;
-		if (line.endsWith(": skipped: local-only project")) continue;
+		if (line.endsWith(": skipped: trunk project")) continue;
 		if (line.endsWith(": skipped: no origin remote")) continue;
 		if (line.includes(": skipped:")) lines.push(`FLEET_SYNC: ${line}`);
 	}

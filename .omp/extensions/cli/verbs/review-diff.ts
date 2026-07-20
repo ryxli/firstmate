@@ -4,7 +4,7 @@
 //
 // Pooled project clones do not keep their local default branch current, so
 // this compares remote-backed projects against origin/<default> after
-// fetching the default branch, and local-only projects against the local
+// fetching the default branch, and trunk projects against the local
 // default branch.
 // Usage: fm review-diff <task-id> [--stat]
 //   --stat prints only the stat summary; default prints stat summary plus full diff.

@@ -51,7 +51,7 @@ The home persists with no live process and is never recycled by herdr until expl
 The charter must be filled before seeding; direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.
 Seeding is transactional: if validation, cloning, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
 `sbin/fm home-seed validate` refuses duplicate ids, duplicate homes, and nested or overlapping homes.
-Secondmate project lists may include `direct-PR` projects only; `local-only` projects stay with the main firstmate.
+Secondmate project lists may include `pr` projects only; `trunk` projects stay with the main firstmate.
 
 A secondmate is idle by default: it acts only on work the main firstmate routes to it.
 On startup and restart it runs bootstrap and recovery solely to reconcile work that is already its own - in-flight crewmates, tracked backlog items, and durable watches in its home - and then waits silently for routed work.
@@ -64,7 +64,7 @@ Scope-matching is firstmate's judgment against the secondmate's natural-language
 The verb resolves the secondmate home from `data/secondmates.md` and mechanically moves each named item from the main `data/backlog.md` into the secondmate home's `data/backlog.md`, preserving the line and its section byte-exact, so the item is neither duplicated nor lost.
 It refuses `## In flight` entries because active task ownership also lives in herdr and `state/`.
 It is idempotent (an item already in the secondmate backlog is skipped) and refuses any destination that is not a genuine seeded firstmate home with safe operational directories and a matching `.fm-secondmate-home` marker, so a move can never land in a project.
-Do not hand off `local-only` items: that work stays with the main firstmate (section 7).
+Do not hand off `trunk` items: that work stays with the main firstmate (section 7).
 
 ### Project memory ownership
 
@@ -90,31 +90,20 @@ Create a project's `AGENTS.md` lazily on first need.
 The first ship task that touches a project lacking one and has durable project-intrinsic knowledge to record should run `sbin/fm ensure-agents-md`, add that knowledge, and commit both through the normal project delivery pipeline.
 Do not eagerly backfill every project.
 
-**Delivery mode (choose at add).** `<mode>` is how a finished change reaches `main`, picked per project when you add it and recorded in the registry line (`fm project-mode` parses it; `fm-spawn` records it into each task's meta):
+**Delivery mode (choose at add).** Recorded in `data/projects.md` (`fm project-mode`; spawn copies into meta):
 
-- `direct-PR` (default; `[...]` may be omitted) - push + open a PR via `gh-axi`, backed by focused review and tests, with no separate pipeline -> cap merge.
-- `local-only` - local branch, no remote, no PR; firstmate reviews the diff, the cap approves, firstmate merges to local `main` (section 7).
-- `no-mistakes` - legacy alias retained so old registry lines still parse; treated as `direct-PR`, and the no-mistakes pipeline is no longer invoked.
+- `pr` (default) - collaborative GitHub PR.
+- `trunk` - personal local default-branch land.
+- Optional `+yolo` (default off): firstmate makes routine approvals itself (section 7). Default new projects to `pr` off; set `trunk` or `+yolo` only on the cap's say-so.
+- Only `trunk|pr` are valid registry modes; stale names are not aliased - fix the registry or they fall back to `pr` with a warning.
 
-Orthogonal to mode is an optional `+yolo` flag (`[direct-PR +yolo]`), default off and **not recommended**: with `yolo` on, firstmate makes the approval decisions itself instead of asking the cap (section 7).
-When the cap adds a project without saying, default to `direct-PR` with yolo off; only set `local-only` or `+yolo` on the cap's explicit say-so.
+**Clone / create:** `pr` needs a GitHub remote (cap consent before `gh-axi` create); `trunk` may be a local-only repo under `projects/<name>`.
 
-**Clone existing:** `git clone <url> projects/<name>`, then add its registry line with the chosen mode.
-
-**Create new:** a `direct-PR` project needs a GitHub repo first (it pushes to an `origin` remote); a `local-only` project needs no remote at all - a purely local git repo is fine.
-Creating a GitHub repo is outward-facing, so get the cap's consent before touching GitHub: propose the repo name, owner/org, visibility (default private), and delivery mode, and create with `gh-axi` only after the cap confirms.
-Then clone it into `projects/<name>`.
-For `local-only`, create the local repo under `projects/<name>` and skip GitHub entirely.
-
-There is no separate validation pipeline to install or run: a change reaches `main` through focused review and tests plus the cap's merge.
+**Artifact spine (folded in).** Durable `data/artifacts/<id>.json` holds `reviewState` + `delivery` (accepted payload immutable). Ops: `fm tasks artifact candidate|revise|accept|abandon|supersede|land|discard|show`. Predicates split: deps need landed (or successor landed); teardown needs landed or `discard`; abandoned/superseded alone are not delivery. `land` proves patch-id on trunk (no note-as-proof). Trunk → `fm merge-local`; pr → `fm pr-check` then `land`. `revise` pre-accept only; `fm send` refused after accept. omp/hashline owns in-session patch accept.
 
 ### Promotion path (mate knowledge to canonical home)
 
-A mate flags promotion-worthy knowledge by dropping the file (or a pointer note) into its home's `data/promote/` directory; that directory is the single promotion inbox, and a `promote:` status line only announces that something landed there.
-Firstmate reviews each flagged item and classifies it with the disposition vocabulary owned by AGENTS.md section 1 (keep/merge/relocate/compile/quarantine/drop).
-A promoted fact lands in exactly one canonical home per the layer contract: tracked template surface (sbin/, skills, benchmarks, AGENTS.md) for domain-generic material, the owning mate's home for domain knowledge, local data/ for fleet records.
-After landing, regenerate any projections (`sbin/fm brief --regen <id>`) and record the disposition in the mate's promote inbox (move the flagged file to `data/promote/done/` with a one-line verdict header) so the mate sees the outcome.
-Tracked landings ride the normal main-only commit flow and reach the other laptop on sync; nothing is promoted by copying a file to a second home without a recorded disposition.
+Mates drop candidates in `data/promote/` (`promote:` status only announces). Classify with AGENTS.md disposition verbs; land in exactly one home (tracked template vs mate home vs local data/). Record disposition under `data/promote/done/`; regenerate briefs as needed. Tracked landings use main-only commit flow - never copy across homes without a recorded disposition.
 
 ## 7. Task lifecycle
 
@@ -135,7 +124,7 @@ Then resolve the secondmate scope.
 Read `data/secondmates.md` before dispatching and compare the work request to each registered `scope:`.
 Route by the nature of the task, not just the project name.
 A project may appear in several `projects:` clone lists, so choose the secondmate whose natural-language scope actually fits the work, such as triage versus feature development.
-If the resolved project is `local-only`, keep the work with the main firstmate even when a secondmate scope sounds relevant.
+If the resolved project is `trunk`, keep the work with the main firstmate even when a secondmate scope sounds relevant.
 If a secondmate's scope fits, steer that secondmate with one concise instruction via `sbin/fm send fm-<id> '<work request>'` and let it run the normal lifecycle inside its own home.
 The bare `fm-<id>` target resolves through this home's `state/<id>.meta`; pass a pane id directly only when intentionally targeting a pane outside this firstmate home.
 Do not spawn a direct crewmate for work that belongs to a secondmate scope unless the secondmate is blocked or the cap explicitly redirects it.
@@ -144,7 +133,7 @@ When you create a new secondmate, hand its in-scope queued items off from the ma
 
 Then classify the shape:
 
-- **Ship** (the default): the deliverable is a change to the project. It ships through the project's delivery mode: `direct-PR` or `local-only`.
+- **Ship** (the default): the deliverable is a change to the project. It ships through the project's delivery mode: `pr` or `trunk`.
 - **Scout:** the deliverable is knowledge - an investigation, a plan, a bug reproduction, an audit. It ends in a report at `data/<id>/report.md`, never a PR. When the cap asks "what's wrong", "how would we", or "find out why" about a project, that is a scout task; dispatch it instead of doing the digging yourself.
 
 Then classify readiness:
@@ -201,20 +190,19 @@ For time-sensitive steers, peek promptly and distinguish sent, queued, observed,
 
 A ship task's path from `done` to landed on `main` is set by the project's `mode` (recorded in meta; section 6); `yolo` decides who approves. The PR ready / Ship teardown stages below apply per mode:
 
-- **direct-PR** (default) - the crewmate does focused review and tests, pushes, and opens the PR itself (its brief says so) and reports `done: PR <url>`. Firstmate runs `fm-pr-check` and relays the PR. Teardown uses the normal pushed-branch check.
-- **local-only** - no remote, no PR. The crewmate stops at `done: ready in branch fm/<id>`. Review the diff with `sbin/fm review-diff <id>`, relay a one-paragraph summary to the cap, and on approval run `sbin/fm merge-local <id>` to fast-forward local `main` (it refuses anything but a clean fast-forward - if it does, have the crewmate rebase). No `fm-pr-check`. Then teardown, whose safety check requires the branch already merged into local `main`, OR the work pushed to any remote (a fork counts - relevant for upstream-contribution PRs on a local-only-registered project).
-- **no-mistakes** - legacy alias; treated exactly as **direct-PR** (no pipeline is run).
+- **pr** (default) - the crewmate does focused review and tests, pushes, and opens the PR itself (its brief says so) and reports `done: PR <url>`. Firstmate runs `fm-pr-check` and relays the PR. Teardown uses the normal pushed-branch check.
+- **trunk** - no PR surface required. The crewmate stops at `done: ready in branch fm/<id>`. Review the diff with `sbin/fm review-diff <id>`, relay a one-paragraph summary to the cap, and on approval run `sbin/fm merge-local <id>` to fast-forward the local default branch (it refuses anything but a clean fast-forward - if it does, have the crewmate rebase). No `fm-pr-check`. Then teardown, whose safety check requires the branch already merged into the local default, OR the work pushed to any remote (a fork counts).
 
 When reviewing any crewmate branch diff, use `sbin/fm review-diff <id>` rather than `git diff <default>...branch` directly.
 Pooled clones keep their local default refs frozen at clone time and can lag `origin`; the helper always compares against the authoritative base.
 
-**yolo (orthogonal).** With `yolo=off` (default) every approval is the cap's: ask-user findings, PR merges, the local-only merge. With `yolo=on`, firstmate makes those calls itself without asking - resolve ask-user findings on your judgment, and run `gh-axi pr merge` / `sbin/fm merge-local` once the work is green/approved - EXCEPT anything destructive, irreversible, or security-sensitive, which still escalates to the cap. Never merge a red PR even under yolo. After any merge you perform without asking the cap, post a one-line "merged <full PR URL or local main> after checks passed" FYI so the cap keeps a trail.
+**yolo (orthogonal).** With `yolo=off` (default) every approval is the cap's: ask-user findings, PR merges, the trunk merge. With `yolo=on`, firstmate makes those calls itself without asking - resolve ask-user findings on your judgment, and run `gh-axi pr merge` / `sbin/fm merge-local` once the work is green/approved - EXCEPT anything destructive, irreversible, or security-sensitive, which still escalates to the cap. Never merge a red PR even under yolo. After any merge you perform without asking the cap, post a one-line "merged <full PR URL or local main> after checks passed" FYI so the cap keeps a trail.
 
 ### Validate
 
 There is no separate firstmate-triggered validation pipeline.
-A ship crewmate runs the project's own focused checks (the tests and lints it already uses) and reviews its own diff before it reports `done` - for `direct-PR` before opening the PR, for `local-only` before reporting `ready in branch`.
-Firstmate's validation is review, not a pipeline: for `direct-PR`, read the opened PR and its CI if the project runs CI; for `local-only`, read the branch diff with `sbin/fm review-diff <id>`.
+A ship crewmate runs the project's own focused checks (the tests and lints it already uses) and reviews its own diff before it reports `done` - for `pr` before opening the PR, for `trunk` before reporting `ready in branch`.
+Firstmate's validation is review, not a pipeline: for `pr`, read the opened PR and its CI if the project runs CI; for `trunk`, read the branch diff with `sbin/fm review-diff <id>`.
 Relay anything that needs a decision to the cap unless `yolo=on` permits routine approval on your judgment.
 Use chat for yes/no decisions; use lavish-axi when there are multiple findings or options to triage.
 
@@ -228,7 +216,7 @@ Review and evidence safeguards are owned by AGENTS.md; before parallel lane work
 
 ### PR ready
 
-For PR-based ship tasks (`direct-PR`), the crewmate reports `done: PR <url>` after opening the PR, adding `checks green` once the project's CI (if any) is green.
+For PR-based ship tasks (`pr`), the crewmate reports `done: PR <url>` after opening the PR, adding `checks green` once the project's CI (if any) is green.
 Run `sbin/fm pr-check <id> <PR url>` - it records `pr=` in the task's meta and registers a merge check for the supervision extension's poll timer.
 Tell the cap: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the cap's terminal makes a full URL clickable) and a one-paragraph summary.
 (The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when it should add durable fleet attention, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
@@ -294,7 +282,7 @@ Update it on every dispatch, completion, and decision.
 An empty local Queued section falls back to the same live-fleet reconciliation `fm tasks fleet` and `fm fleet` use.
 
 Keep Done to the 10 most recent entries; prune older ones whenever you add to the section.
-Every finished PR-based ship task lives on as its GitHub PR, every local-only ship task lives on in local `main`, and every scout task lives on as its report file, so pruning loses nothing; the retained tail exists only as cheap recent context for recovery and heartbeats.
+Every finished PR-based ship task lives on as its GitHub PR, every trunk ship task lives on in the local default branch, and every scout task lives on as its report file, so pruning loses nothing; the retained tail exists only as cheap recent context for recovery and heartbeats.
 
 `fm tasks` owns its own defaults directly (`data/backlog.md`, `data/done-archive.md`, `done_keep = 10`) - there is no config file and no external tool to detect.
 `fm tasks` edits `data/backlog.md` in place, byte-exact: a mutation touches only the targeted item's line(s), every other line - including untouched items and free-form (no-id) prose - is preserved byte-for-byte, and a cross-home `mv` relocates the moved item's original source lines verbatim rather than rewriting them.
@@ -303,7 +291,7 @@ Map firstmate's real backlog operations to the canonical commands:
 - File an item: `fm tasks add <id> "<one line>" --kind <ship|scout> --repo <name>`, plus `--start` for immediate dispatch (In flight) or the default queue placement, `--blocked-by <id>` (repeatable) when it waits on another task, and `--priority 0-4`.
   Pass `--mint [--prefix <p>]` in place of an id to generate a `slug-xx` id from the title instead.
 - Start an existing queued item: `fm tasks start <id>` before dispatching work from Queued, after checking that blockers are gone and any hold has cleared (or just run `fm tasks ready`, which names the highest-priority ready item as `next_command`).
-- Move a finished task to Done: `fm tasks done <id> --pr <url>` for a PR-based ship, `--report <path>` for a scout, or `--note "local main"` for a local-only merge.
+- Move a finished task to Done: `fm tasks done <id> --pr <url>` for a PR-based ship, `--report <path>` for a scout, or `--note "local main"` for a trunk merge.
 - Reopen a task: `fm tasks reopen <id>` moves a Done or In-flight item back to Queued.
 - Update fields: `fm tasks update <id> --title "<text>"`; body notes are inspect-then-replace - read the current body with `show <id> --full`, then write the curated whole with `--body "<text>"` or `--body-file <path>` (`--archive-body` preserves the superseded body in `data/note-archive.md`); `--priority 0-4` re-ranks it.
 - Manage dependencies: `fm tasks block <id> --by <other>` and `fm tasks unblock <id> --by <other>`, then `fm tasks ready` to list queued work with no unresolved blocker and no active hold.
@@ -326,7 +314,7 @@ Secondmates contribute their segment on firstmate's request or at week close; fo
 ## 11. Crewmate briefs
 
 Scaffold with `sbin/fm brief <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
-For a ship task the definition of done is shaped by the project's delivery mode (section 6): `direct-PR` has the crewmate do focused review and tests, then push and open the PR itself, while `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
+For a ship task the definition of done is shaped by the project's delivery mode (section 6): `pr` has the crewmate do focused review and tests, then push and open the PR itself, while `trunk` has it stop at "ready in branch" for firstmate to review and merge locally.
 The scaffold reads the mode via `fm project-mode`, so you do not pass it.
 Ship briefs also include the project-memory contract: run `sbin/fm ensure-agents-md` when the project already has agent-memory files or when the task produced durable project-intrinsic knowledge, then record proportionate learnings in `AGENTS.md`.
 For scout tasks add `--scout`: the scaffold swaps the definition of done for the report contract (findings to `data/<id>/report.md`, no branch, no push, no PR) and declares the worktree scratch; scout is mode-agnostic.

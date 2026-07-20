@@ -44,6 +44,23 @@ import {
 import { collectSnapshot, findTask, normalizeTaskState, rankedTasks } from "../../bridge/collect";
 import type { FleetSnapshot, TaskRow } from "../../bridge/fleet";
 import { didYouMean } from "../common";
+import {
+	ArtifactError,
+	abandon,
+	accept,
+	authorizeDiscard,
+	canonicalizeDeliveryMode,
+	deriveCandidateFromGit,
+	ensureArtifact,
+	loadArtifact,
+	projectRepo,
+	reconcileLanded,
+	revise,
+	saveArtifact,
+	submitCandidate,
+	supersede,
+} from "../lib/artifact";
+import { spawnSync } from "node:child_process";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -882,7 +899,124 @@ function cmdDashboard(): number {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = ["add", "list", "show", "start", "done", "reopen", "update", "block", "unblock", "hold", "unhold", "ready", "mv", "prune", "render", "fleet"];
+function flagVal(args: string[], name: string): string | undefined {
+	const i = args.indexOf(name);
+	return i >= 0 ? args[i + 1] : undefined;
+}
+
+function releaseWorkerPane(taskId: string): void {
+	const metaPath = join(resolveHome(), "state", `${taskId}.meta`);
+	if (!existsSync(metaPath)) return;
+	let pane = "";
+	for (const line of readFileSync(metaPath, "utf8").split(/\r?\n/)) {
+		if (line.startsWith("pane=")) pane = line.slice(5);
+	}
+	if (!pane) return;
+	spawnSync("herdr", ["pane", "close", pane], { stdio: ["ignore", "ignore", "ignore"] });
+}
+
+/** Thin WorkerLoop on data/artifacts/<id>.json; land proves patch-id on trunk. */
+function cmdArtifact(rest: string[]): number {
+	const op = rest[0];
+	const id = rest[1];
+	if (!op || op === "--help" || op === "-h") {
+		process.stdout.write(
+			`${toon({
+				command: "tasks artifact",
+				usage: "fm tasks artifact <candidate|revise|accept|abandon|supersede|land|discard|show> <id> ...",
+				notes: [
+					"durable record: data/artifacts/<id>.json",
+					"land proves patch-id equivalence on trunk (no note-as-proof)",
+					"teardown dispose only when landed or discard-authorized",
+					"deps resolve only when landed (or successor chain landed)",
+				],
+			})}\n`,
+		);
+		return 0;
+	}
+	if (!id) return errorOut("usage: fm tasks artifact <op> <id> ...", "VALIDATION_ERROR");
+	try {
+		if (op === "show") {
+			const record = loadArtifact(id);
+			if (!record) return errorOut(`no artifact for ${id}`, "NOT_FOUND");
+			process.stdout.write(`${toon({ command: "tasks artifact show", result: record })}\n`);
+			return 0;
+		}
+		if (op === "land" || op === "landed") {
+			const record = reconcileLanded(id);
+			process.stdout.write(`${toon({ command: "tasks artifact land", result: record })}\n`);
+			return 0;
+		}
+		const project = flagVal(rest, "--project") ?? loadArtifact(id)?.project ?? "unknown";
+		const record = ensureArtifact(id, project);
+		if (op === "candidate") {
+			const candidateSha = flagVal(rest, "--candidate-sha");
+			if (!candidateSha) return errorOut("candidate requires --candidate-sha (patch-id/parent derived from git)", "VALIDATION_ERROR");
+			const proj = projectRepo(record.project);
+			const derived = deriveCandidateFromGit(proj, candidateSha, flagVal(rest, "--parent"));
+			const evidence = rest.includes("--evidence")
+				? rest.filter((_, i, a) => a[i - 1] === "--evidence")
+				: ["derived-from-git"];
+			submitCandidate(record, {
+				patchRef: flagVal(rest, "--patch-ref") ?? `git:${derived.parentSha}..${derived.candidateSha}`,
+				parentSha: derived.parentSha,
+				patchId: derived.patchId,
+				candidateSha: derived.candidateSha,
+				filesChanged: derived.filesChanged,
+				evidence,
+			});
+		} else if (op === "revise") {
+			const why = flagVal(rest, "--why");
+			const bar = flagVal(rest, "--bar");
+			if (!why || !bar) return errorOut("revise requires --why and --bar", "VALIDATION_ERROR");
+			revise(record, {
+				why,
+				mustChange: flagVal(rest, "--must-change") ?? "",
+				mustRemain: flagVal(rest, "--must-remain") ?? "",
+				nextAcceptanceBar: bar,
+				priorPatchIds: record.revisions.map(r => r.patchId),
+			});
+		} else if (op === "accept") {
+			const by = flagVal(rest, "--by") ?? "supervisor";
+			const criteria = rest.includes("--criterion")
+				? rest.filter((_, i, a) => a[i - 1] === "--criterion")
+				: ["candidate-review"];
+			accept(record, canonicalizeDeliveryMode(flagVal(rest, "--mode") ?? "pr"), {
+				by,
+				criteria,
+				note: flagVal(rest, "--note"),
+			});
+			saveArtifact(record);
+			releaseWorkerPane(id);
+			process.stdout.write(`${toon({ command: "tasks artifact accept", result: loadArtifact(id) })}\n`);
+			return 0;
+		} else if (op === "abandon") {
+			const reason = flagVal(rest, "--reason");
+			if (!reason) return errorOut("abandon requires --reason", "VALIDATION_ERROR");
+			abandon(record, reason);
+		} else if (op === "discard") {
+			const reason = flagVal(rest, "--reason");
+			const by = flagVal(rest, "--by") ?? "cap";
+			if (!reason) return errorOut("discard requires --reason (cap-authorized dispose)", "VALIDATION_ERROR");
+			authorizeDiscard(record, by, reason);
+		} else if (op === "supersede") {
+			const next = flagVal(rest, "--next");
+			if (!next) return errorOut("supersede requires --next <successor-task-id>", "VALIDATION_ERROR");
+			supersede(record, next);
+			ensureArtifact(next, record.project);
+		} else {
+			return errorOut(`unknown artifact op: ${op}`, "VALIDATION_ERROR");
+		}
+		saveArtifact(record);
+		process.stdout.write(`${toon({ command: `tasks artifact ${op}`, result: loadArtifact(id) })}\n`);
+		return 0;
+	} catch (error) {
+		if (error instanceof ArtifactError) return errorOut(error.message, "VALIDATION_ERROR");
+		throw error;
+	}
+}
+
+const SUBCOMMANDS = ["add", "list", "show", "start", "done", "reopen", "update", "block", "unblock", "hold", "unhold", "ready", "mv", "prune", "render", "fleet", "artifact"];
 
 const HELP_TEXT: Record<string, string> = {
 	add: ADD_USAGE,
@@ -901,6 +1035,7 @@ const HELP_TEXT: Record<string, string> = {
 	prune: "usage: fm tasks prune [--keep N] [--state queued|in-flight|done]",
 	render: "usage: fm tasks render",
 	fleet: "usage: fm tasks fleet [--state <in-flight|queued|done>] | fm tasks fleet get <id>",
+	artifact: "usage: fm tasks artifact <candidate|revise|accept|abandon|supersede|land|discard|show> <id> ...",
 };
 
 async function run(argv: string[]): Promise<number> {
@@ -910,7 +1045,7 @@ async function run(argv: string[]): Promise<number> {
 
 	if (!sub) return cmdDashboard();
 	if (sub === "--help" || sub === "-h") {
-		process.stdout.write(`${toon({ command: "tasks", usage: "fm tasks [--fleet] [add|list|show|start|done|reopen|update|block|unblock|hold|unhold|ready|mv|prune|render|fleet]", commands: SUBCOMMANDS.map(name => ({ command: name, usage: HELP_TEXT[name] })) })}\n`);
+		process.stdout.write(`${toon({ command: "tasks", usage: "fm tasks [--fleet] [add|list|show|start|done|reopen|update|block|unblock|hold|unhold|ready|mv|prune|render|fleet|artifact]", commands: SUBCOMMANDS.map(name => ({ command: name, usage: HELP_TEXT[name] })) })}\n`);
 		return 0;
 	}
 	if (rest[0] === "--help" || rest[0] === "-h") {
@@ -958,6 +1093,8 @@ async function run(argv: string[]): Promise<number> {
 				return cmdRender(rest);
 			case "fleet":
 				return await cmdFleet(rest);
+			case "artifact":
+				return cmdArtifact(rest);
 			default:
 				return errorOut(`unknown subcommand: ${sub}`, "UNKNOWN_SUBCOMMAND", ["Run `fm tasks --help` for available commands."]);
 		}

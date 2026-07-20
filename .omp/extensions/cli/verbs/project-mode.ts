@@ -1,27 +1,19 @@
 // fm verb: project-mode - resolve a project's delivery mode and yolo flag from
 // the data/projects.md registry.
-// Ported behavior-preserving from the former sbin/fm project-mode.
 //
 // Prints two words to stdout: "<mode> <yolo>" where mode is one of
-// direct-PR|direct-main|local-only and yolo is on|off.
+// trunk|pr and yolo is on|off.
 //
 // Registry line format (data/projects.md):
-//   - <name> - <desc> (added <date>)                  -> direct-PR off  (default)
+//   - <name> - <desc> (added <date>)                  -> pr off  (default)
 //   - <name> [<mode>] - <desc> (added <date>)          -> <mode> off
 //   - <name> [<mode> +yolo] - <desc> (added <date>)    -> <mode> on
 //
-// mode = how a finished change reaches main:
-//   direct-PR    push + PR via gh-axi, focused review + tests, no pipeline -> cap merge (default)
-//   direct-main  cap-authorized project mode: reviewed clean branch -> guarded direct push to origin/main, no PR
-//   no-mistakes  legacy registry alias; canonicalized to direct-PR on output, so
-//                consumers only ever see direct-PR|direct-main|local-only
-//   local-only   local branch, no remote/PR -> firstmate review -> cap approve -> local merge
-// yolo (orthogonal) = when on, firstmate makes approval decisions itself (PR merges,
-//   ask-user findings, local-only merge approval) without checking the cap - except
-//   anything destructive/irreversible/security-sensitive, which still escalates.
+// Modes (only these; no legacy aliases):
+//   pr     collaborative: accepted patch -> GitHub PR -> observe merge
+//   trunk  personal: accepted patch -> integrate local default branch -> optional push
 //
-// An unknown/missing project or unknown mode falls back to "direct-PR off" and warns
-// to stderr, so a typo never silently selects a direct-to-main mode.
+// Unknown/missing modes fall back to "pr off" with a stderr warning.
 // Usage: fm project-mode <project-name>
 
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -43,16 +35,13 @@ interface Parsed {
 	yolo: string;
 }
 
-// Mirrors the original awk one-liner: find the first registry line whose first
-// two whitespace-separated fields are "-" and the project name, then read an
-// optional bracketed "[<mode> +yolo]" token out of the remaining fields.
 function parseRegistry(text: string, name: string): Parsed | null {
 	for (const rawLine of text.split("\n")) {
 		const trimmed = rawLine.trim();
 		const fields = trimmed.length ? trimmed.split(/\s+/) : [];
 		if (fields[0] !== "-" || fields[1] !== name) continue;
 
-		let mode = "direct-PR";
+		let mode = "pr";
 		let yolo = "off";
 
 		if (fields[2] && fields[2].startsWith("[")) {
@@ -84,8 +73,8 @@ async function run(argv: string[]): Promise<number> {
 	const reg = join(data, "projects.md");
 
 	if (!existsSync(reg) || !statSync(reg).isFile()) {
-		process.stderr.write(`warn: no registry at ${reg}; defaulting ${name} to direct-PR off\n`);
-		process.stdout.write("direct-PR off\n");
+		process.stderr.write(`warn: no registry at ${reg}; defaulting ${name} to pr off\n`);
+		process.stdout.write("pr off\n");
 		return 0;
 	}
 
@@ -93,25 +82,18 @@ async function run(argv: string[]): Promise<number> {
 	const parsed = parseRegistry(text, name);
 
 	if (!parsed) {
-		process.stderr.write(`warn: project "${name}" not in registry; defaulting to direct-PR off\n`);
-		process.stdout.write("direct-PR off\n");
+		process.stderr.write(`warn: project "${name}" not in registry; defaulting to pr off\n`);
+		process.stdout.write("pr off\n");
 		return 0;
 	}
 
 	let { mode, yolo } = parsed;
-	switch (mode) {
-		case "no-mistakes":
-			mode = "direct-PR"; // legacy alias: canonicalize so consumers never see it
-			break;
-		case "direct-PR":
-		case "direct-main":
-		case "local-only":
-			break;
-		default:
-			process.stderr.write(`warn: unknown mode "${mode}" for ${name}; defaulting to direct-PR off\n`);
-			mode = "direct-PR";
-			yolo = "off";
-			break;
+	if (mode !== "pr" && mode !== "trunk") {
+		process.stderr.write(
+			`warn: unknown mode "${mode}" for ${name}; only trunk|pr are valid (no legacy aliases); defaulting to pr off\n`,
+		);
+		mode = "pr";
+		yolo = "off";
 	}
 	if (yolo !== "on" && yolo !== "off") yolo = "off";
 
@@ -121,6 +103,6 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "project-mode",
-	describe: "Resolve a project's delivery mode (direct-PR/direct-main/local-only) and yolo flag from the data/projects.md registry.",
+	describe: "Resolve a project's delivery mode (trunk|pr only) and yolo flag from data/projects.md.",
 	run,
 };
