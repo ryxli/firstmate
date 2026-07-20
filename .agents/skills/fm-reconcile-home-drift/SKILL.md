@@ -29,9 +29,9 @@ Verify it against live state (tool output, remote, runtime signals) and only the
 
 ## Rewritten remote
 
-If the remote history was rewritten and a fast-forward is impossible, use `sbin/fm update --adopt-remote`.
-Read that script's header for its guarantees; do not hand-craft resets.
+Only after cap approval and a sanctioned `--force-with-lease` rewrite on the other machine, run `sbin/fm update --adopt-remote`.
+Let the updater enforce its clean-tree, diverged-history, and no-local-only-commits gates; never hand-craft a reset.
 
 ## Exit condition
 
-Reconciliation is done when every drifted item has a named verb and its owning home, and no fact lives in two layers.
+Reconciliation is done when every drifted item has one named verb and one owning file/layer, with its home named where relevant, and no fact lives in two layers.

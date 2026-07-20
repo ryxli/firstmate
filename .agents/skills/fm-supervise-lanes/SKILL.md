@@ -1,15 +1,15 @@
 ---
 name: fm-supervise-lanes
 description: >-
-  Supervises spawned lanes and persistent crew. Use when coordinating
-  crewmates, whiteboards, peer bus, or review disposition.
+  Supervises OMP subagents, persistent mates, and visible FM workers. Use when
+  coordinating parallel lanes, whiteboards, peer bus, or review disposition.
 ---
 
 # fm-supervise-lanes
 
-Judgment for supervising crewmate, secondmate, and tan lanes.
+Judgment for OMP subagents, persistent secondmates, and visible FM workers.
 Demand-load from `skill://fm-manage-project-work` or when supervising parallel lanes.
-Authoritative state is the whiteboard and Working list, not pane memory.
+Authoritative live state is the fresh `fm fleet` view derived from Herdr inventory and the current backlog, artifacts, status/meta records, and registered homes; the whiteboard is a derived operator view, never pane memory.
 
 ## Whiteboard write gate
 
@@ -37,11 +37,13 @@ Every board begins with a cap-first band; without it the board is non-compliant.
 Plain language only in the operator view.
 Load-bearing safety claims need a timestamped evidence line naming the exact read-only command that produced them.
 
-## Peer bus
+## Communication channels
 
-Send only a handoff that changes the recipient's next action, a blocking question only they can answer, or a safety interrupt.
-`peer_send`/`peer_pull` for mate escalation; `fm send` for pane steering.
-No acknowledgements, receipts, or FYI progress.
+Use OMP subagent return artifacts and `hub` only for bounded `task` workers.
+Use `peer_send`/`peer_pull` for an actionable handoff, blocking question, or safety escalation between persistent firstmate and secondmate roles.
+Use `fm send` only for explicit visible-pane steering or harness control, not routine mate-to-mate communication.
+Disposable FM workers report through their task status/report artifacts.
+No conversational acknowledgements or FYI progress; durable lifecycle artifacts and receipts remain required.
 
 ## Ownership and dispatch
 

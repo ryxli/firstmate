@@ -16,11 +16,12 @@ PR merge, needs-decision, destructive, irreversible, and security-sensitive acti
 
 ```sh
 fm afk enter    # set flag; resume idle-digest if present
-fm afk exit     # screen+clear digest if present; always clear flag
+fm afk exit     # screen digest; clear flag only after digest cleanup succeeds
 fm afk status
 ```
 
-`fm afk` owns the flag and idle-digest resume/cleanup atomically - do not hand-edit `state/.afk` or leave half-exited digest state.
+`fm afk` owns ordered flag and idle-digest resume/cleanup; a failed exit retains away mode rather than leaving half-exited digest state.
+Do not hand-edit `state/.afk`.
 
 ## While away
 
@@ -32,4 +33,4 @@ The supervision extension batches relevant events over `FM_ESCALATE_BATCH_SECS` 
 
 A message beginning with `/afk` refreshes away mode and does not exit it.
 Any other real cap message ends away mode; bias ambiguity toward exit.
-On return run `fm afk exit` (shows digest when present, then clears).
+On return run `fm afk exit` (shows the digest when present, then clears away mode only after cleanup succeeds).
