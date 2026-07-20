@@ -43,6 +43,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMateHomeLayout } from "../lib/mate-home-layout";
+import { syncHomeSkills } from "../lib/home-skills";
 import { ensureMateMiseToml } from "../lib/mise-home";
 import { linkShipExtensions } from "../lib/ship-ext";
 import { identityValue, assertIdentityDisplayName } from "../lib/identity";
@@ -686,7 +687,10 @@ interface SeedState {
 	backupDir: string;
 	createdProjectsFile: string;
 	createdExtLinksFile: string;
+	createdSkillArtifactsFile: string;
 	extDstExisted: boolean;
+	skillsDirExisted: boolean;
+	ompYmlExisted: boolean;
 	parentRegExisted: boolean;
 	parentBrief: string;
 	parentBriefCreated: boolean;
@@ -827,6 +831,27 @@ function rollback(ctx: Ctx, state: SeedState): void {
 					// best-effort
 				}
 			}
+			for (const path of readTrackedPaths(state.createdSkillArtifactsFile)) {
+				try {
+					rmSync(path, { force: true, recursive: true });
+				} catch {
+					// best-effort
+				}
+			}
+			if (!state.skillsDirExisted) {
+				try {
+					rmdirSync(join(state.home, ".omp", "skills"));
+				} catch {
+					// non-empty or already gone; ignore
+				}
+			}
+			if (!state.ompYmlExisted) {
+				try {
+					rmSync(join(state.home, "config", "omp.yml"), { force: true });
+				} catch {
+					// best-effort
+				}
+			}
 			if (!state.extDstExisted) {
 				try {
 					rmdirSync(join(state.home, ".omp", "extensions"));
@@ -903,7 +928,10 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 		backupDir,
 		createdProjectsFile: join(backupDir, "created-projects"),
 		createdExtLinksFile: join(backupDir, "created-ext-links"),
+		createdSkillArtifactsFile: join(backupDir, "created-skill-artifacts"),
 		extDstExisted: false,
+		skillsDirExisted: false,
+		ompYmlExisted: false,
 		parentRegExisted: false,
 		parentBrief: join(ctx.data, "mates", id, "brief.md"),
 		parentBriefCreated: false,
@@ -917,6 +945,7 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 	};
 	writeFileSync(state.createdProjectsFile, "");
 	writeFileSync(state.createdExtLinksFile, "");
+	writeFileSync(state.createdSkillArtifactsFile, "");
 
 	try {
 		if (existsSync(ctx.reg)) {
@@ -975,9 +1004,23 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 		const extSrc = join(CANONICAL_ROOT, ".omp", "extensions");
 		const extResult = linkShipExtensions(home, extSrc, { verbose: false, trackFile: state.createdExtLinksFile });
 		state.extDstExisted = extResult.dstExisted;
+		mkdirSync(join(home, ".omp"), { recursive: true });
+		state.skillsDirExisted = existsSync(join(home, ".omp", "skills"));
+		state.ompYmlExisted = existsSync(join(home, "config", "omp.yml"));
 		const miseResult = ensureMateMiseToml(home, true);
 		if (miseResult.status.startsWith("blocked:")) fail(`error: unable to seed mise config at ${miseResult.path}: ${miseResult.status}`);
 		state.miseTomlCreated = miseResult.created;
+
+		const skillsResult = syncHomeSkills(home, {
+			bootstrapManifests: true,
+			trackFile: state.createdSkillArtifactsFile,
+			quiet: true,
+			codeRoot: CANONICAL_ROOT,
+			fmHome: ctx.fmHome,
+		});
+		if (!skillsResult.ok) {
+			fail(`error: home-skills sync failed during seed: ${skillsResult.status}`);
+		}
 
 		if (!existsSync(state.parentBrief)) {
 			const charterEnv = process.env.FM_SECONDMATE_CHARTER;

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameS
 import { join, resolve } from "node:path";
 
 import { manifestHash, sourceRootForHome } from "./collect";
+import { ensureSecondmateHomeSkills, isSecondmateHome } from "../cli/lib/ensure-home-skills";
 
 export const CAPABILITY_REGISTRY_SCHEMA = "firstmate.capability-registry/v2" as const;
 export const UPDATE_TRANSACTION_SCHEMA = "firstmate.fleet-update/v1" as const;
@@ -852,6 +853,13 @@ export async function updateFleet(options: UpdateOptions = {}): Promise<FleetUpd
 			continue;
 		}
 		const verifiedPaneId = pane.pane_id;
+		if (isSecondmateHome(target.home)) {
+			const skills = ensureSecondmateHomeSkills(target.home, { quiet: true, fmHome: operationalHome });
+			if (skills && !skills.ok) {
+				record(targetResult(target, "failed", action, proofFor(source.revision, manifest, receipt), `home-skills: ${skills.status}`));
+				continue;
+			}
+		}
 		const reloaded = runReload(reloadScript, verifiedPaneId, operationalHome);
 		if (!reloaded.ok) {
 			record(targetResult(target, "failed", action, proofFor(source.revision, manifest, receipt), reloaded.reason));

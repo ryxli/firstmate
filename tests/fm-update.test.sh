@@ -98,6 +98,13 @@ add_sm() {
     printf 'home=%s/%s\n' "$w" "$id"
   } > "$w/home/state/$id.meta"
   printf '%s\n' "$id" > "$w/$id/.fm-secondmate-home"
+  mkdir -p "$w/$id/config" "$w/$id/state" "$w/$id/data" "$w/$id/projects" "$w/$id/.omp"
+  : > "$w/$id/config/shared-skills"
+  : > "$w/$id/config/local-skills"
+  # Worktree-local info/exclude is not consulted; use the common git dir.
+  common=$(git -C "$w/$id" rev-parse --git-common-dir)
+  mkdir -p "$common/info"
+  printf '%s\n' 'config/' 'state/' 'data/' 'projects/' '.omp/' >> "$common/info/exclude"
 }
 
 # Advance origin by one commit. mode=instr changes the instruction surface

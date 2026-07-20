@@ -227,12 +227,14 @@ function maybeRead(path: string): string | undefined {
 function readLaunch(output: string): LaunchResult {
 	const argc = Number(readFileSync(`${output}.argc`, "utf8"));
 	const args = Array.from({ length: argc }, (_value, index) => readFileSync(`${output}.arg${index}`, "utf8"));
+	const prompts = args.filter(arg => arg.startsWith("--append-system-prompt="));
+	const trailing = args.filter(arg => !arg.startsWith("--config=") && !arg.startsWith("--append-system-prompt="));
 	return {
 		cwd: readFileSync(`${output}.cwd`, "utf8"),
 		marker: maybeRead(`${output}.marker`),
-		rolePrompt: args[0],
-		appendSystemPrompt: args[1],
-		kickoff: args[2],
+		rolePrompt: prompts[0] ?? "",
+		appendSystemPrompt: prompts[1] ?? "",
+		kickoff: trailing[0],
 		argc: String(argc),
 		pid: maybeRead(`${output}.pid`),
 		lock: maybeRead(`${output}.lock`),
@@ -240,6 +242,15 @@ function readLaunch(output: string): LaunchResult {
 		staticContext: maybeRead(`${output}.static`),
 		args,
 	};
+}
+
+/** Seed minimal isolated-skill surfaces for a secondmate home under test. */
+function seedSecondmateSkills(home: string): void {
+	mkdirSync(join(home, "config"), { recursive: true });
+	mkdirSync(join(home, "state"), { recursive: true });
+	mkdirSync(join(home, ".omp"), { recursive: true });
+	writeFileSync(join(home, "config", "shared-skills"), "");
+	writeFileSync(join(home, "config", "local-skills"), "");
 }
 
 function commandLog(fx: Fixture): string[] {
@@ -438,7 +449,7 @@ describe("fm start prompt", () => {
 		const fx = fixture();
 		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
 		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
-		mkdirSync(join(fx.home, "config"), { recursive: true });
+		seedSecondmateSkills(fx.home);
 		mkdirSync(join(fx.home, "data"), { recursive: true });
 		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=Keel\n");
 		writeFileSync(join(fx.home, "data", "charter.md"), "# Charter\nRiggs\n\n# Routing scope\nfrontend routing\n");
@@ -448,7 +459,8 @@ describe("fm start prompt", () => {
 		const result = readLaunch(fx.output);
 		expect(commandLog(fx)).toEqual([]);
 		expect(run.stdout).toBe("");
-		expect(result.argc).toBe("3");
+		expect(result.argc).toBe("4");
+		expect(result.args.some(arg => arg.startsWith("--config=") && arg.endsWith("/config/omp.yml"))).toBe(true);
 		expect(result.rolePrompt).toContain("kind: secondmate");
 		expect(result.rolePrompt).toContain("You are Riggs, a secondmate reporting to Keel.");
 		expect(result.rolePrompt).toContain("reports_to: Keel");
@@ -467,7 +479,7 @@ describe("fm start prompt", () => {
 		const fx = fixture();
 		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
 		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
-		mkdirSync(join(fx.home, "config"), { recursive: true });
+		seedSecondmateSkills(fx.home);
 		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=Keel\n");
 
 		const run = await runFm(fx, undefined, { FM_STATE_OVERRIDE: "" }, [], fx.home);
@@ -483,7 +495,7 @@ describe("fm start prompt", () => {
 		const fx = fixture();
 		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
 		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
-		mkdirSync(join(fx.home, "config"), { recursive: true });
+		seedSecondmateSkills(fx.home);
 		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=Keel\n");
 
 		const run = await runFm(fx, fx.home, { FM_STATE_OVERRIDE: "" }, [], fx.temp);
@@ -521,7 +533,7 @@ describe("fm start prompt", () => {
 		const fx = fixture();
 		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
 		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
-		mkdirSync(join(fx.home, "config"), { recursive: true });
+		seedSecondmateSkills(fx.home);
 		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=firstmate\nparent=Keel\n");
 
 		const run = await runFm(fx, undefined, { FM_STATE_OVERRIDE: "" }, [], fx.home);
@@ -539,7 +551,7 @@ describe("fm start prompt", () => {
 		const fx = fixture();
 		writeFileSync(join(fx.home, "AGENTS.md"), "# secondmate\n");
 		writeFileSync(join(fx.home, ".fm-secondmate-home"), "riggs\n");
-		mkdirSync(join(fx.home, "config"), { recursive: true });
+		seedSecondmateSkills(fx.home);
 		writeFileSync(join(fx.home, "config", "identity"), "schema_version=1\nname=Riggs\nrole=frontend and implementation domain\nparent=captain\n");
 
 		const run = await runFm(fx, undefined, { FM_STATE_OVERRIDE: "" }, [], fx.home);

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { lockSnapshot, removeLockIfOwner, resolveLockPaths, sleepMs, withLockClaim, writeLockOwner, type SessionLockPaths } from "../lib/session-lock";
 
 import { FM_START_STATIC_CONTEXT_ENV, CaptainContextOversizeError, mainPreloadBlock, runStartupContext } from "../lib/startup-context";
+import { ensureSecondmateHomeSkills } from "../lib/ensure-home-skills";
 import { activeHome, IdentityNameOversizeError, RoleContractOversizeError, roleContractForHome, roleKindForHome } from "../lib/role-contract";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -188,9 +189,19 @@ async function waitAndLaunch(ompArgs: string[], cwd: string, options: LaunchOpti
 }
 
 async function legacyRun(argv: string[], home: string, contract: string): Promise<number> {
+	const skills = ensureSecondmateHomeSkills(home, { quiet: true });
+	if (skills && !skills.ok) {
+		process.stderr.write(`error: home-skills reconciliation failed: ${skills.status}\n`);
+		return 1;
+	}
 	const args = argv.slice(1);
 	const context = secondmateContextBlock(home);
-	const ompArgs = [`--append-system-prompt=${contract}`, `--append-system-prompt=${context}`, ...(args.length > 0 ? args : [secondmateKickoff(contract)])];
+	const ompArgs = [
+		`--config=${join(home, "config", "omp.yml")}`,
+		`--append-system-prompt=${contract}`,
+		`--append-system-prompt=${context}`,
+		...(args.length > 0 ? args : [secondmateKickoff(contract)]),
+	];
 	return await waitAndLaunch(ompArgs, home, {
 		launchEnv: () => childEnv({ FM_HOME: home }),
 		lockHome: home,

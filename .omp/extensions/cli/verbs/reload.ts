@@ -65,6 +65,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, statSync } fro
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { jsonGet, herdrPaneAgentProcessVerdict, metaSet, resolveLivePane } from "../lib/herdr";
+import { ensureSecondmateHomeSkills, injectOmpHomeConfig, isSecondmateHome } from "../lib/ensure-home-skills";
 
 // Equivalent of the former script's SCRIPT_DIR/.. (sbin's parent = repo root),
 // resolved from this verb module's own location (verbs -> cli -> extensions -> .omp -> root).
@@ -622,6 +623,15 @@ async function core(parsed: ParsedArgs, tracked: TrackedState): Promise<number> 
 		agentSessionIdPresent: pinSidPresent,
 	};
 
+	// Specialist homes must have a reconciled skill allowlist before /quit.
+	if (pin.cwd && isSecondmateHome(pin.cwd)) {
+		const skills = ensureSecondmateHomeSkills(pin.cwd, { quiet: true, codeRoot: fmRoot });
+		if (skills && !skills.ok) {
+			process.stderr.write(`fm reload: home-skills reconciliation failed for ${pin.cwd}: ${skills.status}; refusing /quit\n`);
+			return 1;
+		}
+	}
+
 	// -------------------------------------------------------------------
 	// Self-reload guard: this process running inside the pane it targets
 	// dies with the agent when /quit lands, before the relaunch step. All
@@ -782,6 +792,9 @@ async function core(parsed: ParsedArgs, tracked: TrackedState): Promise<number> 
 	} else {
 		process.stderr.write("fm-reload.sh: no session id found and --allow-fresh not set\n");
 		return 1;
+	}
+	if (pin.cwd && isSecondmateHome(pin.cwd)) {
+		effectiveCmd = injectOmpHomeConfig(effectiveCmd, pin.cwd);
 	}
 
 	// -------------------------------------------------------------------

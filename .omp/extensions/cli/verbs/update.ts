@@ -42,6 +42,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSyn
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ffFirstLine, ffRefreshOrigin, ffResolveDefaultBranch, ffSafeFastForward, ffSkip } from "../lib/ff";
+import { syncHomeSkills } from "../lib/home-skills";
 import { shellQuote } from "../lib/spawn";
 
 const CANONICAL_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "");
@@ -483,6 +484,11 @@ function processSecondmate(id: string, home: string, pane: string, ctx: Ctx): vo
 		homeReal = validated.home;
 		if (ctx.seenHomes.has(homeReal)) return;
 		ctx.seenHomes.add(homeReal);
+		const skills = syncHomeSkills(homeReal, { quiet: true, codeRoot: CANONICAL_ROOT, fmHome: ctx.fmHome });
+		if (!skills.ok) {
+			process.stdout.write(`secondmate ${id}: skipped: home-skills sync failed: ${skills.status}\n`);
+			return;
+		}
 		process.stdout.write(`secondmate ${id}: symlink home verified\n`);
 		return;
 	}
@@ -497,6 +503,11 @@ function processSecondmate(id: string, home: string, pane: string, ctx: Ctx): vo
 	ctx.seenHomes.add(homeReal);
 
 	const result = updateTarget(ctx.adoptRemote, homeReal, `secondmate ${id}`, true, true, ctx.fetched);
+	const skills = syncHomeSkills(homeReal, { quiet: true, codeRoot: CANONICAL_ROOT, fmHome: ctx.fmHome });
+	if (!skills.ok) {
+		process.stdout.write(`secondmate ${id}: skipped: home-skills sync failed: ${skills.status}\n`);
+		return;
+	}
 	if ((result.status === "updated" || result.status === "adopted") && pane) {
 		ctx.nudgeWindows.push(`fm-${id}`);
 	}

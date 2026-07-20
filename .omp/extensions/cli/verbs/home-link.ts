@@ -15,17 +15,22 @@ import {
 	lstatSync,
 	mkdirSync,
 	readdirSync,
-	readlinkSync,
-	realpathSync,
 	rmSync,
 	rmdirSync,
-	statSync,
 	symlinkSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMateMiseToml } from "../lib/mise-home";
 import { checkMateHomeLayout, repairMateHomeLayout } from "../lib/mate-home-layout";
+import {
+	existsFollow,
+	isDirectoryFollow,
+	isFileFollow,
+	isSymlink,
+	linkPointsTo,
+	normalizeExistingDir,
+} from "../lib/path-links";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const SUB_HOME_MARKER = ".fm-secondmate-home";
@@ -44,86 +49,6 @@ function usage(): number {
 	process.stderr.write("usage: fm home-link <home> --check\n");
 	process.stderr.write("       fm home-link <home> --repair\n");
 	return 1;
-}
-
-// -- path helpers, mirroring the bash script's `cd -P`-based normalization --
-
-function cdPhysical(dir: string): string {
-	const st = statSync(dir); // throws if missing; follows symlinks like `cd`
-	if (!st.isDirectory()) throw new Error(`not a directory: ${dir}`);
-	return realpathSync(dir);
-}
-
-function normalizeExistingDir(path: string): string | null {
-	try {
-		const st = statSync(path);
-		if (!st.isDirectory()) return null;
-		return realpathSync(path);
-	} catch {
-		return null;
-	}
-}
-
-function normalizePath(path: string): string | null {
-	try {
-		const realParent = cdPhysical(dirname(path));
-		return `${realParent}/${basename(path)}`;
-	} catch {
-		return null;
-	}
-}
-
-function resolveLinkTarget(link: string): string | null {
-	let target: string;
-	try {
-		target = readlinkSync(link);
-	} catch {
-		return null;
-	}
-	if (target.startsWith("/")) return normalizePath(target);
-	return normalizePath(`${dirname(link)}/${target}`);
-}
-
-function isSymlink(path: string): boolean {
-	try {
-		return lstatSync(path).isSymbolicLink();
-	} catch {
-		return false;
-	}
-}
-
-function existsFollow(path: string): boolean {
-	try {
-		statSync(path);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function isDirectoryFollow(path: string): boolean {
-	try {
-		return statSync(path).isDirectory();
-	} catch {
-		return false;
-	}
-}
-
-function isFileFollow(path: string): boolean {
-	try {
-		return statSync(path).isFile();
-	} catch {
-		return false;
-	}
-}
-
-function linkPointsTo(link: string, expected: string): boolean {
-	if (!isSymlink(link)) return false;
-	const actual = resolveLinkTarget(link);
-	if (actual === null) return false;
-	const expectedReal = normalizePath(expected);
-	if (expectedReal === null) return false;
-	return actual === expectedReal;
 }
 
 function emptyRegularFile(path: string): boolean {
@@ -381,7 +306,9 @@ async function run(argv: string[]): Promise<number> {
 		statusLine(ctx, "link.CLAUDE.md");
 		repairLink(ctx, "sbin", join(codeRoot, "sbin"));
 		statusLine(ctx, "link.sbin");
-		repairLink(ctx, ".agents", join(codeRoot, ".agents"));
+		// Intentionally no .agents whole-catalog link. Legacy canonical .agents
+		// removal and per-skill exposure are owned by `fm home-skills`.
+		ctx.status = "skipped";
 		statusLine(ctx, "link..agents");
 		checkMiseToml(ctx);
 		statusLine(ctx, "mise.toml");

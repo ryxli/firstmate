@@ -80,10 +80,12 @@ make_supervisor_home() {
 make_secondmate_home() {
   local name=$1 id=$2 home
   home="$TMP_ROOT/$name"
-  mkdir -p "$home/config" "$home/data" "$home/projects" "$home/sbin" "$home/state"
+  mkdir -p "$home/config" "$home/data" "$home/projects" "$home/sbin" "$home/state" "$home/.omp"
   printf '%s\n' "$id" > "$home/.fm-secondmate-home"
   printf '# Test secondmate\n' > "$home/AGENTS.md"
   printf 'charter\n' > "$home/data/charter.md"
+  : > "$home/config/shared-skills"
+  : > "$home/config/local-skills"
   printf '%s\n' "$home"
 }
 
@@ -182,22 +184,25 @@ test_omp_secondmate_resume_uses_home_overlay_once() {
 }
 
 test_omp_secondmate_without_home_overlay_is_exact_baseline() {
-  local home fakebin secondmate secondmate_abs sq_brief role_arg expected actual
+  local home fakebin secondmate secondmate_abs sq_brief sq_overlay role_arg expected actual
   home=$(make_supervisor_home absent)
   fakebin=$(make_fake_herdr "$home")
   secondmate=$(make_secondmate_home absent-secondmate absent-mate)
   secondmate_abs=$(cd "$secondmate" && pwd -P)
   printf 'supervising: true\n' > "$home/config/omp.yml"
+  # No pre-seeded omp.yml: home-skills sync creates the canonical overlay before launch.
 
   run_spawn "$home" "$fakebin" absent-mate "$secondmate" omp --secondmate \
-    || fail "OMP secondmate spawn without a home overlay failed"
+    || fail "OMP secondmate spawn without a pre-seeded home overlay failed"
 
   sq_brief=$(fm_shell_quote "$secondmate_abs/data/charter.md")
+  sq_overlay=$(fm_shell_quote "$secondmate_abs/config/omp.yml")
   role_arg=$(secondmate_role_arg "$secondmate_abs" "$home")
-  expected="$(secondmate_prefix "$secondmate_abs")omp $role_arg --auto-approve \"\$(cat $sq_brief)\"; exec \"\${SHELL:-/bin/zsh}\" -l"
+  expected="$(secondmate_prefix "$secondmate_abs")omp $role_arg --config $sq_overlay --auto-approve \"\$(cat $sq_brief)\"; exec \"\${SHELL:-/bin/zsh}\" -l"
   actual=$(captured_command "$home")
-  assert_equal "$expected" "$actual" "absent secondmate overlay changed the baseline OMP command"
-  pass "absent secondmate overlay leaves the OMP launch byte-for-byte unchanged"
+  assert_equal "$expected" "$actual" "generated secondmate overlay was not injected into the OMP command"
+  [ -f "$secondmate_abs/config/omp.yml" ] || fail "home-skills did not create config/omp.yml before launch"
+  pass "secondmate launch always passes the canonical home overlay created by home-skills"
 }
 
 test_non_omp_secondmate_is_exact_baseline() {
@@ -218,6 +223,8 @@ test_non_omp_secondmate_is_exact_baseline() {
   pass "non-OMP secondmate launch remains byte-for-byte unchanged"
 }
 
+# Raw OMP secondmate commands are an operator-owned escape hatch: spawn does
+# not inject --config. Isolation is the caller's responsibility when using raw.
 test_raw_secondmate_launch_is_exact_baseline() {
   local home fakebin secondmate secondmate_abs raw expected actual
   home=$(make_supervisor_home raw-secondmate)
@@ -228,12 +235,12 @@ test_raw_secondmate_launch_is_exact_baseline() {
   raw='OMP_MODE=manual omp --model custom/raw "literal raw command"'
 
   run_spawn "$home" "$fakebin" raw-mate "$secondmate" "$raw" --secondmate \
-    || fail "raw OMP secondmate spawn with an overlay failed"
+    || fail "raw OMP secondmate spawn failed"
 
   expected="$(secondmate_prefix "$secondmate_abs")$raw; exec \"\${SHELL:-/bin/zsh}\" -l"
   actual=$(captured_command "$home")
-  assert_equal "$expected" "$actual" "overlay handling changed a raw secondmate command"
-  pass "raw secondmate launch remains byte-for-byte unchanged"
+  assert_equal "$expected" "$actual" "raw escape hatch unexpectedly gained --config injection"
+  pass "raw secondmate launch stays operator-owned (no automatic --config)"
 }
 
 expected_ordinary_template() {

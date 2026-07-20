@@ -47,6 +47,7 @@ import { supervisorName, workerLabel } from "../lib/identity";
 import { getHarnessAdapter } from "../lib/harness-adapters";
 import { herdrReapHuskSlot, jsonGet, metaSet, metaValue } from "../lib/herdr";
 import { shellQuote } from "../lib/spawn";
+import { ensureSecondmateHomeSkills, injectOmpHomeConfig } from "../lib/ensure-home-skills";
 import { crewRoleContract, ensureSecondmateParentIdentity, secondmateRoleContract } from "../lib/role-contract";
 
 // Equivalent of the former script's SCRIPT_DIR/.. (sbin's parent = repo root),
@@ -549,6 +550,12 @@ function validateFirstmateHomeForSpawn(id: string, home: string, fmRoot: string,
 		}
 	}
 
+	const skills = ensureSecondmateHomeSkills(absHome, { quiet: true, codeRoot: fmRoot, fmHome });
+	if (skills && !skills.ok) {
+		process.stderr.write(`error: home-skills reconciliation failed for secondmate home ${home}: ${skills.status}\n`);
+		return { ok: false };
+	}
+
 	if (!existsSync(`${absHome}/AGENTS.md`)) {
 		process.stderr.write(`error: ${home} is not a firstmate home (missing AGENTS.md)\n`);
 		return { ok: false };
@@ -845,10 +852,12 @@ async function run(argv: string[]): Promise<number> {
 	} else {
 		launchCmd = launch.split("__BRIEF__").join(sqBrief);
 	}
-	if (launchFromTemplate && kind === "secondmate" && harness === "omp" && existsSync(`${projAbs}/config/omp.yml`)) {
-		const sqOmpConfig = shellQuote(`${projAbs}/config/omp.yml`);
-		const stripped = launchCmd.startsWith("omp") ? launchCmd.slice(3) : launchCmd;
-		launchCmd = `omp --config ${sqOmpConfig}${stripped}`;
+	// Isolated omp.yml is injected only for verified launch templates.
+	// A raw OMP secondmate command (whitespace launch string) is an
+	// operator-owned escape hatch: it bypasses automatic --config injection
+	// and must supply its own overlay if isolation is required.
+	if (launchFromTemplate && kind === "secondmate" && harness === "omp") {
+		launchCmd = injectOmpHomeConfig(launchCmd, projAbs);
 	}
 	if (harness === "omp") {
 		const contract = kind === "secondmate"

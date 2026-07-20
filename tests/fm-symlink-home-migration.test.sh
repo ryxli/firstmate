@@ -200,22 +200,27 @@ SH
 
 make_link_home() {
   local code=$1 home=$2 id=$3
-  mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
+  mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects" "$home/.omp"
   printf '%s\n' "$id" > "$home/.fm-secondmate-home"
   FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair >/dev/null
+  # Isolated skill exposure: empty manifests until a caller selects shared skills.
+  : > "$home/config/shared-skills"
+  : > "$home/config/local-skills"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-skills sync "$home" >/dev/null \
+    || fail "home-skills sync failed while preparing link home $home"
 }
 
 make_current_home() {
   local code=$1 home=$2 id=$3 entry name
   code=$(canonical "$code")
   make_link_home "$code" "$home" "$id"
-  rm -f "$home/.omp"
+  # Real local .omp is the current layout; never replace it with a whole-tree link.
   rm -f "$home/.agents" "$home/.claude"
   mkdir -p "$home/.omp/extensions"
   for entry in "$code/.omp/extensions"/*; do
     [ -e "$entry" ] || continue
     name=$(basename "$entry")
-    ln -s "$entry" "$home/.omp/extensions/$name"
+    [ -e "$home/.omp/extensions/$name" ] || ln -s "$entry" "$home/.omp/extensions/$name"
   done
 }
 
@@ -324,8 +329,8 @@ test_current_layout_repairs_extension_link() {
     || fail "current-layout check failed after repair"
   pass "current per-extension broken link is repaired"
 }
-# Contract: a freshly repaired current-layout home discovers the canonical
-# shared skills through .agents without replacing its real, home-owned .omp.
+# Contract: home-link never recreates a whole-catalog .agents link; selected
+# shared skills are exposed only through home-skills into .omp/skills.
 test_current_layout_repair_discovers_shared_skills() {
   require_slice_scripts
   local code="$TMP_ROOT/current-skills-code" home="$TMP_ROOT/current-skills-home" out
@@ -334,32 +339,33 @@ test_current_layout_repair_discovers_shared_skills() {
   code=$(canonical "$code")
   for skill in fm-operate-crew-harness fm-manage-project-work; do
     mkdir -p "$code/.agents/skills/$skill"
-    printf 'name: %s\n' "$skill" > "$code/.agents/skills/$skill/SKILL.md"
+    printf -- '---\nname: %s\ndescription: test\n---\n' "$skill" > "$code/.agents/skills/$skill/SKILL.md"
   done
   make_current_home "$code" "$home" currentskills
 
-  if out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1); then
-    fail "current-layout check accepted a home missing the shared .agents link"
-  fi
-  assert_contains "$out" "result=blocked" \
-    "current-layout check did not report the shared .agents link failure"
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair >/dev/null \
-    || fail "current-layout repair failed to link shared .agents"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
+    || fail "current-layout check failed without .agents: $out"
+  assert_contains "$out" "link..agents=skipped" "home-link still treats .agents as required"
+  assert_contains "$out" "result=ok" "current-layout check did not report result=ok"
+  [ ! -e "$home/.agents" ] && [ ! -L "$home/.agents" ] \
+    || fail "home-link created a whole-catalog .agents link"
 
+  printf '%s\n' fm-operate-crew-harness > "$home/config/shared-skills"
+  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-skills sync "$home" >/dev/null \
+    || fail "home-skills sync failed to expose selected shared skill"
   [ -d "$home/.omp" ] && [ ! -L "$home/.omp" ] \
-    || fail "current-layout repair replaced the home-owned .omp directory"
+    || fail "home-skills replaced the home-owned .omp directory"
   assert_link_points "$home/.omp/extensions/test-ext.ts" "$code/.omp/extensions/test-ext.ts" \
-    "current-layout extension link after skill repair"
-  assert_link_points "$home/.agents" "$code/.agents" "shared .agents link"
-  for skill in fm-operate-crew-harness fm-manage-project-work; do
-    skill_file="$home/.agents/skills/$skill/SKILL.md"
-    [ -f "$skill_file" ] || fail "shared skill is not discoverable from repaired home: $skill"
-    assert_contains "$(cat "$skill_file")" "name: $skill" \
-      "repaired home discovered the wrong content for $skill"
-  done
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check >/dev/null \
-    || fail "current-layout check failed after shared-skill repair"
-  pass "current-layout repair links .agents and discovers shared skills"
+    "current-layout extension link after skill sync"
+  assert_link_points "$home/.omp/skills/fm-operate-crew-harness" "$code/.agents/skills/fm-operate-crew-harness" \
+    "managed shared skill link"
+  [ ! -e "$home/.omp/skills/fm-manage-project-work" ] \
+    || fail "unselected shared skill was exposed"
+  skill_file="$home/.omp/skills/fm-operate-crew-harness/SKILL.md"
+  [ -f "$skill_file" ] || fail "selected shared skill is not discoverable via .omp/skills"
+  assert_contains "$(cat "$skill_file")" "name: fm-operate-crew-harness" \
+    "synced home discovered the wrong content for selected skill"
+  pass "home-link skips .agents; home-skills exposes only selected shared skills"
 }
 
 

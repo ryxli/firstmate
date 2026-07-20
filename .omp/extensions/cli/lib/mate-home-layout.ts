@@ -172,3 +172,76 @@ export function repairMateHomeLayout(home: string): MateHomeLayoutRepair {
 export function ensureMateHomeLayout(home: string): MateHomeLayoutRepair {
 	return repairMateHomeLayout(home);
 }
+
+// --- Stricter containers for skill isolation (refuse all symlinks) -------------
+
+export type RealPathKind = "dir" | "file-or-absent";
+
+/**
+ * Mutable skill-isolation surfaces that must be real local paths.
+ * Unlike general layout checks, these refuse in-home symlinks too.
+ */
+export const HOME_SKILLS_CONTAINER_RELS = [
+	".omp",
+	"config",
+	"state",
+] as const;
+
+export class MateHomePathError extends Error {
+	constructor(
+		readonly code: string,
+		message: string,
+	) {
+		super(message);
+		this.name = "MateHomePathError";
+	}
+}
+
+function lstatOrNull(path: string): ReturnType<typeof lstatSync> | null {
+	try {
+		return lstatSync(path);
+	} catch {
+		return null;
+	}
+}
+
+/** Require a real local directory (not a symlink). */
+export function assertRealLocalDirectory(path: string, label: string): void {
+	const st = lstatOrNull(path);
+	if (!st) throw new MateHomePathError("symlinked-container", `${label} missing: ${path}`);
+	if (st.isSymbolicLink() || !st.isDirectory()) {
+		throw new MateHomePathError("symlinked-container", `${label} must be a real local directory: ${path}`);
+	}
+}
+
+/** Require a real regular file when present; absent is ok. Refuse symlinks. */
+export function assertRealLocalFileOrAbsent(path: string, label: string): void {
+	const st = lstatOrNull(path);
+	if (!st) return;
+	if (st.isSymbolicLink()) {
+		throw new MateHomePathError("symlinked-container", `${label} must not be a symlink: ${path}`);
+	}
+	if (!st.isFile()) {
+		throw new MateHomePathError("symlinked-container", `${label} must be a real regular file: ${path}`);
+	}
+}
+
+/**
+ * Preflight containers used by home-skills reconciliation.
+ * `.omp/skills` may be absent (created during sync); when present it must be real.
+ */
+export function requireHomeSkillsContainers(home: string, receiptRel = "state/home-skills.receipt.json"): void {
+	assertRealLocalDirectory(home, "home");
+	for (const rel of HOME_SKILLS_CONTAINER_RELS) {
+		assertRealLocalDirectory(join(home, rel), `home/${rel}`);
+	}
+	const skillsDir = join(home, ".omp", "skills");
+	const skillsSt = lstatOrNull(skillsDir);
+	if (skillsSt) {
+		if (skillsSt.isSymbolicLink() || !skillsSt.isDirectory()) {
+			throw new MateHomePathError("symlinked-container", `home/.omp/skills must be a real local directory: ${skillsDir}`);
+		}
+	}
+	assertRealLocalFileOrAbsent(join(home, "config", "omp.yml"), "home/config/omp.yml");
+	assertRealLocalFileOrAbsent(join(home, receiptRel), `home/${receiptRel}`);
+}

@@ -94,33 +94,29 @@ describe("fm-context-weight", () => {
 		expect(sectionRows).toEqual([...sectionRows].sort((a, b) => b - a));
 	});
 
-	it("reports per-mate includeSkills weight resolved via home and cache, degrading gracefully for missing config and unresolvable skills", () => {
+	it("reports per-mate includeSkills weight from isolated .omp/skills, not whole-catalog or cache", () => {
 		const fixture = mkdtempSync(join(tmpdir(), "fm-context-weight-mate-"));
 		homes.push(fixture);
 		const codeRoot = join(fixture, "code");
 		const home = join(fixture, "home");
 		const mateHomeA = join(fixture, "mate-a");
 		const mateHomeB = join(fixture, "mate-b");
-		const ompCache = join(fixture, "cache-omp");
-		const claudeCache = join(fixture, "cache-claude"); // left empty: never created
 
 		write(join(codeRoot, "AGENTS.md"), "# Agent\nshared context\n");
 
 		const sharedText = "# Shared\nshared skill content\n";
 		const localOnlyText = "# Local\nmate-local skill content that is a bit longer\n";
-		const cachedText = "# Cached\nmachine-cache skill content\n";
-		write(join(mateHomeA, ".agents", "skills", "shared", "SKILL.md"), sharedText);
-		write(join(mateHomeA, ".agents", "skills", "local-only", "SKILL.md"), localOnlyText);
-		write(join(ompCache, "cached-skill", "SKILL.md"), cachedText);
+		write(join(mateHomeA, ".omp", "skills", "shared", "SKILL.md"), sharedText);
+		write(join(mateHomeA, ".omp", "skills", "local-only", "SKILL.md"), localOnlyText);
 		write(
 			join(mateHomeA, "config", "omp.yml"),
 			[
 				"skills:",
+				"  enabled: true",
 				"  includeSkills:",
 				"    - shared",
 				"    - local-only",
 				"    - missing-skill",
-				"    - cached-skill",
 				"",
 				"compaction:",
 				"  strategy: context-full",
@@ -143,8 +139,6 @@ describe("fm-context-weight", () => {
 				...process.env,
 				FM_CODE_ROOT_OVERRIDE: codeRoot,
 				FM_HOME: home,
-				FM_SKILL_CACHE_OMP_OVERRIDE: ompCache,
-				FM_SKILL_CACHE_CLAUDE_OVERRIDE: claudeCache,
 			},
 			stdout: "pipe",
 			stderr: "pipe",
@@ -159,13 +153,11 @@ describe("fm-context-weight", () => {
 
 		const sharedTokens = countTokens(sharedText);
 		const localOnlyTokens = countTokens(localOnlyText);
-		const cachedTokens = countTokens(cachedText);
-		const mateaTotal = sharedTokens + localOnlyTokens + cachedTokens;
+		const mateaTotal = sharedTokens + localOnlyTokens;
 
-		expect(stdout).toContain(`matea\tshared\t${sharedTokens}\thome/.agents\n`);
-		expect(stdout).toContain(`matea\tlocal-only\t${localOnlyTokens}\thome/.agents\n`);
+		expect(stdout).toContain(`matea\tshared\t${sharedTokens}\thome/.omp/skills\n`);
+		expect(stdout).toContain(`matea\tlocal-only\t${localOnlyTokens}\thome/.omp/skills\n`);
 		expect(stdout).toContain("matea\tmissing-skill\t0\tunresolved\n");
-		expect(stdout).toContain(`matea\tcached-skill\t${cachedTokens}\tcache:omp-managed-skills\n`);
 		expect(stdout).toContain(`matea\tTOTAL\t${mateaTotal}\t-\n`);
 		expect(stdout).toContain("mateb\t(no config/omp.yml)\t0\t-\n");
 	});
