@@ -227,7 +227,12 @@ test_fm_home_parameterization() {
   FM_HOME="$home_one" FM_SECONDMATE_CHARTER='ops domain' "$ROOT/sbin/fm" brief task-c --secondmate app >/dev/null \
     || fail "secondmate brief scaffold failed under FM_HOME"
   brief="$home_one/data/mates/task-c/brief.md"
-  grep -F "through the fleet peer bus" "$brief" >/dev/null || fail "secondmate brief did not use peer-bus escalation"
+  grep -F $'# Charter\nops domain' "$brief" >/dev/null || fail "secondmate brief did not retain its domain charter"
+  grep -F $'# Routing scope\nops domain' "$brief" >/dev/null || fail "secondmate brief did not retain its routing scope"
+  grep -F -- '- app' "$brief" >/dev/null || fail "secondmate brief did not retain its registered project"
+  grep -F '<!-- BEGIN MATE-OWNED NOTES:' "$brief" >/dev/null || fail "secondmate brief omitted its mate-owned block"
+  ! grep -F "through the fleet peer bus" "$brief" >/dev/null || fail "secondmate brief retained generic escalation prose"
+  ! grep -F "You are a secondmate" "$brief" >/dev/null || fail "secondmate brief restated runtime identity"
 
   printf 'project=x\n' > "$home_one/state/task-a.meta"
   FM_HOME="$home_one" FM_GUARD_GRACE=999999 "$ROOT/sbin/fm" pr-check task-a https://github.com/example/repo/pull/1 >/dev/null 2>/dev/null \
