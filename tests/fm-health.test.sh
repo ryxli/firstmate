@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Focused coverage for the read-only firstmate health diagnostic.
 # Scenarios: healthy no-drift, sbin-only home (stale bin), stale metadata,
-# unknown live panes (with cross-workspace scoping), and a required failure.
+# intentionally inactive metadata, unknown live panes, and required failures.
 set -eu
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -78,7 +78,7 @@ run "$A" "$TMP/panesA.json" >"$TMP/A.out" || fail "healthy scenario exited non-z
 have $'^home:demo\tok\tchecked$' "$TMP/A.out"
 have $'^identity:demo\tok\tname=Demo$' "$TMP/A.out"
 have $'^live-panes\tok\tcount=3$' "$TMP/A.out"
-have $'^overall\tok\tall checks passed$' "$TMP/A.out"
+have $'^overall\tok\thealthy: no drift$' "$TMP/A.out"
 lack $'\twarn\t' "$TMP/A.out"
 lack $'\tfail\t' "$TMP/A.out"
 lack 'pane:wH:pA' "$TMP/A.out"   # own supervisor pane (name=Keel, cwd=FM_HOME) not flagged unknown
@@ -96,7 +96,7 @@ printf '{"result":{"panes":[]}}\n' >"$TMP/panesB.json"
 run "$B" "$TMP/panesB.json" >"$TMP/B.out" || fail "sbin-only scenario exited non-zero" "$TMP/B.out"
 have $'^home:sbinonly\tok\tchecked$' "$TMP/B.out"      # valid WITHOUT a real bin
 have $'^bin:sbinonly\twarn\tstale-link' "$TMP/B.out"    # stale bin -> warning only
-have $'^overall\twarn\twarnings present$' "$TMP/B.out"
+have $'^overall\twarn\thealthy: non-blocking drift only (exit 0)$' "$TMP/B.out"
 lack $'^home:sbinonly\tfail' "$TMP/B.out"               # never a required failure
 
 # =====================================================================
@@ -113,7 +113,31 @@ cat >"$TMP/panesC.json" <<'EOF'
 EOF
 run "$C" "$TMP/panesC.json" >"$TMP/C.out" || fail "stale-meta scenario exited non-zero" "$TMP/C.out"
 have $'^meta:dead\twarn\tstale-pane=wH:p7$' "$TMP/C.out"
-have $'^overall\twarn\twarnings present$' "$TMP/C.out"
+have $'^overall\twarn\thealthy: non-blocking drift only (exit 0)$' "$TMP/C.out"
+
+# =====================================================================
+# Scenario C2: closed panes after terminal/waiting reports are expected.
+# =====================================================================
+CT="$TMP/CT"; mkdir -p "$CT/data" "$CT/state"
+make_current_home "$TMP/demoCT" Demo valid
+cat >"$CT/data/secondmates.md" <<EOF
+- demo - demo mate (home: $TMP/demoCT; workspace: wH; name: Demo)
+EOF
+printf 'pane=wH:p1\nkind=ship\n' >"$CT/state/done.meta"
+printf 'working: validating\ndone: ready\n' >"$CT/state/done.status"
+printf 'pane=wH:p2\nkind=ship\n' >"$CT/state/blocked.meta"
+printf 'blocked: waiting upstream\n' >"$CT/state/blocked.status"
+printf 'pane=wH:p3\nkind=ship\n' >"$CT/state/failed.meta"
+printf 'failed: terminal error\n' >"$CT/state/failed.status"
+printf 'pane=wH:p4\nkind=ship\n' >"$CT/state/decision.meta"
+printf 'needs-decision: choose owner\n' >"$CT/state/decision.status"
+printf '{"result":{"panes":[]}}\n' >"$TMP/panesCT.json"
+run "$CT" "$TMP/panesCT.json" >"$TMP/CT.out" || fail "inactive-meta scenario exited non-zero" "$TMP/CT.out"
+lack $'^meta:done\twarn' "$TMP/CT.out"
+lack $'^meta:blocked\twarn' "$TMP/CT.out"
+lack $'^meta:failed\twarn' "$TMP/CT.out"
+lack $'^meta:decision\twarn' "$TMP/CT.out"
+have $'^overall\tok\thealthy: no drift$' "$TMP/CT.out"
 
 # =====================================================================
 # Scenario D: unknown live panes  ->  untracked agent pane in a tracked
@@ -125,10 +149,12 @@ cat >"$D/data/secondmates.md" <<EOF
 - demo - demo mate (home: $TMP/demoD; workspace: wH; name: Demo)
 EOF
 printf 'pane=wH:p1\nkind=ship\n' >"$D/state/task1.meta"
+printf 'pane=wH:p6\nkind=ship\n' >"$TMP/demoD/state/cross-home-task.meta"
 cat >"$TMP/panesD.json" <<'EOF'
 {"result":{"panes":[
   {"pane_id":"wH:p1","agent":"omp","display_agent":"","agent_status":"idle"},
   {"pane_id":"wH:p5","agent":"omp","display_agent":"fm-orphan","agent_status":"idle"},
+  {"pane_id":"wH:p6","agent":"omp","display_agent":"omp","agent_status":"done"},
   {"pane_id":"wZ:p1","agent":"omp","display_agent":"fm-foreign","agent_status":"idle"},
   {"pane_id":"wH:p9","agent":"omp","display_agent":"Demo","agent_status":"idle"}
 ]}}
@@ -138,7 +164,8 @@ have $'^pane:wH:p5\twarn\tunknown ws=wH label=fm-orphan$' "$TMP/D.out"
 lack 'wZ:p1' "$TMP/D.out"                               # foreign-workspace pane not flagged
 lack 'pane:wH:p9' "$TMP/D.out"                          # registered mate's own pane not flagged
 lack 'pane:wH:p1' "$TMP/D.out"                          # tracked pane not flagged
-have $'^overall\twarn\twarnings present$' "$TMP/D.out"
+lack 'pane:wH:p6' "$TMP/D.out"                          # another registered home's tracked pane not flagged
+have $'^overall\twarn\thealthy: non-blocking drift only (exit 0)$' "$TMP/D.out"
 
 # =====================================================================
 # Scenario E: required failure  ->  broken current layout -> fail, exit 1
@@ -154,7 +181,7 @@ if run "$E" "$TMP/panesE.json" >"$TMP/E.out"; then
   fail "required-failure scenario unexpectedly exited 0" "$TMP/E.out"
 fi
 have $'^home:broken\tfail\tcurrent-layout$' "$TMP/E.out"
-have $'^overall\tfail\trequired check failed$' "$TMP/E.out"
+have $'^overall\tfail\tunhealthy: required check failed$' "$TMP/E.out"
 
 # Legacy plain-clone home branch still fails via fm-home-link when broken.
 L="$TMP/L"; mkdir -p "$L/data" "$L/state"
@@ -168,4 +195,4 @@ if FM_HEALTH_TEST_FAIL_HOME=1 run "$L" "$TMP/panesL.json" >"$TMP/L.out"; then
 fi
 have $'^home:legacy\tfail\tblocked$' "$TMP/L.out"
 
-printf 'fm-health: healthy, sbin-only(stale-bin), stale-meta, unknown-pane, and required-failure scenarios passed\n'
+printf 'fm-health: healthy, stale-bin, active/inactive stale-meta, unknown-pane, and required-failure scenarios passed\n'

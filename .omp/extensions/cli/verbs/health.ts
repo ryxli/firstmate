@@ -8,6 +8,7 @@
 //   - unknown live panes (agent panes in a tracked workspace, absent from state/*.meta)
 //   - stale state/*.meta pane references (recorded pane no longer live)
 //   - metadata/live identity or workspace mismatches
+//   - a leading legend (# lines): scope, state meanings, and the two sibling verdicts
 //
 // This NEVER restarts agents, mutates fleet state, or requires the retired bin/ layout.
 // A current home is valid when its sbin and extension links are correct; the mate's
@@ -247,6 +248,19 @@ function parseMetaFile(text: string): Record<string, string> {
 	return kv;
 }
 
+const INACTIVE_REPORT_STATES: Record<string, true> = {
+	blocked: true,
+	done: true,
+	failed: true,
+	"needs-decision": true,
+};
+
+function latestReportState(path: string): string | undefined {
+	const lines = (readTextOrNull(path) ?? "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+	const match = /^([a-z-]+):/i.exec(lines.at(-1) ?? "");
+	return match?.[1].toLowerCase();
+}
+
 async function run(_argv: string[]): Promise<number> {
 	const fmRootOverride = process.env.FM_ROOT_OVERRIDE?.trim();
 	const fmRoot = fmRootOverride || REPO_ROOT;
@@ -257,12 +271,12 @@ async function run(_argv: string[]): Promise<number> {
 	const timeoutSec = normalizeTimeoutSeconds(process.env.FM_HEALTH_TIMEOUT);
 
 	const lines: string[] = [];
-	let status = 0;
-	let warning = 0;
+	let failCount = 0;
+	let warnCount = 0;
 	const emit = (check: string, checkState: string, detail: string): void => {
 		lines.push(`${check}\t${checkState}\t${detail}`);
-		if (checkState === "fail") status = 1;
-		if (checkState === "warn") warning = 1;
+		if (checkState === "fail") failCount += 1;
+		if (checkState === "warn") warnCount += 1;
 	};
 
 	// --- herdr / capture / roster --------------------------------------------
@@ -371,6 +385,21 @@ async function run(_argv: string[]): Promise<number> {
 		}
 		const metaPanes = new Map<string, string>();
 		for (const [ident, kv] of metas) if (kv.pane) metaPanes.set(kv.pane, ident);
+		const fleetMetaPanes = new Set(metaPanes.keys());
+		for (const { home } of entries) {
+			let mateMetaFiles: string[] = [];
+			try {
+				mateMetaFiles = readdirSync(join(home, "state")).filter(name => name.endsWith(".meta"));
+			} catch {
+				continue;
+			}
+			for (const name of mateMetaFiles) {
+				const text = readTextOrNull(join(home, "state", name));
+				if (text === null) continue;
+				const pane = parseMetaFile(text).pane;
+				if (pane) fleetMetaPanes.add(pane);
+			}
+		}
 
 		const reg = new Map<string, { home: string; ws: string; name: string }>();
 		const mateLabels = new Set<string>();
@@ -384,10 +413,14 @@ async function run(_argv: string[]): Promise<number> {
 			if (workspace && looseRealpath(home) === looseRealpath(fmHome)) homeWs.add(workspace);
 		}
 
-		// Stale metadata: recorded pane no longer live.
+		// A closed pane is expected after a worker reports a terminal or waiting
+		// state. Warn only when metadata still implies a live worker.
 		for (const [ident, kv] of metas) {
 			const pane = kv.pane ?? "";
-			if (pane && !live.has(pane)) emit(`meta:${ident}`, "warn", `stale-pane=${pane}`);
+			const reportState = latestReportState(join(state, `${ident}.status`));
+			if (pane && !live.has(pane) && !INACTIVE_REPORT_STATES[reportState ?? ""]) {
+				emit(`meta:${ident}`, "warn", `stale-pane=${pane}`);
+			}
 		}
 
 		// Identity mismatch: recorded agent identity vs the live pane's agent.
@@ -405,7 +438,7 @@ async function run(_argv: string[]): Promise<number> {
 		// pane (own identity name + cwd == FM_HOME).
 		for (const pid of [...liveAgents.keys()].sort()) {
 			const p = liveAgents.get(pid)!;
-			if (metaPanes.has(pid)) continue;
+			if (fleetMetaPanes.has(pid)) continue;
 			if (homeWs.size > 0 && !homeWs.has(wsOf(pid))) continue;
 			const lab = labelOf(p);
 			if (mateLabels.has(lab.toLowerCase())) continue;
@@ -429,12 +462,17 @@ async function run(_argv: string[]): Promise<number> {
 		emit("live-panes", "warn", "pane-list-unavailable");
 	}
 
-	if (status !== 0) lines.push("overall\tfail\trequired check failed");
-	else if (warning !== 0) lines.push("overall\twarn\twarnings present");
-	else lines.push("overall\tok\tall checks passed");
+	if (failCount > 0) lines.push("overall\tfail\tunhealthy: required check failed");
+	else if (warnCount > 0) lines.push("overall\twarn\thealthy: non-blocking drift only (exit 0)");
+	else lines.push("overall\tok\thealthy: no drift");
 
-	process.stdout.write(`${lines.join("\n")}\n`);
-	return status;
+	const legend = [
+		"# fm health: LOCAL plumbing + drift probe - not the operational fleet verdict (`fm fleet`) or the resting-clean gate (`fm fleet check`).",
+		"# states: ok = pass | warn = non-blocking drift, exit stays 0 | fail = required breakage, exit 1.",
+		"# warn rows (stale meta panes, unknown panes, workspace/identity drift) are diagnostic - safe to leave until the owning task lands.",
+	];
+	process.stdout.write(`${[...legend, ...lines].join("\n")}\n`);
+	return failCount > 0 ? 1 : 0;
 }
 
 function findFirst(text: string, key: string): string | undefined {
