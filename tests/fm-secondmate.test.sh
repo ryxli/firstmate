@@ -433,6 +433,9 @@ EOF
     fail "seed succeeded despite failed clone after mise creation"
   fi
   [ ! -e "$subhome/.mise.toml" ] || fail "failed seed left created .mise.toml behind"
+  [ ! -e "$subhome/.omp/hooks/pre" ] || fail "failed seed left a newly-created pre-hook link"
+  [ ! -e "$subhome/.omp/hooks" ] || fail "failed seed left a newly-created hooks directory"
+  [ ! -e "$subhome/.omp" ] || fail "failed seed left a newly-created .omp directory"
   [ ! -e "$subhome/projects/alpha" ] || fail "failed seed left a cloned project after mise rollback"
   if [ -f "$home/data/secondmates.md" ] && grep -F -- '- rollback-mise ' "$home/data/secondmates.md" >/dev/null; then
     fail "failed seed left registry route after mise rollback"
@@ -2266,7 +2269,7 @@ EOF
 test_home_seed_ship_extensions_linked() {
   # A pre-created minimal home (not a git clone) has no .omp/extensions/ entries.
   # Seeding it should create symlinks for every canonical extension.
-  local home subhome fakebin ext_src entry name link target found
+  local home subhome fakebin ext_src hook_src entry name link target found
   home="$TMP_ROOT/ext-link-home"
   subhome="$TMP_ROOT/ext-link-subhome"
   mkdir -p "$home/projects" "$home/data" "$home/state"
@@ -2299,7 +2302,77 @@ test_home_seed_ship_extensions_linked() {
     [ "$target" = "$entry" ] || fail "extension symlink $name points to wrong target: $target"
   done
   [ "$found" -gt 0 ] || fail "canonical extensions dir had no entries"
+  hook_src="$ROOT/.omp/hooks/pre"
+  [ -d "$hook_src" ] || fail "canonical pre-hook source missing"
+  [ -L "$subhome/.omp/hooks/pre" ] || fail "pre-hook directory symlink not created"
+  [ "$(readlink "$subhome/.omp/hooks/pre")" = "$hook_src" ] || fail "pre-hook symlink points to wrong target"
   pass "home seeding creates extension symlinks pointing at canonical"
+}
+
+test_home_seed_preserves_tracked_real_pre_hooks() {
+  local home subhome fakebin guard
+  home="$TMP_ROOT/pre-real-home"
+  subhome="$TMP_ROOT/pre-real-subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  make_git_project "$home/projects/alpha"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/pre-real-alpha.git"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  fakebin=$(make_fake_no_mistakes "$TMP_ROOT/pre-real-nm-fake")
+  guard="$subhome/.omp/hooks/pre/fm-lifecycle-guard.ts"
+  mkdir -p "$(dirname "$guard")" "$subhome/sbin"
+  printf '# Firstmate\n' > "$subhome/AGENTS.md"
+  printf 'tracked guard\n' > "$guard"
+  if PATH="$fakebin:$PATH" FM_HOME="$home" \
+    FM_SECONDMATE_CHARTER='pre real scope' FM_SECONDMATE_SCOPE='pre real scope' \
+    "$ROOT/sbin/fm" home-seed prerel "$subhome" alpha >/dev/null 2>&1; then
+    fail "seed accepted untracked real pre hooks"
+  fi
+  [ "$(cat "$guard")" = "tracked guard" ] || fail "untracked pre-hook conflict changed user material"
+  rm "$guard"
+  printf 'other\n' > "$subhome/.omp/hooks/pre/other.ts"
+  if PATH="$fakebin:$PATH" FM_HOME="$home" \
+    FM_SECONDMATE_CHARTER='pre real scope' FM_SECONDMATE_SCOPE='pre real scope' \
+    "$ROOT/sbin/fm" home-seed prerel "$subhome" alpha >/dev/null 2>&1; then
+    fail "seed accepted nonempty unrecognized pre hooks"
+  fi
+  rm "$subhome/.omp/hooks/pre/other.ts"
+  printf 'tracked guard\n' > "$guard"
+  git -C "$subhome" init -q
+  git -C "$subhome" config user.name 'Firstmate Tests'
+  git -C "$subhome" config user.email tests@example.invalid
+  git -C "$subhome" add .omp/hooks/pre/fm-lifecycle-guard.ts
+  git -C "$subhome" commit -qm 'track pre hook'
+  PATH="$fakebin:$PATH" FM_HOME="$home" \
+    FM_SECONDMATE_CHARTER='pre real scope' FM_SECONDMATE_SCOPE='pre real scope' \
+    "$ROOT/sbin/fm" home-seed prerel "$subhome" alpha >/dev/null \
+    || fail "seed failed for tracked real pre hooks"
+  [ -d "$subhome/.omp/hooks/pre" ] || fail "tracked pre hooks directory disappeared"
+  [ ! -L "$subhome/.omp/hooks/pre" ] || fail "tracked pre hooks directory was linked"
+  [ "$(cat "$guard")" = "tracked guard" ] || fail "tracked guard changed"
+  pass "home seeding preserves tracked real pre hooks"
+}
+
+test_home_seed_restores_empty_pre_hooks_on_rollback() {
+  local home subhome missing_remote
+  home="$TMP_ROOT/pre-restore-home"
+  subhome="$TMP_ROOT/pre-restore-subhome"
+  missing_remote="$TMP_ROOT/remotes/pre-restore-missing.git"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  make_git_project "$home/projects/alpha"
+  make_git_project "$home/projects/beta"
+  add_file_origin "$home/projects/alpha" "$TMP_ROOT/remotes/pre-restore-alpha.git"
+  git -C "$home/projects/beta" remote add origin "file://$missing_remote"
+  printf '%s\n' '- alpha [pr] - alpha project (added 2026-06-22)' '- beta [pr] - beta project (added 2026-06-22)' > "$home/data/projects.md"
+  mkdir -p "$subhome/data" "$subhome/state" "$subhome/config" "$subhome/projects" "$subhome/sbin" "$subhome/.omp/hooks/pre"
+  printf '# Firstmate\n' > "$subhome/AGENTS.md"
+  if FM_HOME="$home" FM_SECONDMATE_CHARTER='pre restore scope' FM_SECONDMATE_SCOPE='pre restore scope' \
+    "$ROOT/sbin/fm" home-seed prerestore "$subhome" alpha beta >/dev/null 2>&1; then
+    fail "seed unexpectedly succeeded in pre-hook restore test"
+  fi
+  [ -d "$subhome/.omp/hooks/pre" ] || fail "rollback removed pre-existing empty pre-hook directory"
+  [ ! -L "$subhome/.omp/hooks/pre" ] || fail "rollback left a pre-hook symlink"
+  [ -d "$subhome/.omp/hooks" ] || fail "rollback removed pre-existing hooks directory"
+  pass "home seeding restores empty pre hooks on rollback"
 }
 
 test_home_seed_ship_extensions_idempotent() {
@@ -2489,6 +2562,9 @@ test_home_seed_resolves_relative_source_origins
 test_home_seed_refuses_project_destinations_outside_subhome
 test_home_seed_refuses_operational_dirs_outside_subhome
 test_home_seed_refuses_symlinked_leaf_files
+test_home_seed_ship_extensions_linked
+test_home_seed_preserves_tracked_real_pre_hooks
+test_home_seed_restores_empty_pre_hooks_on_rollback
 test_secondmate_spawn_records_home_meta
 test_secondmate_spawn_repairs_shared_links
 test_secondmate_spawn_preserves_shared_link_conflicts
@@ -2516,7 +2592,6 @@ test_secondmate_teardown_refuses_home_descendants
 test_secondmate_charter_brief_is_idle_by_default
 test_tasks_mv_moves_in_scope_items
 test_tasks_mv_creates_absent_section_and_refuses_non_secondmate_home
-test_home_seed_ship_extensions_linked
 test_home_seed_ship_extensions_idempotent
 test_home_seed_ship_extensions_skips_real_file
 test_link_ship_ext_resolves_id_from_registry

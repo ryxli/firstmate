@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isTrackedPreHooks } from "../lib/ship-ext";
 import { ensureMateMiseToml } from "../lib/mise-home";
 import { checkMateHomeLayout, repairMateHomeLayout } from "../lib/mate-home-layout";
 import {
@@ -185,8 +186,106 @@ function repairExtensionLink(ctx: Ctx, name: string): void {
 	}
 	ctx.status = "repaired";
 }
+function hasLifecycleGuard(path: string): boolean {
+	try {
+		return lstatSync(join(path, "fm-lifecycle-guard.ts")).isFile();
+	} catch {
+		return false;
+	}
+}
+
+function checkPreHooks(ctx: Ctx): void {
+	const ompDir = join(ctx.homePath, ".omp");
+	const source = join(ctx.codeRoot, ".omp", "hooks", "pre");
+	const hooksDir = join(ompDir, "hooks");
+	const link = join(hooksDir, "pre");
+	if (!isDirectoryFollow(source) || !hasLifecycleGuard(source)) {
+		setBlock(ctx, "missing-target");
+		return;
+	}
+
+	const canonicalOmp = join(ctx.codeRoot, ".omp");
+	const legacyOmpLink = isSymlink(ompDir) && linkPointsTo(ompDir, canonicalOmp);
+	if (isSymlink(ompDir)) {
+		if (!linkPointsTo(ompDir, canonicalOmp)) {
+			setBlock(ctx, "wrong-link");
+			return;
+		}
+	} else if (!isDirectoryFollow(ompDir)) {
+		setBlock(ctx, existsSync(ompDir) ? "hook-conflict" : "wrong-link");
+		return;
+	}
+	if (!legacyOmpLink && (isSymlink(hooksDir) || (existsSync(hooksDir) && !isDirectoryFollow(hooksDir)))) {
+		setBlock(ctx, "hook-conflict");
+		return;
+	}
+	if (linkPointsTo(link, source) || (isDirectoryFollow(link) && !isSymlink(link) && hasLifecycleGuard(link))) {
+		if (isSymlink(link) || legacyOmpLink || isTrackedPreHooks(ctx.homePath)) {
+			ctx.status = "ok";
+			return;
+		}
+		setBlock(ctx, "hook-conflict");
+		return;
+	}
+
+	let linkExists = false;
+	try {
+		lstatSync(link);
+		linkExists = true;
+	} catch {
+		// missing link
+	}
+	if (linkExists && !isSymlink(link) && isDirectoryFollow(link)) {
+		let entries: string[] = [];
+		try {
+			entries = readdirSync(link);
+		} catch {
+			setBlock(ctx, "hook-conflict");
+			return;
+		}
+		if (entries.length > 0) {
+			setBlock(ctx, "hook-conflict");
+			return;
+		}
+	}
+	if (linkExists && !isSymlink(link) && !isDirectoryFollow(link)) {
+		setBlock(ctx, "hook-conflict");
+		return;
+	}
+	if (ctx.mode === "check") {
+		setBlock(ctx, "wrong-link");
+		return;
+	}
+
+	if (isSymlink(link)) {
+		try {
+			rmSync(link, { force: true });
+		} catch {
+			setBlock(ctx, "repair-failed");
+			return;
+		}
+	} else if (linkExists) {
+		try {
+			rmdirSync(link);
+		} catch {
+			setBlock(ctx, "repair-failed");
+			return;
+		}
+	}
+	try {
+		mkdirSync(hooksDir, { recursive: true });
+		symlinkSync(source, link);
+	} catch {
+		setBlock(ctx, "repair-failed");
+		return;
+	}
+	ctx.status = "repaired";
+}
+
 
 function checkCurrentOmp(ctx: Ctx): void {
+	checkPreHooks(ctx);
+	statusLine(ctx, "link..omp.hooks.pre");
 	const extSrc = join(ctx.codeRoot, ".omp", "extensions");
 	const extDst = join(ctx.homePath, ".omp", "extensions");
 	if (!isDirectoryFollow(extDst) || isSymlink(extDst)) {
@@ -320,6 +419,8 @@ async function run(argv: string[]): Promise<number> {
 			statusLine(ctx, "link..claude");
 			repairLink(ctx, ".omp", join(codeRoot, ".omp"));
 			statusLine(ctx, "link..omp");
+			checkPreHooks(ctx);
+			statusLine(ctx, "link..omp.hooks.pre");
 		}
 
 		if (ctx.result !== "ok") ctx.status = ctx.result;

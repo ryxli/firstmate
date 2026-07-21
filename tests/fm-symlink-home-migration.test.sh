@@ -58,11 +58,12 @@ spawn() {
 
 make_code_root() {
   local dir=$1
-  mkdir -p "$dir/.agents/skills" "$dir/.claude" "$dir/.omp/extensions"
+  mkdir -p "$dir/.agents/skills" "$dir/.claude" "$dir/.omp/extensions" "$dir/.omp/hooks/pre"
   printf '# Test code root\n' > "$dir/AGENTS.md"
   printf 'Compatibility link target\n' > "$dir/CLAUDE.md"
   ln -s "$ROOT/sbin" "$dir/sbin"
   printf 'skill\n' > "$dir/.agents/skills/test.md"
+  printf 'export default function fmLifecycleGuard() {}\n' > "$dir/.omp/hooks/pre/fm-lifecycle-guard.ts"
   printf 'ext\n' > "$dir/.omp/extensions/test-ext.ts"
 }
 
@@ -242,6 +243,70 @@ test_current_layout_home_link_check_passes() {
     || fail "current-layout check failed: $out"
   assert_contains "$out" "result=ok" "current-layout check did not report result=ok"
   pass "current per-extension .omp layout passes home-link check"
+}
+
+test_home_link_pre_hook_surface() {
+  require_slice_scripts
+  local code="$TMP_ROOT/pre-hooks-code" home="$TMP_ROOT/pre-hooks-home" hooks_target="$TMP_ROOT/hooks-target" out
+  make_code_root "$code"
+  make_current_home "$code" "$home" prehooks
+  unlink "$home/.omp/hooks/pre"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
+    && fail "missing pre-hook link passed check"
+  assert_contains "$out" "link..omp.hooks.pre=blocked:wrong-link" "missing pre-hook diagnostic mismatch"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair 2>&1) \
+    || fail "missing pre-hook link repair failed: $out"
+  [ -L "$home/.omp/hooks/pre" ] || fail "missing pre-hook link repair did not create a symlink"
+  [ "$(readlink "$home/.omp/hooks/pre")" = "$(canonical "$code")/.omp/hooks/pre" ] || fail "missing pre-hook repair targeted the wrong source"
+  unlink "$home/.omp/hooks/pre"
+  mkdir -p "$home/.omp/hooks/pre"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
+    && fail "empty real pre-hook directory passed check"
+  assert_contains "$out" "link..omp.hooks.pre=blocked:wrong-link" "empty pre-hook diagnostic mismatch"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair 2>&1) \
+    || fail "empty real pre-hook repair failed: $out"
+  [ -L "$home/.omp/hooks/pre" ] || fail "empty real pre-hook directory was not linked"
+  [ "$(readlink "$home/.omp/hooks/pre")" = "$(canonical "$code")/.omp/hooks/pre" ] || fail "empty pre-hook repair targeted the wrong source"
+  unlink "$home/.omp/hooks/pre"
+  ln -s "$TMP_ROOT/wrong-pre-hooks" "$home/.omp/hooks/pre"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair 2>&1) \
+    || fail "wrong pre-hook link repair failed: $out"
+  [ "$(readlink "$home/.omp/hooks/pre")" = "$(canonical "$code")/.omp/hooks/pre" ] || fail "wrong pre-hook link target remained"
+  unlink "$home/.omp/hooks/pre"
+  printf 'user-owned pre hooks\n' > "$home/.omp/hooks/pre"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair 2>&1) \
+    && fail "real pre-hook file conflict was repaired"
+  assert_contains "$out" "link..omp.hooks.pre=blocked:hook-conflict" "real pre-hook file status mismatch"
+  [ "$(cat "$home/.omp/hooks/pre")" = "user-owned pre hooks" ] || fail "real pre-hook file changed"
+  rm -f "$home/.omp/hooks/pre"
+  rm -rf "$home/.omp/hooks"
+  mkdir -p "$hooks_target"
+  ln -s "$hooks_target" "$home/.omp/hooks"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair 2>&1) \
+    && fail "symlinked hooks container was repaired"
+  assert_contains "$out" "link..omp.hooks.pre=blocked:hook-conflict" "symlinked hooks container status mismatch"
+  rmdir "$hooks_target"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
+    && fail "broken symlinked hooks container passed check"
+  assert_contains "$out" "link..omp.hooks.pre=blocked:hook-conflict" "broken hooks container status mismatch"
+  [ -L "$home/.omp/hooks" ] || fail "broken hooks container symlink was removed"
+  unlink "$home/.omp/hooks"
+  mkdir -p "$home/.omp/hooks"
+  rm -f "$home/.omp/hooks/pre"
+  mkdir -p "$home/.omp/hooks/pre"
+  printf 'untracked\n' > "$home/.omp/hooks/pre/fm-lifecycle-guard.ts"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
+    && fail "untracked real pre hooks passed check"
+  assert_contains "$out" "link..omp.hooks.pre=blocked:hook-conflict" "untracked pre-hook status mismatch"
+  git -C "$home" init -q
+  git -C "$home" config user.name 'Firstmate Tests'
+  git -C "$home" config user.email tests@example.invalid
+  git -C "$home" add .omp/hooks/pre/fm-lifecycle-guard.ts
+  git -C "$home" commit -qm 'track pre hook'
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
+    || fail "tracked real pre hooks failed check: $out"
+  assert_contains "$out" "link..omp.hooks.pre=ok" "tracked real pre-hook status mismatch"
+  pass "home-link reconciles native pre-hook links and preserves conflicts"
 }
 
 # Contract: persistent homes no longer require a CLAUDE.md compatibility link.
@@ -541,6 +606,7 @@ test_home_link_removes_legacy_claude_symlink
 test_home_link_preserves_non_symlink_claude_objects
 
 test_current_layout_home_link_check_passes
+test_home_link_pre_hook_surface
 test_current_layout_broken_extension_link_fails
 test_current_layout_repairs_extension_link
 test_current_layout_repair_discovers_shared_skills

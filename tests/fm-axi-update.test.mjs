@@ -70,10 +70,12 @@ try {
   git(["config", "user.email", "fmtest@example.com"], seed);
   git(["config", "user.name", "fmtest"], seed);
   mkdirSync(join(seed, ".omp", "extensions"), { recursive: true });
+  mkdirSync(join(seed, ".omp", "hooks", "pre"), { recursive: true });
   writeFileSync(join(seed, "AGENTS.md"), "v1\n");
   writeFileSync(join(seed, ".omp", "extensions", "bridge.ts"), "export const revision = 1;\n");
+  writeFileSync(join(seed, ".omp", "hooks", "pre", "fm-lifecycle-guard.ts"), "export const revision = 1;\n");
   writeFileSync(join(seed, ".omp", "fleet-capabilities.json"), JSON.stringify({ schema: "firstmate.capability-registry/v1", targets: [
-    { id: "target", home: target, source_revision: "0000000000000000000000000000000000000000", surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
+    { id: "target", home: target, source_revision: "0000000000000000000000000000000000000000", surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts", ".omp/hooks/pre"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
     { id: "unaffected", home: other, source_revision: "0000000000000000000000000000000000000000", surfaces: ["README.md"], required_probe_result: { activation: "ok" }, reload_target: "wrong-unaffected-target" },
   ] }));
   git(["add", "-A"], seed);
@@ -96,8 +98,7 @@ try {
     git(["config", "user.name", "fmtest"], repo);
   }
   const oldRevision = git(["rev-parse", "HEAD"], source);
-  writeFileSync(join(seed, "AGENTS.md"), "v2\n");
-  writeFileSync(join(seed, ".omp", "extensions", "bridge.ts"), "export const revision = 2;\n");
+  writeFileSync(join(seed, ".omp", "hooks", "pre", "fm-lifecycle-guard.ts"), "export const revision = 2;\n");
   git(["add", "-A"], seed);
   git(["commit", "-q", "--no-verify", "-m", "v2"], seed);
   git(["push", "-q", "origin", "main"], seed);
@@ -149,7 +150,7 @@ try {
   delete legacyReceipt.required_probe_result;
   writeFileSync(join(legacy, "state", "activation-receipt.json"), JSON.stringify(legacyReceipt));
   writeFileSync(registry, JSON.stringify({ schema: "firstmate.capability-registry/v1", targets: [
-    { id: "target", home: target, source_revision: oldRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
+    { id: "target", home: target, source_revision: oldRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts", ".omp/hooks/pre"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
     { id: "legacy", home: legacy, source_revision: oldRevision, surfaces: ["AGENTS.md"], required_probe_result: { activation: "ok" }, reload_target: "wrong-legacy-target" },
   ] }));
   writeFileSync(reload, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${reloadLog}'\ncat > '${join(target, "state", "activation-receipt.json")}' <<'JSON'\n${JSON.stringify(receipt(source, newRevision, "w1:p1", "session-target", { activation: "ok" }))}\nJSON\n`);
@@ -188,7 +189,7 @@ try {
   if (!rolePayload.result.results.some(row => row.target === "secondmate:legacy") || rolePayload.result.results.some(row => row.target === "target")) throw new Error(`dynamic role selector did not resolve current home: ${roleRun.stdout}`);
   console.log("ok - dynamic role selector resolves the current registered home");
   writeFileSync(registry, JSON.stringify({ schema: "firstmate.capability-registry/v1", revision: newRevision, targets: [
-    { id: "target", home: target, source_revision: oldRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
+    { id: "target", home: target, source_revision: oldRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts", ".omp/hooks/pre"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
   ] }));
   writeFileSync(reload, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${reloadLog}'\ncat > '${join(target, "state", "activation-receipt.json")}' <<'JSON'\n${JSON.stringify(receipt(source, newRevision, "w1:p1", "session-target", { activation: "ok" }))}\nJSON\n`);
   chmodSync(reload, 0o755);
@@ -203,7 +204,7 @@ try {
   delete incompleteReceipt.required_probe_result;
   writeFileSync(join(target, "state", "activation-receipt.json"), JSON.stringify(incompleteReceipt));
   writeFileSync(registry, JSON.stringify({ schema: "firstmate.capability-registry/v1", revision: `${newRevision}-receipt`, targets: [
-    { id: "target", home: target, source_revision: oldRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
+    { id: "target", home: target, source_revision: oldRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts", ".omp/hooks/pre"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
   ] }));
   const incomplete = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
   if (incomplete.status !== 1) throw new Error(`incomplete receipt exited ${incomplete.status}: ${incomplete.stdout}`);
@@ -214,7 +215,7 @@ try {
 
   const unavailable = join(temp, "unavailable");
   writeFileSync(registry, JSON.stringify({ schema: "firstmate.capability-registry/v1", targets: [
-    { id: "target", home: target, source_revision: oldRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
+    { id: "target", home: target, source_revision: oldRevision, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts", ".omp/hooks/pre"], required_probe_result: { activation: "ok" }, reload_target: "wrong-target" },
     { id: "unavailable", home: unavailable, source_revision: oldRevision, surfaces: ["AGENTS.md"], required_probe_result: { activation: "ok" }, reload_target: "wrong-unavailable-target" },
   ] }));
   const third = spawnSync(process.execPath, [cli, "fleet", "update"], { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
@@ -266,9 +267,11 @@ try {
   writeFileSync(join(seeded, ".fm-secondmate-home"), "seeded\n");
   writeFileSync(join(seeded, "AGENTS.md"), "v2\n");
   symlinkSync(join(source, ".omp", "extensions", "bridge.ts"), join(seeded, ".omp", "extensions", "bridge.ts"));
+  mkdirSync(join(seeded, ".omp", "hooks"), { recursive: true });
+  symlinkSync(join(source, ".omp", "hooks", "pre"), join(seeded, ".omp", "hooks", "pre"), "dir");
   symlinkSync(join(source, ".omp", "extensions", "linked"), join(seeded, ".omp", "extensions", "linked"), "dir");
   writeFileSync(registry, JSON.stringify({ schema: "firstmate.capability-registry/v1", targets: [
-    { id: "seeded", home: seeded, source_revision: oldRevision, surfaces: [".omp/extensions/bridge.ts", ".omp/extensions/linked"], required_probe_result: { activation: "ok" } },
+    { id: "seeded", home: seeded, source_revision: oldRevision, surfaces: [".omp/extensions/bridge.ts", ".omp/extensions/linked", ".omp/hooks/pre"], required_probe_result: { activation: "ok" } },
   ] }));
   const oldLinkedReceipt = linkedReceipt(seeded, source, oldRevision, "w1:p4", "session-seeded", { activation: "ok" }, {
     "AGENTS.md": Buffer.from("v1\n"),
@@ -304,7 +307,7 @@ try {
   writeFileSync(join(wholeSeeded, ".fm-secondmate-home"), "whole\n");
   writeFileSync(join(wholeSeeded, "AGENTS.md"), "v2\n");
   writeFileSync(registry, JSON.stringify({ schema: "firstmate.capability-registry/v1", targets: [
-    { id: "whole-seeded", home: wholeSeeded, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts"], required_probe_result: { activation: "ok" } },
+    { id: "whole-seeded", home: wholeSeeded, surfaces: ["AGENTS.md", ".omp/extensions/bridge.ts", ".omp/hooks/pre"], required_probe_result: { activation: "ok" } },
   ] }));
   writeFileSync(wholePanes, JSON.stringify({ result: { panes: [
     { pane_id: "w1:p5", cwd: wholeSeeded, agent: "omp", agent_status: "idle", agent_session_id: "session-whole" },

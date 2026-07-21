@@ -4,13 +4,13 @@
     {
       "id": "firstmate",
       "selector": { "role": "firstmate" },
-      "surfaces": ["AGENTS.md", ".omp/extensions", "sbin"],
+      "surfaces": ["AGENTS.md", ".omp/extensions", ".omp/hooks/pre", "sbin"],
       "required_probe_result": { "activation": "ok" }
     },
     {
       "id": "secondmate",
       "selector": { "role": "secondmate" },
-      "surfaces": ["AGENTS.md", ".omp/extensions", "sbin"],
+      "surfaces": ["AGENTS.md", ".omp/extensions", ".omp/hooks/pre", "sbin"],
       "required_probe_result": { "activation": "ok" }
     }
   ]

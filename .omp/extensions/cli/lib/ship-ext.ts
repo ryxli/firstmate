@@ -8,7 +8,8 @@
 // tracks - a different use case, not a call to this bash function - so this
 // port stays faithful to the fm home-seed caller's env-gated semantics.)
 
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, rmSync, rmdirSync, symlinkSync } from "node:fs";
 import { basename, join } from "node:path";
 
 export interface ShipExtOptions {
@@ -96,5 +97,98 @@ export function linkShipExtensions(home: string, extSrc: string, opts: ShipExtOp
 		}
 	}
 
+	return result;
+}
+function isEmptyDirectory(path: string): boolean {
+	try {
+		const st = lstatSync(path);
+		return st.isDirectory() && readdirSync(path).length === 0;
+	} catch {
+		return false;
+	}
+}
+
+function hasLifecycleGuard(path: string): boolean {
+	try {
+		return lstatSync(join(path, "fm-lifecycle-guard.ts")).isFile();
+	} catch {
+		return false;
+	}
+}
+
+export function isTrackedPreHooks(home: string): boolean {
+	const result = spawnSync("git", ["-C", home, "ls-files", "--error-unmatch", "--", ".omp/hooks/pre/fm-lifecycle-guard.ts"], {
+		stdio: "ignore",
+	});
+	return result.status === 0 && !result.error;
+}
+
+// linkShipPreHooks(home, source, opts?): install the native fleet hook
+// directory as one symlink under <home>/.omp/hooks/pre. A tracked real
+// directory containing the lifecycle guard is authoritative; all other real
+// material is preserved.
+export function linkShipPreHooks(home: string, source: string, opts: ShipExtOptions = {}): ShipExtResult {
+	const result: ShipExtResult = { srcMissing: false, dstExisted: false, changed: 0, skipped: 0, noop: 0 };
+
+	if (!isDirectory(source) || !hasLifecycleGuard(source)) {
+		result.srcMissing = true;
+		return result;
+	}
+	const ompDir = join(home, ".omp");
+	const hooksDir = join(ompDir, "hooks");
+	const preDst = join(hooksDir, "pre");
+	let hooksSt: ReturnType<typeof lstatSync> | null = null;
+	try {
+		hooksSt = lstatSync(hooksDir);
+	} catch {
+		hooksSt = null;
+	}
+	if (hooksSt !== null && (!hooksSt.isDirectory() || hooksSt.isSymbolicLink())) {
+		if (opts.verbose) process.stdout.write("ship-ext: skip hooks directory conflict\n");
+		result.skipped += 1;
+		return result;
+	}
+	result.dstExisted = isDirectory(preDst);
+
+	if (isDirectory(preDst) && hasLifecycleGuard(preDst) && isTrackedPreHooks(home)) {
+		if (opts.verbose) process.stdout.write("ship-ext: skip authoritative real pre hooks\n");
+		result.noop += 1;
+		return result;
+	}
+	let st: ReturnType<typeof lstatSync> | null = null;
+	try {
+		st = lstatSync(preDst);
+	} catch {
+		st = null;
+	}
+
+	if (st !== null && st.isSymbolicLink()) {
+		if (readlinkSync(preDst) === source) {
+			result.noop += 1;
+			return result;
+		}
+		rmSync(preDst, { force: true });
+		mkdirSync(hooksDir, { recursive: true });
+		symlinkSync(source, preDst);
+		if (opts.trackFile) appendFileSync(opts.trackFile, `${preDst}\n`);
+		if (opts.verbose) process.stdout.write(`ship-ext: refreshed pre -> ${source}\n`);
+		result.changed += 1;
+		return result;
+	}
+
+	if (st !== null) {
+		if (!st.isDirectory() || !isEmptyDirectory(preDst)) {
+			if (opts.verbose) process.stdout.write("ship-ext: skip real pre hooks conflict\n");
+			result.skipped += 1;
+			return result;
+		}
+		rmdirSync(preDst);
+	}
+
+	mkdirSync(hooksDir, { recursive: true });
+	symlinkSync(source, preDst);
+	if (opts.trackFile) appendFileSync(opts.trackFile, `${preDst}\n`);
+	if (opts.verbose) process.stdout.write(`ship-ext: linked pre -> ${source}\n`);
+	result.changed += 1;
 	return result;
 }

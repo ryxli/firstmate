@@ -34,6 +34,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
 	realpathSync,
 	rmSync,
 	rmdirSync,
@@ -45,7 +46,7 @@ import { fileURLToPath } from "node:url";
 import { ensureMateHomeLayout } from "../lib/mate-home-layout";
 import { syncHomeSkills } from "../lib/home-skills";
 import { ensureMateMiseToml } from "../lib/mise-home";
-import { linkShipExtensions } from "../lib/ship-ext";
+import { linkShipExtensions, linkShipPreHooks } from "../lib/ship-ext";
 import { identityValue, assertIdentityDisplayName } from "../lib/identity";
 import { parseSecondmateRegistryLine } from "../lib/secondmate-registry";
 
@@ -115,6 +116,14 @@ function isFile(path: string): boolean {
 function isSymlinkPath(path: string): boolean {
 	try {
 		return lstatSync(path).isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+function isEmptyRealDirectory(path: string): boolean {
+	try {
+		const st = lstatSync(path);
+		return st.isDirectory() && readdirSync(path).length === 0;
 	} catch {
 		return false;
 	}
@@ -690,6 +699,9 @@ interface SeedState {
 	createdExtLinksFile: string;
 	createdSkillArtifactsFile: string;
 	extDstExisted: boolean;
+	ompDirExisted: boolean;
+	hooksDirExisted: boolean;
+	preHooksEmptyDirExisted: boolean;
 	skillsDirExisted: boolean;
 	ompYmlExisted: boolean;
 	parentRegExisted: boolean;
@@ -832,6 +844,14 @@ function rollback(ctx: Ctx, state: SeedState): void {
 					// best-effort
 				}
 			}
+			const preHooksPath = join(state.home, ".omp", "hooks", "pre");
+			if (state.preHooksEmptyDirExisted) {
+				try {
+					mkdirSync(preHooksPath);
+				} catch {
+					// best-effort restore
+				}
+			}
 			for (const path of readTrackedPaths(state.createdSkillArtifactsFile)) {
 				try {
 					rmSync(path, { force: true, recursive: true });
@@ -859,6 +879,15 @@ function rollback(ctx: Ctx, state: SeedState): void {
 				} catch {
 					// non-empty or already gone; ignore
 				}
+			}
+			if (!state.hooksDirExisted) {
+				try {
+					rmdirSync(join(state.home, ".omp", "hooks"));
+				} catch {
+					// non-empty or already gone; ignore
+				}
+			}
+			if (!state.ompDirExisted) {
 				try {
 					rmdirSync(join(state.home, ".omp"));
 				} catch {
@@ -931,6 +960,9 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 		createdExtLinksFile: join(backupDir, "created-ext-links"),
 		createdSkillArtifactsFile: join(backupDir, "created-skill-artifacts"),
 		extDstExisted: false,
+		ompDirExisted: false,
+		hooksDirExisted: false,
+		preHooksEmptyDirExisted: false,
 		skillsDirExisted: false,
 		ompYmlExisted: false,
 		parentRegExisted: false,
@@ -1002,11 +1034,23 @@ function seedHome(ctx: Ctx, id: string, requestedHome: string, projects: string[
 		}
 		state.homeBackedUp = true;
 
+		const ompPath = join(home, ".omp");
+		const hooksPath = join(ompPath, "hooks");
+		const preHooksPath = join(hooksPath, "pre");
+		state.ompDirExisted = isDir(ompPath);
+		state.hooksDirExisted = isDir(hooksPath);
+		state.preHooksEmptyDirExisted = isEmptyRealDirectory(preHooksPath);
 		const extSrc = join(CANONICAL_ROOT, ".omp", "extensions");
 		const extResult = linkShipExtensions(home, extSrc, { verbose: false, trackFile: state.createdExtLinksFile });
 		state.extDstExisted = extResult.dstExisted;
-		mkdirSync(join(home, ".omp"), { recursive: true });
-		state.skillsDirExisted = existsSync(join(home, ".omp", "skills"));
+		const preResult = linkShipPreHooks(home, join(CANONICAL_ROOT, ".omp", "hooks", "pre"), {
+			verbose: false,
+			trackFile: state.createdExtLinksFile,
+		});
+		if (preResult.srcMissing) fail(`error: canonical pre hooks missing at ${join(CANONICAL_ROOT, ".omp", "hooks", "pre")}`);
+		if (preResult.skipped > 0) fail(`error: pre-hook conflict at ${preHooksPath}`);
+		mkdirSync(ompPath, { recursive: true });
+		state.skillsDirExisted = existsSync(join(ompPath, "skills"));
 		state.ompYmlExisted = existsSync(join(home, "config", "omp.yml"));
 		const miseResult = ensureMateMiseToml(home, true);
 		if (miseResult.status.startsWith("blocked:")) fail(`error: unable to seed mise config at ${miseResult.path}: ${miseResult.status}`);
