@@ -28,7 +28,14 @@ pass() { printf 'ok - %s\n' "$1"; }
 # shapes match against (rootSession decl, activateRootSession's hasUI gate,
 # session_start/session_switch/agent_start, and the four tool hooks).
 write_pristine_fixture() {
+  # OMP's SessionShutdownEvent currently has only `type`; @ts-nocheck mirrors
+  # Herdr's vendor source, whose obsolete reason gate is still runtime-valid.
   cat >"$1" <<'TS'
+// @ts-nocheck
+interface SessionShutdownEvent {
+  type: "session_shutdown";
+}
+
 interface HeartbeatCtx {
   hasUI?: boolean;
   isIdle?: () => boolean;
@@ -81,6 +88,9 @@ export default function register(pi: PiHandle): void {
   function clearFailureState(): void {
     calls.push("clearFailureState");
   }
+  function releaseHerdrLifecycleAuthority(): void {
+    calls.push("releaseHerdrLifecycleAuthority");
+  }
 
   pi.__test = {
     getAgentActive: () => agentActive,
@@ -89,6 +99,12 @@ export default function register(pi: PiHandle): void {
   };
 
   let rootSession = false;
+
+  // This is the v6 vendor helper. SessionShutdownEvent has no `reason`, so the
+  // old gate is unreachable even though AgentSession.dispose emits final teardown.
+  function shouldReleaseOnSessionShutdown(event: SessionShutdownEvent): boolean {
+    return event.reason === "quit";
+  }
 
   // ctx: any (not HeartbeatCtx) is mandatory here: sbin/fm-patch-herdr-omp.sh
   // matches this signature byte-exact against herdr's real, un-typed
@@ -136,6 +152,12 @@ export default function register(pi: PiHandle): void {
   pi.on("agent_end", (_event, ctx) => {
     agentActive = false;
     publishState();
+  });
+
+  pi.on("session_shutdown", (event, _ctx) => {
+    if (shouldReleaseOnSessionShutdown(event)) {
+      releaseHerdrLifecycleAuthority();
+    }
   });
 
   pi.on("tool_approval_requested", (event, ctx) => {
@@ -208,6 +230,95 @@ test_apply_is_idempotent() {
   printf '%s' "$out" | grep -q "already patched" || fail "second apply must report already patched, got: $out"
   [ "$(cat "$f")" = "$before" ] || fail "second apply must not modify an already-patched file"
   pass "re-applying to an already-patched file is a no-op"
+}
+
+test_session_shutdown_releases_without_reason_and_upgrades_old_gate() {
+  command -v bun >/dev/null 2>&1 \
+    || fail "bun is required for the session_shutdown release regression"
+
+  local fixture="$TMP_ROOT/session-shutdown-release.ts"
+  local harness="$TMP_ROOT/session-shutdown-release-harness.mjs"
+  write_pristine_fixture "$fixture"
+  "${PATCHER[@]}" --file "$fixture" >/dev/null \
+    || fail "initial session_shutdown release apply failed"
+  "${PATCHER[@]}" --check --file "$fixture" \
+    || fail "--check rejected the patched session_shutdown release helper"
+
+  cat >"$harness" <<'MJS'
+const fixturePath = process.argv[2];
+const handlers = new Map();
+const pi = { on(event, fn) { handlers.set(event, fn); return pi; } };
+const originalSetInterval = globalThis.setInterval;
+globalThis.setInterval = () => ({ unref() {} });
+const mod = await import(fixturePath);
+mod.default(pi);
+globalThis.setInterval = originalSetInterval;
+
+const shutdownEvent = { type: "session_shutdown" };
+if ("reason" in shutdownEvent) {
+  console.error("FAIL: test event unexpectedly contains a shutdown reason");
+  process.exit(1);
+}
+handlers.get("session_shutdown")?.(shutdownEvent, {});
+if (!pi.__test.getCalls().includes("releaseHerdrLifecycleAuthority")) {
+  console.error(`FAIL: reasonless session_shutdown did not release Herdr lifecycle authority: ${JSON.stringify(pi.__test.getCalls())}`);
+  process.exit(1);
+}
+console.log("PASS: a reasonless OMP session_shutdown releases Herdr lifecycle authority");
+MJS
+
+  local out
+  out=$(bun run "$harness" "$fixture" 2>&1)
+  local rc=$?
+  [ "$rc" -eq 0 ] || fail "reasonless session_shutdown release regressed: $out"
+  printf '%s' "$out" | grep -q "^PASS" \
+    || fail "session_shutdown release harness did not report PASS: $out"
+
+  # Recreate the previously lifecycle-patched v6 helper with its unreachable
+  # reason gate. The new integrity check must reject it and apply must converge.
+  python3 - "$fixture" <<'PY' || fail "could not restore the old session_shutdown reason gate"
+import io, re, sys
+
+path = sys.argv[1]
+src = io.open(path, encoding="utf-8").read()
+release_re = re.compile(
+    r'(?m)^(?P<indent>[ \t]*)// fm-session-shutdown-release-all: [^\n]*\n'
+    r'(?P=indent)return true;'
+)
+src, count = release_re.subn(
+    lambda match: f'{match.group("indent")}return event.reason === "quit";',
+    src,
+    count=1,
+)
+if count != 1:
+    raise SystemExit(f"expected one patched session_shutdown helper, found {count}")
+io.open(path, "w", encoding="utf-8").write(src)
+PY
+
+  "${PATCHER[@]}" --check --file "$fixture"
+  rc=$?
+  [ "$rc" -eq 1 ] || fail "--check accepted the old session_shutdown reason gate, got $rc"
+  "${PATCHER[@]}" --file "$fixture" >/dev/null \
+    || fail "apply did not remediate the old session_shutdown reason gate"
+  "${PATCHER[@]}" --check --file "$fixture" \
+    || fail "--check rejected the remediated session_shutdown release helper"
+
+  local before
+  before=$(cat "$fixture")
+  out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+  rc=$?
+  [ "$rc" -eq 0 ] || fail "repeat apply after session_shutdown remediation failed, got $rc"
+  printf '%s' "$out" | grep -q "already patched" \
+    || fail "repeat apply after session_shutdown remediation was not a no-op: $out"
+  [ "$(cat "$fixture")" = "$before" ] \
+    || fail "repeat apply after session_shutdown remediation modified the file"
+
+  out=$(bun run "$harness" "$fixture" 2>&1)
+  rc=$?
+  [ "$rc" -eq 0 ] || fail "remediated reasonless session_shutdown release regressed: $out"
+  printf '%s' "$out" | grep -q "^PASS" \
+    || fail "remediated session_shutdown release harness did not report PASS: $out"
+  pass "reasonless session_shutdown release is checked, remediated from the old gate, and idempotent"
 }
 test_patch_check_requires_publish_guard_at_publish_state() {
   local fixture="$TMP_ROOT/missing-publish-guard.ts"
@@ -1364,6 +1475,7 @@ test_pristine_check_reports_unpatched
 test_apply_enforces_invariant
 test_patch_check_requires_publish_guard_at_publish_state
 test_apply_is_idempotent
+test_session_shutdown_releases_without_reason_and_upgrades_old_gate
 test_upgrade_from_prior_buggy_heartbeat_converges
 test_upgrade_from_v3_resume_gate_converges
 test_upgrade_from_actual_parent_7a20f3d

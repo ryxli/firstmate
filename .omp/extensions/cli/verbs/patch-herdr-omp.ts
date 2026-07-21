@@ -67,6 +67,7 @@ import { spawnSync } from "node:child_process";
 const MARKER = "fm-resync-heartbeat";
 const PATCH_MARKER = "fm-resync-heartbeat-lifecycle-invariant";
 const ROOT_CLAIM_MARKER = "fm-exact-root-session-claim-v5";
+const SESSION_SHUTDOWN_RELEASE_MARKER = "fm-session-shutdown-release-all";
 
 const HELP = `# fm-patch-herdr-omp.sh - patch the herdr-managed omp status integration to
 # self-heal a stuck agent_status.
@@ -110,9 +111,34 @@ const HELP = `# fm-patch-herdr-omp.sh - patch the herdr-managed omp status integ
 // approximation of Python's regex semantics.
 const PATCH_PY = `import io, re, sys
 
-path, resync_ms, marker, patch_marker, root_claim_marker, mode = sys.argv[1:7]
+path, resync_ms, marker, patch_marker, root_claim_marker, session_shutdown_release_marker, mode = sys.argv[1:8]
 src = io.open(path, encoding="utf-8").read()
 
+
+# OMP's current SessionShutdownEvent has only a type field; it does not include a
+# reason. Keep this intentionally narrow to the vendor helper so older source
+# fixtures that predate the helper remain patchable.
+session_shutdown_helper_signature_re = re.compile(
+    r'function shouldReleaseOnSessionShutdown\\(',
+)
+session_shutdown_helper_re = re.compile(
+    r'(?P<signature>(?P<indent>[ \\t]*)function shouldReleaseOnSessionShutdown\\([^)]*\\)'
+    r'(?:\\s*:\\s*[^{\\n]+)?\\s*\\{\\n)'
+    r'(?P<body>[^{}]*?)'
+    r'(?P<close>\\n(?P=indent)\\})',
+)
+
+def has_session_shutdown_release_invariant(text: str) -> bool:
+    if session_shutdown_helper_signature_re.search(text) is None:
+        return True
+    match = session_shutdown_helper_re.search(text)
+    if match is None:
+        return False
+    body = match.group("body")
+    return (
+        session_shutdown_release_marker in body and
+        re.search(r'\\breturn\\s+true\\s*;', body) is not None
+    )
 publish_state_re = re.compile(
     r'  function publishState\\(force = false\\)(?:: [^{]+)? \\{\\n'
 )
@@ -157,6 +183,8 @@ def is_patched(text: str) -> bool:
     is_patched.missing = [item for item in required if item not in text]
     if not has_publish_guard(text):
         is_patched.missing.append("publishState guard")
+    if not has_session_shutdown_release_invariant(text):
+        is_patched.missing.append("session_shutdown release invariant")
     return not is_patched.missing
 if mode == "check":
     sys.exit(0 if is_patched(src) else 1)
@@ -164,6 +192,27 @@ if mode == "check":
 if is_patched(src):
     sys.stderr.write(f"already patched: {path}\\n")
     sys.exit(0)
+
+# Current OMP session_shutdown events carry no reason and AgentSession.dispose
+# emits them only during final process teardown. Release Herdr authority on all
+# such events instead of retaining the obsolete reason-equals-quit gate.
+if session_shutdown_helper_signature_re.search(src) is not None:
+    session_shutdown_match = session_shutdown_helper_re.search(src)
+    if session_shutdown_match is None:
+        sys.stderr.write("error: shouldReleaseOnSessionShutdown helper shape changed\\n")
+        sys.exit(3)
+    session_shutdown_indent = session_shutdown_match.group("indent")
+    session_shutdown_replacement = (
+        session_shutdown_match.group("signature")
+        + f"{session_shutdown_indent}  // {session_shutdown_release_marker}: current OMP session_shutdown events carry no reason and are emitted only by final AgentSession.dispose.\\n"
+        + f"{session_shutdown_indent}  return true;"
+        + session_shutdown_match.group("close")
+    )
+    src = (
+        src[:session_shutdown_match.start()]
+        + session_shutdown_replacement
+        + src[session_shutdown_match.end():]
+    )
 
 # Remove any prior heartbeat block from an older patcher version before inserting
 # the current block. This lets the patcher upgrade an already-patched live file.
@@ -648,7 +697,16 @@ async function run(argv: string[]): Promise<number> {
 	const resyncMs = process.env.FM_HERDR_RESYNC_MS || "15000";
 	const res = spawnSync(
 		"python3",
-		["-", target, resyncMs, MARKER, PATCH_MARKER, ROOT_CLAIM_MARKER, mode],
+		[
+			"-",
+			target,
+			resyncMs,
+			MARKER,
+			PATCH_MARKER,
+			ROOT_CLAIM_MARKER,
+			SESSION_SHUTDOWN_RELEASE_MARKER,
+			mode,
+		],
 		{ input: PATCH_PY, encoding: "utf8", stdio: ["pipe", "inherit", "inherit"] },
 	);
 	if (res.error) {
