@@ -50,14 +50,18 @@ describe("runtime role contracts", () => {
 			expect(mainRoleContract({ home: fallbackMain })).toContain("name: firstmate\nkind: firstmate");
 			expect(mainRoleContract({ home: main })).toContain("You are Keel, the first mate reporting to the cap.");
 			expect(mainRoleContract({ home: main })).toContain("name: Keel\nkind: firstmate");
+			expect(mainRoleContract({ home: main })).toContain("never echo worker status the cap already received directly");
 			expect(roleContractForHome(main)).toContain("name: Keel\nkind: firstmate");
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("You are Kodiak, a secondmate reporting to Keel.");
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("id: kodiak\nname: Kodiak\nkind: secondmate\nreports_to: Keel");
 			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("routing_scope: frontend and design routing");
+			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("respond directly to the cap present in this lane; do not relay routine status or seek firstmate approval");
+			expect(secondmateRoleContract({ home: kodiak, mainHome: main })).toContain("escalate_to_firstmate: only a material routing conflict");
 			expect(roleContractForHome(plum, main)).toContain("id: plum\nname: Plum\nkind: secondmate\nreports_to: Keel");
 			expect(roleContractForHome(plum, main)).toContain("routing_scope: legacy evidence only");
 			expect(crewRoleContract({ home: main, mainHome: main, crewId: "fix-bug", launchingSupervisor: "Keel" })).toContain("You are a crew agent assigned to fix-bug, reporting to Keel.");
 			expect(crewRoleContract({ home: main, mainHome: main, crewId: "fix-bug", launchingSupervisor: "Keel" })).toContain("id: fix-bug\nkind: crew\nreports_to: Keel");
+			expect(crewRoleContract({ home: main, mainHome: main, crewId: "fix-bug", launchingSupervisor: "Keel" })).toContain("respond directly to the cap present in this lane; do not relay routine status or seek supervisor approval");
 		} finally {
 			rmSync(fallbackMain, { recursive: true, force: true });
 			rmSync(main, { recursive: true, force: true });

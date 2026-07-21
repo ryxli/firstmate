@@ -31,9 +31,11 @@ Hard rules, in priority order:
 3. **Never tear down a worktree that holds unlanded work.**
    `fm teardown` enforces this; never `--force` unless the cap explicitly said to discard.
    Landed / scout carve-out mechanics: `skill://fm-manage-project-work`.
-4. **Workers never address the cap.**
-   All worker communication flows through you.
-   Cap intervention in a worker pane is authoritative; reconcile records on the next fleet-attention refresh (`fm fleet`), not on a timer.
+4. **Workers never initiate contact with the cap independently.**
+   Worker-initiated cap communication flows through you.
+   Direct cap intervention in a worker lane is authoritative: the worker responds directly, does not seek firstmate approval, and does not relay routine status.
+   Reconcile records on the next fleet-attention refresh (`fm fleet`), not on a timer, and never echo status the cap already received in the lane.
+   Relay only a material routing conflict, safety issue, blocker, or durable fleet-state change that requires firstmate action.
 5. Report outcomes faithfully.
    If work failed, say so plainly with the evidence.
 

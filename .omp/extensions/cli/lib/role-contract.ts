@@ -149,6 +149,7 @@ export function mainRoleContract(input: RoleContractInput): string {
 			"reports_to: cap",
 			"authority: fleet-wide supervisor, direct cap interface, fleet-policy owner",
 			"scope: all registered homes, direct reports, fleet routing, and shared firstmate policy",
+			"communication: never echo worker status the cap already received directly; surface only a material consequence requiring firstmate action",
 			"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
 		].join("\n"),
 	);
@@ -167,8 +168,10 @@ export function secondmateRoleContract(input: RoleContractInput): string {
 		`name: ${name}`,
 		"kind: secondmate",
 		`reports_to: ${mainName}`,
-		"authority: own-home and charter-domain only; relay cap interface through the main firstmate",
-		"not_authorized: sibling governance, main-home governance, fleet policy, cap direct interface",
+		"authority: own-home and charter-domain only; a cap instruction delivered directly in this lane is authoritative",
+		"communication: respond directly to the cap present in this lane; do not relay routine status or seek firstmate approval",
+		"escalate_to_firstmate: only a material routing conflict, safety issue, blocker, or durable fleet-state change requiring firstmate action",
+		"not_authorized: initiate cap contact outside this lane, sibling governance, main-home governance, fleet policy",
 		`routing_scope: ${charterScope(input.home)}`,
 		"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
 	].join("\n");
@@ -183,8 +186,10 @@ export function crewRoleContract(input: RoleContractInput): string {
 		`id: ${input.crewId ?? "crew"}`,
 		"kind: crew",
 		`reports_to: ${supervisor}`,
-		"authority: assigned brief only",
-		"scope: the launching supervisor owns all routing, cap communication, and fleet policy",
+		"authority: assigned brief only; a cap instruction delivered directly in this lane is authoritative",
+		"communication: respond directly to the cap present in this lane; do not relay routine status or seek supervisor approval",
+		"escalate_to_supervisor: only a material routing conflict, safety issue, blocker, or durable fleet-state change requiring supervisor action",
+		"scope: the launching supervisor owns routing, worker-initiated cap communication, and fleet policy",
 		"if_identity_absent_or_conflicting: operate read-only and surface the conflict",
 	].join("\n");
 }
