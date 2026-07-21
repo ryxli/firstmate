@@ -195,6 +195,11 @@ export default function whiteboard(pi: ExtensionAPI) {
 	const z = pi.zod;
 	const lastReads = new Map<string, string>();
 	const loops = new Map<string, LoopRuntime>();
+	const whiteboardToolNames = ["whiteboard_read", "whiteboard_write", "whiteboard_checkpoint"];
+	const setWhiteboardToolsActive = async (active: boolean): Promise<void> => {
+		const nonWhiteboardTools = pi.getActiveTools().filter(name => !whiteboardToolNames.includes(name));
+		await pi.setActiveTools(active ? [...nonWhiteboardTools, ...whiteboardToolNames] : nonWhiteboardTools);
+	};
 	const loopMinMs = Number(process.env.WB_LOOP_MIN_MS) || 15000;
 	const loopMaxMs = Number(process.env.WB_LOOP_MAX_MS) || 300000;
 	let statusUi: { setStatus?: (key: string, text: string | undefined) => void } | undefined;  // footer status handle captured from a command ctx (undefined in print/RPC)
@@ -441,7 +446,11 @@ export default function whiteboard(pi: ExtensionAPI) {
 	};
 
 	const stopAllLoops = (): void => { for (const runtime of loops.values()) stopLoop(runtime); };
-	const resetAllLoops = (): void => { stopAllLoops(); loops.clear(); };
+	const resetAllLoops = async (): Promise<void> => {
+		stopAllLoops();
+		loops.clear();
+		await setWhiteboardToolsActive(false);
+	};
 
 	const openEditor = async (ctx, filePath: string) => {
 		try {
@@ -524,6 +533,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 				// Toggle: disable if the loop is already enabled.
 				if (runtime.enabled) {
 					stopLoop(runtime);
+					await setWhiteboardToolsActive([...loops.values()].some(other => other.enabled || other.pendingTickId !== undefined || other.activeTickId !== undefined));
 					notify(ctx, "loop disabled for this session");
 					return;
 				}
@@ -535,6 +545,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 				if (current.trim() === "") {
 					board.replace(SKELETON, runtime.boardPath);
 				}
+				await setWhiteboardToolsActive(true);
 				runtime.enabled = true;
 				runtime.consecutiveTurns = 0;
 				runtime.idleStreak = 0;
@@ -552,7 +563,9 @@ export default function whiteboard(pi: ExtensionAPI) {
 				// Manual one-shot turn. "tick now" / "tick!" delivers as a steer that interrupts the current
 				// turn instead of waiting for it to finish (the default nextTurn queues until the turn ends).
 				const interrupt = rawVerb === "tick!" || ["now", "interrupt", "!", "steer"].includes((tokens[1] ?? "").toLowerCase());
-				queueLoopTick(identity, ctx, interrupt ? "manual tick (interrupt)" : "manual tick", interrupt ? "steer" : "nextTurn");
+				await setWhiteboardToolsActive(true);
+				const queued = queueLoopTick(identity, ctx, interrupt ? "manual tick (interrupt)" : "manual tick", interrupt ? "steer" : "nextTurn");
+				if (!queued) await setWhiteboardToolsActive([...loops.values()].some(runtime => runtime.enabled || runtime.pendingTickId !== undefined || runtime.activeTickId !== undefined));
 				return;
 			}
 
@@ -629,7 +642,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 		activatePendingTick(content);
 	});
 
-	pi.on?.("agent_end", event => {
+	pi.on?.("agent_end", async event => {
 		const now = _now();
 		const lastAssistant = [...(event?.messages ?? [])].reverse().find(m => m.role === "assistant");
 		const wasAborted = lastAssistant?.stopReason === "aborted";
@@ -685,6 +698,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 			emitMetric(runtime, runtime.lastOutcome ?? "no-progress");
 			setLoopStatus(runtime);
 		}
+		await setWhiteboardToolsActive([...loops.values()].some(runtime => runtime.enabled || runtime.pendingTickId !== undefined || runtime.activeTickId !== undefined));
 	});
 
 	pi.on?.("session_switch", resetAllLoops);
@@ -697,6 +711,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 		name: "whiteboard_read",
 		label: "Whiteboard Read",
 		description: "Read the current whiteboard. Default returns a diff since this session's last read; pass mode:\"full\" for the complete numbered board.",
+		defaultInactive: true,
 		parameters: z.object({
 			mode: z.enum(["auto", "diff", "full"]).optional().describe("auto/diff returns changes since the last read; full returns the complete numbered board"),
 		}),
@@ -725,6 +740,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 		name: "whiteboard_write",
 		label: "Whiteboard Write",
 		description: "Atomically replace the entire whiteboard with new content (full-board replace via board.replace).",
+		defaultInactive: true,
 		parameters: z.object({
 			text: z.string().describe("Full replacement content"),
 		}),
@@ -751,6 +767,7 @@ export default function whiteboard(pi: ExtensionAPI) {
 		name: "whiteboard_checkpoint",
 		label: "Whiteboard Checkpoint",
 		description: "Record the outcome of this board-conversation turn. progress self-continues (when autonomy on and under max_turns); settled/needs-decision/blocked/error rest and wait for the next cap edit.",
+		defaultInactive: true,
 		parameters: z.object({
 			outcome: z.enum(["progress", "settled", "needs-decision", "blocked", "error"]).describe("Turn outcome"),
 			summary: z.string().describe("One-sentence summary"),

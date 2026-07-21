@@ -9,33 +9,17 @@ description: >-
 
 Judgment for OMP subagents, persistent secondmates, and visible FM workers.
 Demand-load from `skill://fm-manage-project-work` or when supervising parallel lanes.
-Authoritative live state is the fresh `fm fleet` view derived from Herdr inventory and the current backlog, artifacts, status/meta records, and registered homes; the whiteboard is a derived operator view, never pane memory.
+Authoritative live state is the fresh `fm fleet` view derived from Herdr inventory and durable task records.
 
-## Whiteboard write gate
+## Whiteboard opt-in
 
-Write the board only when lane state, evidence, disposition, decision, or wake condition changes.
+A whiteboard is active only after the cap or operator explicitly invokes `/wb loop`, `/wb tick`, or `/wb tick!` in that session.
+Tool registration or tool presence is never enablement.
+When inactive, never call `whiteboard_read`, `whiteboard_write`, or `whiteboard_checkpoint`, and never maintain a board as a side effect of supervision.
 
-- Duplicate reviewer completion → no write
-- No-op system notice → no write
-- New rejection → one write with the new disposition
-- Worker working → ready → one write
-- Changed wake condition only → one write
-- Cap decision → one write
-- After a real transition, prior accepted state remains (monotonic)
-
-## Operator view
-
-Every board begins with a cap-first band; without it the board is non-compliant.
-
-```
-## OPERATOR VIEW
-🟢|🟡|🔴|🔵 <one plain-language line per active lane>   (hard cap: 8 lines)
-⚠ Needs cap: <decision or "nothing">
-→ For supervisor: <handoff/ask or "nothing">
-```
-
-Plain language only in the operator view.
-Load-bearing safety claims need a timestamped evidence line naming the exact read-only command that produced them.
+When active, write only when lane state, evidence, disposition, decision, or wake condition changes.
+Duplicate completion and no-op notices do not justify a write.
+The board is a derived operator view, never the source of truth.
 
 ## Communication channels
 
@@ -54,7 +38,7 @@ High-blast-radius steps get a named fresh-context reviewer; REJECT relays the mi
 
 ## Terminal events
 
-A terminal event (`done`, `blocked`, `needs-decision`, `failed`, material phase change) is a same-turn obligation: read the named artifact, take the lifecycle action, write the resulting board state when it changed.
+A terminal event (`done`, `blocked`, `needs-decision`, `failed`, material phase change) is a same-turn obligation: read the named artifact and take the lifecycle action; update a whiteboard only when that session explicitly enabled it.
 A claim with no named artifact is invalid.
 
 ## Escalation

@@ -197,6 +197,8 @@ describe("fm verb help contract", () => {
 					afterFp: after,
 				});
 				expect(out.stdout).toMatch(/project-dir|worktree|crewmate|task-id/i);
+				expect(out.stdout).toContain("--visible");
+				expect(out.stdout).toMatch(/OMP Task delivery/i);
 				expect(out.stdout).toMatch(/secondmate/);
 				expect(out.stdout).not.toContain("data/--help/brief.md");
 				expect(out.stdout).not.toContain("data/-h/brief.md");

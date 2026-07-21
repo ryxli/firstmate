@@ -87,7 +87,7 @@ export function commandHelp(command = "fm"): Record<string, unknown> {
 			command: "fm",
 			usage: "fm <command> …",
 			workflow: [
-				cmd("fm spawn …", "Dispatch a worker."),
+				cmd("fm spawn …", "Prepare isolated background work; add --visible for a Herdr worker."),
 				cmd("fm peek <mate>", "Inspect current progress."),
 				cmd("fm send <mate> …", SEND_DESCRIBE),
 				cmd("fm accept <task>", "Approve the candidate."),
@@ -98,7 +98,7 @@ export function commandHelp(command = "fm"): Record<string, unknown> {
 					name: "Dispatch",
 					commands: [
 						cmd("brief", "Scaffold a crewmate brief or secondmate charter."),
-						cmd("spawn", "Spawn a crewmate or secondmate."),
+						cmd("spawn", "Prepare a background task or explicitly spawn a visible worker/secondmate."),
 						cmd("tasks", "Manage the backlog and live fleet tasks."),
 					],
 				},

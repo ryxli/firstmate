@@ -4,7 +4,8 @@ A board-as-conversation loop for named agent sessions.
 
 The board is a shared, free-form markdown file that is the primary channel between the cap and the agent.
 The cap edits it in nvim; the agent reads the diff and replies by editing the board.
-Loop state is session-local: enable it with `/wb loop` in each named agent session; it is not persisted across sessions.
+Loop state and agent tools are session-local and inactive by default.
+`/wb loop`, `/wb tick`, or `/wb tick!` explicitly activates the tools for the requested work; ordinary `/wb` view/edit/status commands do not.
 
 ## Board format
 
@@ -40,11 +41,15 @@ These are cap-facing quick edits over `board.removeLines`/`replaceRange`/`replac
 
 ## Agent tools
 
-Exactly three tools are registered:
+Exactly three tools are registered with `defaultInactive: true`, so their schemas are absent from the initial model prompt:
 
 - **`whiteboard_read`** - read the board; default returns a diff since last read; `mode:"full"` returns the complete numbered board.
 - **`whiteboard_write`** - atomically replace the entire board (uses `board.replace`); updates the session's last-read snapshot.
 - **`whiteboard_checkpoint`** - record the turn outcome; drives the loop continuation decision.
+
+`/wb loop` activates all three until toggled off.
+`/wb tick` and `/wb tick!` activate them only for the queued one-shot turn, then remove them from the active set unless another loop or tick still needs them.
+Activation and deactivation preserve every unrelated active tool.
 
 Checkpoint outcomes: `progress` | `settled` | `needs-decision` | `blocked` | `error`.
 

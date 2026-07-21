@@ -175,6 +175,14 @@ make_project() {
 
 run_spawn() {
   local home=$1 fakebin=$2; shift 2
+  local visible_arg=--visible
+  local arg
+  for arg in "$@"; do
+    if [ "$arg" = --secondmate ]; then
+      visible_arg=
+      break
+    fi
+  done
   : > "$home/herdr.log"
   rm -f "$home/command.log"
   PATH="$fakebin:$PATH" \
@@ -183,7 +191,7 @@ run_spawn() {
     FM_FAKE_HERDR_LOG="$home/herdr.log" \
     FM_FAKE_COMMAND_LOG="$home/command.log" \
     FM_HUSK_REAP_SETTLE=0 \
-    "$SPAWN" spawn "$@" >/dev/null
+    "$SPAWN" spawn "$@" ${visible_arg:+"$visible_arg"} >/dev/null
 }
 
 captured_command() {

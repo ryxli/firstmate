@@ -14,10 +14,11 @@ Backlog command details: `fm tasks --help` (do not restate here).
 ## Classification and routing
 
 Resolve the project independently every request, then secondmate scope from `data/secondmates.md`.
-Bounded routine research and repo-local harness work default to OMP background subagents through the `task` tool.
-Persistent secondmates own domain routing, judgment, integration, and exceptional stateful work; they should delegate bounded execution to OMP subagents when authority and delivery isolation are preserved.
-Project code changes use OMP subagents only on an isolated delivery surface; otherwise use an FM ship worker. Use a visible FM worker only when the cap requests one or the work needs durable interactive state and recovery.
-When FM is required, changes use ship tasks and read-only work uses scout tasks (report at `data/<id>/report.md`).
+Bounded work defaults to OMP background subagents through the `task` tool.
+For project writes: create the brief, run pane-free `fm spawn` to prepare the isolated worktree and lifecycle metadata, then immediately dispatch the task agent into the printed worktree.
+Persistent secondmates retain domain routing and exceptional stateful work and remain visible; use `fm spawn --visible` for disposable workers only when the cap requests visibility or durable interactive recovery.
+Task completion is not acceptance or landing: preserve the existing `fm accept` then `fm finish` gates.
+When a visible FM worker is required, changes use ship tasks and read-only work uses scout tasks (report at `data/<id>/report.md`).
 `trunk` never routes to a secondmate; only `pr` projects do.
 Serialize overlapping repo areas; otherwise parallelize.
 Once the cap freezes scope, every active and queued thread must trace to that set; newly observed symptoms are evidence within an existing thread until a verified causal chain proves otherwise.

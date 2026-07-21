@@ -9,13 +9,12 @@
 // (verbs/tasks.ts) - the single executable task system - never an external
 // tool probe.
 //
-// Usage: fm spawn <task-id> <project-dir> [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>] [--crew-model=<model>]
+// Usage: fm spawn <task-id> <project-dir> [--scout]
+//        fm spawn <task-id> <project-dir> --visible [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>] [--crew-model=<model>]
 //        fm spawn <task-id> [<firstmate-home>] --secondmate [--workspace=<id>] [--tab=<id>]
-//   With no harness arg, ship/scout harness comes from fm harness crew
-//   (config/crew-harness, falling back to firstmate's own harness). A bare
-//   adapter name (omp|claude|codex|opencode|pi) overrides it for this spawn.
-//   A non-flag string containing whitespace is treated as a RAW launch command
-//   for ship/scout. Secondmates always launch through their home-local fm start.
+//   Visible ship/scout workers use config/crew-harness unless a bare adapter
+//   name (omp|claude|codex|opencode|pi) or raw launch command overrides it.
+//   Secondmates always launch through their home-local fm start.
 //   --scout records kind=scout in the task's meta (report deliverable, scratch worktree;
 //   see AGENTS.md section 6); --secondmate records kind=secondmate and launches in a
 //   provisioned firstmate home; the default is kind=ship.
@@ -24,11 +23,13 @@
 //   Each pair re-execs `sbin/fm spawn` in single-task mode.
 //
 // Worktrees are created with `git worktree add` at $FM_WORKTREE_BASE/<id>
-// (default: $FM_HOME/worktrees/<id>). herdr agent start launches the crewmate
-// directly in the worktree directory. herdr tracks agent status natively, so
-// no per-harness turn-end hook files are installed.
+// (default: $FM_HOME/worktrees/<id>). Ship and scout tasks are prepared for
+// OMP Task delivery by default. `--visible` instead launches the crewmate in a
+// Herdr pane directly in the worktree directory. Secondmates remain visible.
 //
-// On success prints:
+// On success prints either:
+//   prepared <id> delivery=omp-task kind=<ship|scout> mode=<mode> yolo=<on|off> worktree=<path> brief=<path>
+// or, for visible workers:
 //   spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> pane=<pane-id> worktree=<path>
 
 import { spawnSync } from "node:child_process";
@@ -119,6 +120,8 @@ interface ParsedArgs {
 	workspace: string;
 	tab: string;
 	crewModel: string;
+	crewModelExplicit: boolean;
+	visible: boolean;
 	pos: string[];
 }
 
@@ -130,6 +133,8 @@ function parseArgs(args: string[]): ParsedArgs | { error: string } {
 	let workspace = envOrUndefined("FM_SPAWN_WORKSPACE") ?? "";
 	let tab = "";
 	let crewModel = envOrUndefined("FM_CREW_MODEL") ?? "";
+	let crewModelExplicit = false;
+	let visible = false;
 	const pos: string[] = [];
 
 	for (let i = 0; i < args.length; i++) {
@@ -138,6 +143,8 @@ function parseArgs(args: string[]): ParsedArgs | { error: string } {
 			kind = "scout";
 		} else if (a === "--secondmate") {
 			kind = "secondmate";
+		} else if (a === "--visible") {
+			visible = true;
 		} else if (a.startsWith("--workspace=")) {
 			workspace = a.slice("--workspace=".length);
 		} else if (a === "--workspace") {
@@ -146,10 +153,12 @@ function parseArgs(args: string[]): ParsedArgs | { error: string } {
 			workspace = args[i];
 		} else if (a.startsWith("--crew-model=")) {
 			crewModel = a.slice("--crew-model=".length);
+			crewModelExplicit = true;
 		} else if (a === "--crew-model") {
 			i += 1;
 			if (i >= args.length) return { error: "error: --crew-model requires a value" };
 			crewModel = args[i];
+			crewModelExplicit = true;
 		} else if (a.startsWith("--tab=")) {
 			tab = a.slice("--tab=".length);
 		} else if (a === "--tab") {
@@ -161,7 +170,7 @@ function parseArgs(args: string[]): ParsedArgs | { error: string } {
 		}
 	}
 
-	return { kind, workspace, tab, crewModel, pos };
+	return { kind, workspace, tab, crewModel, crewModelExplicit, visible, pos };
 }
 
 // isBatchDispatch: true when POS[0] has the `id=repo` shape (contains '=' and
@@ -180,7 +189,7 @@ function isBatchDispatch(pos: string[]): boolean {
 // mirrors the bash for-loop: a malformed pair or a --secondmate combination
 // prints its own error and sets rc, but the loop keeps going (rc is only ever
 // set, never reset, so the last-set value wins at the end).
-function runBatch(pos: string[], kind: Kind, workspace: string, crewModel: string, fmRoot: string): number {
+function runBatch(pos: string[], kind: Kind, workspace: string, crewModel: string, crewModelExplicit: boolean, visible: boolean, fmRoot: string): number {
 	let rc = 0;
 	for (const pair of pos) {
 		const eqIdx = pair.indexOf("=");
@@ -192,7 +201,8 @@ function runBatch(pos: string[], kind: Kind, workspace: string, crewModel: strin
 		const pairId = pair.slice(0, eqIdx);
 		const pairRepo = pair.slice(eqIdx + 1);
 		const workspaceArgs = workspace ? ["--workspace", workspace] : [];
-		const crewModelArgs = crewModel ? ["--crew-model", crewModel] : [];
+		const crewModelArgs = crewModelExplicit ? ["--crew-model", crewModel] : [];
+		const visibleArgs = visible ? ["--visible"] : [];
 
 		if (kind === "secondmate") {
 			process.stderr.write("error: batch dispatch does not support --secondmate; spawn each secondmate explicitly\n");
@@ -202,8 +212,8 @@ function runBatch(pos: string[], kind: Kind, workspace: string, crewModel: strin
 
 		const args =
 			kind === "scout"
-				? ["spawn", pairId, pairRepo, "--scout", ...workspaceArgs, ...crewModelArgs]
-				: ["spawn", pairId, pairRepo, ...workspaceArgs, ...crewModelArgs];
+				? ["spawn", pairId, pairRepo, "--scout", ...visibleArgs, ...workspaceArgs, ...crewModelArgs]
+				: ["spawn", pairId, pairRepo, ...visibleArgs, ...workspaceArgs, ...crewModelArgs];
 		const res = spawnSync(join(fmRoot, "sbin", "fm"), args, {
 			stdio: "inherit",
 			env: { ...process.env, FM_SPAWN_NO_GUARD: "1" },
@@ -823,14 +833,15 @@ async function run(argv: string[]): Promise<number> {
 		process.stderr.write(`${parsed.error}\n`);
 		return 2;
 	}
-	const { kind, tab, crewModel } = parsed;
+	const { kind, tab, crewModel, crewModelExplicit, visible: requestedVisible } = parsed;
+	const visible = kind === "secondmate" || requestedVisible;
 	let { workspace } = parsed;
 	const { pos } = parsed;
 
 	const { fmRoot, fmHome, state, data, projects, config } = resolvePaths();
 
 	if (isBatchDispatch(pos)) {
-		return runBatch(pos, kind, workspace, crewModel, fmRoot);
+		return runBatch(pos, kind, workspace, crewModel, crewModelExplicit, requestedVisible, fmRoot);
 	}
 
 	const id = pos[0];
@@ -878,6 +889,12 @@ async function run(argv: string[]): Promise<number> {
 	let launchFromTemplate = false;
 	if (kind === "secondmate") {
 		harness = "omp";
+	} else if (!visible) {
+		if (arg3 !== "" || crewModelExplicit) {
+			process.stderr.write("error: harness and --crew-model select a visible adapter; add --visible\n");
+			return 1;
+		}
+		harness = "omp-task";
 	} else if (/\s/.test(arg3)) {
 		launch = arg3;
 		harness = firstCommandWordFromRaw(launch);
@@ -898,7 +915,6 @@ async function run(argv: string[]): Promise<number> {
 		if (tmpl === null) {
 			process.stderr.write(`error: unknown harness '${harness}'; pass a raw launch command to use an unverified adapter\n`);
 			return 1;
-
 		}
 		launch = tmpl;
 		launchFromTemplate = true;
@@ -966,15 +982,17 @@ async function run(argv: string[]): Promise<number> {
 
 	// Preflight: validate harness binary and worktree base before creating anything.
 	if (kind !== "secondmate") {
-		const pre = spawnSync(join(fmRoot, "sbin", "fm"), ["resolve-spawn", projAbs, harness], { stdio: "inherit" });
+		const preflightHarness = visible ? harness : "omp";
+		const pre = spawnSync(join(fmRoot, "sbin", "fm"), ["resolve-spawn", projAbs, preflightHarness], { stdio: "inherit" });
 		if (pre.status !== 0) return pre.status ?? 1;
 	}
 
-	// Ship and scout tabs must be created in the spawning firstmate's own
-	// workspace, never whichever workspace happens to be focused. Explicit
-	// --workspace and FM_SPAWN_WORKSPACE values are deliberate overrides. This
-	// runs after preflight so a missing-binary abort surfaces its own error first.
-	if (kind !== "secondmate" && !workspace) {
+	// Visible ship and scout workers must be created in the spawning
+	// firstmate's own workspace, never whichever workspace happens to be
+	// focused. Explicit --workspace and FM_SPAWN_WORKSPACE values are
+	// deliberate overrides. This runs after preflight so a missing-binary abort
+	// surfaces its own error first.
+	if (visible && kind !== "secondmate" && !workspace) {
 		const cur = spawnSync("herdr", ["pane", "current"], { encoding: "utf8" });
 		const text = cur.status === 0 ? (cur.stdout ?? "") : "";
 		workspace = jsonGet(text, "result", "pane", "workspace_id");
@@ -1005,6 +1023,17 @@ async function run(argv: string[]): Promise<number> {
 		}
 	}
 
+	const cleanupTaskWorktree = (): void => {
+		if (kind === "secondmate" || !existsSync(wt)) return;
+		const removed = spawnSync("git", ["-C", projAbs, "worktree", "remove", "--force", wt], { stdio: "ignore" }).status === 0;
+		if (removed) return;
+		try {
+			rmSync(wt, { recursive: true, force: true });
+		} catch {
+			// Best-effort fallback after the owning git command failed.
+		}
+	};
+
 	// Per-project delivery mode + yolo flag.
 	let mode: string;
 	let yolo: string;
@@ -1021,33 +1050,74 @@ async function run(argv: string[]): Promise<number> {
 		const parts = (pm.stdout ?? "").trim().split(/\s+/);
 		mode = parts[0] ?? "trunk";
 		yolo = parts[1] ?? "off";
-		const sqBrief = shellQuote(brief);
-		launchCmd = launch.split("__BRIEF__").join(sqBrief);
-		if (launchFromTemplate && harness === "omp") {
-			if (!parseOmpLaunchCommand(launchCmd)) {
-				process.stderr.write(`error: cannot inject OMP system context into launch command for ${id}\n`);
-				return 1;
-			}
-			const contract = crewRoleContract({
-				home: projAbs,
-				mainHome: fmHome,
-				crewId: id,
-				launchingSupervisor: supervisorName(config),
-			});
-			const beforeInject = launchCmd;
-			launchCmd = injectOmpAppendSystemPrompts(launchCmd, [contract]);
-			if (launchCmd === beforeInject || !launchCmd.includes("--append-system-prompt=")) {
-				process.stderr.write(`error: OMP system-context injection failed for ${id}\n`);
-				return 1;
+		if (visible) {
+			const sqBrief = shellQuote(brief);
+			launchCmd = launch.split("__BRIEF__").join(sqBrief);
+			if (launchFromTemplate && harness === "omp") {
+				if (!parseOmpLaunchCommand(launchCmd)) {
+					process.stderr.write(`error: cannot inject OMP system context into launch command for ${id}\n`);
+					return 1;
+				}
+				const contract = crewRoleContract({
+					home: projAbs,
+					mainHome: fmHome,
+					crewId: id,
+					launchingSupervisor: supervisorName(config),
+				});
+				const beforeInject = launchCmd;
+				launchCmd = injectOmpAppendSystemPrompts(launchCmd, [contract]);
+				if (launchCmd === beforeInject || !launchCmd.includes("--append-system-prompt=")) {
+					process.stderr.write(`error: OMP system-context injection failed for ${id}\n`);
+					return 1;
+				}
 			}
 		}
 	}
-	const paneCmd = `${launchCmd}; exec "\${SHELL:-/bin/zsh}" -l`;
+	const paneCmd = visible ? `${launchCmd}; exec "\${SHELL:-/bin/zsh}" -l` : "";
 
 	// Workspace, tab, and pane labels are display-only. The unique task id is
 	// the durable Herdr registration slot, while the harness keeps its
 	// integration identity.
 	const label = kind === "secondmate" ? (secondmateRegistryValue(data, id, "name") ?? id) : workerLabel(config, id, envOrUndefined("FM_TASK_LABEL"));
+
+	if (!visible) {
+		try {
+			mkdirSync(state, { recursive: true });
+			writeFileSync(
+				`${state}/${id}.meta`,
+				[
+					`worktree=${wt}`,
+					`project=${projAbs}`,
+					"harness=omp-task",
+					"delivery=omp-task",
+					`kind=${kind}`,
+					`mode=${mode}`,
+					`yolo=${yolo}`,
+					`worker=${label}`,
+					`supervisor=${supervisorName(config)}`,
+				]
+					.map(l => `${l}\n`)
+					.join(""),
+			);
+		} catch {
+			cleanupTaskWorktree();
+			process.stderr.write(`error: could not write spawn metadata for ${id}\n`);
+			return 1;
+		}
+
+		try {
+			appendBacklogInflight(data, fmRoot, fmHome, id, basename(projAbs), kind);
+		} catch {
+			rmSync(`${state}/${id}.meta`, { force: true });
+			cleanupTaskWorktree();
+			process.stderr.write(`error: could not record prepared task ${id} in the backlog\n`);
+			return 1;
+		}
+
+		process.stdout.write(`prepared ${id} delivery=omp-task kind=${kind} mode=${mode} yolo=${yolo} worktree=${wt} brief=${brief}\n`);
+		return 0;
+	}
+
 	const agentSlot = id;
 	const agentIdentity = harness;
 
@@ -1189,21 +1259,26 @@ async function run(argv: string[]): Promise<number> {
 
 export default {
 	name: "spawn",
-	describe: "Spawn a crewmate or secondmate.",
+	describe: "Prepare background work or spawn a visible crewmate/secondmate.",
 	surface: "captain" as const,
 	help: {
 		usage:
-			"fm spawn <task-id> <project-dir> [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>] [--crew-model=<model>]\n" +
+			"fm spawn <task-id> <project-dir> [--scout]\n" +
+			"fm spawn <task-id> <project-dir> --visible [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>] [--crew-model=<model>]\n" +
 			"fm spawn <task-id> [<firstmate-home>] --secondmate [--workspace=<id>] [--tab=<id>]",
-			description: "Spawn a crewmate in a git worktree, or a secondmate in its isolated firstmate home.",
+		description: "Prepare a pane-free OMP Task worktree by default; --visible launches the crewmate in Herdr. Secondmates are always visible.",
 		commands: [
 			{
-				command: "spawn <task-id> <project-dir> …",
-				description: "Crewmate/task spawn into a project worktree (optional --scout).",
+				command: "spawn <task-id> <project-dir> [--scout]",
+				description: "Prepare an isolated worktree and pane-free lifecycle metadata for OMP Task delivery.",
+			},
+			{
+				command: "spawn <task-id> <project-dir> --visible …",
+				description: "Launch an explicit visible ship/scout worker in Herdr.",
 			},
 			{
 				command: "spawn <task-id> … --secondmate",
-				description: "Secondmate spawn into a provisioned firstmate home.",
+				description: "Launch a secondmate in its provisioned firstmate home.",
 			},
 		],
 		notes: [

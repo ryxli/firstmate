@@ -115,6 +115,56 @@ run_spawn() {
   run_spawn_harness "$own_workspace" "$env_workspace" "$id" codex "$@"
 }
 
+run_prepared_scout() {
+  local id=$1
+  make_brief "$id"
+  FM_ROOT_OVERRIDE="$ROOT" \
+    FM_HOME="$FM_TEST_HOME" \
+    FM_STATE_OVERRIDE="$FM_TEST_HOME/state" \
+    FM_DATA_OVERRIDE="$FM_TEST_HOME/data" \
+    FM_PROJECTS_OVERRIDE="$FM_TEST_HOME/projects" \
+    FM_CONFIG_OVERRIDE="$FM_TEST_HOME/config" \
+    FM_WORKTREE_BASE="$FM_TEST_HOME/worktrees" \
+    FM_SPAWN_NO_GUARD=1 \
+    FM_FAKE_HERDR_LOG="$HERDR_LOG" \
+    PATH="$BIN_DIR:$BASE_PATH" \
+    "$SPAWN" spawn "$id" projects/app --scout 2>&1
+}
+
+test_default_scout_prepares_omp_task_without_herdr() {
+  local id=prepared-scout-z0 out meta project_abs
+  reset_herdr_log
+  project_abs=$(cd "$PROJECT" && pwd)
+  out=$(FM_CREW_MODEL=ignored/background-default run_prepared_scout "$id")
+  printf '%s\n' "$out" | grep -F "prepared $id delivery=omp-task kind=scout mode=pr yolo=off worktree=$FM_TEST_HOME/worktrees/$id brief=$FM_TEST_HOME/data/$id/brief.md" >/dev/null \
+    || fail "default scout did not print the OMP Task handoff receipt: $out"
+  grep -F 'spawned ' <<<"$out" >/dev/null \
+    && fail "default scout claimed to launch a visible worker: $out"
+  [ -d "$FM_TEST_HOME/worktrees/$id" ] || fail "default scout did not create its worktree"
+  meta="$FM_TEST_HOME/state/$id.meta"
+  for field in \
+    "worktree=$FM_TEST_HOME/worktrees/$id" \
+    "project=$project_abs" \
+    'harness=omp-task' \
+    'delivery=omp-task' \
+    'kind=scout' \
+    'mode=pr' \
+    'yolo=off' \
+    'worker=' \
+    'supervisor='; do
+    case "$field" in
+      worker=|supervisor=) grep -q "^$field" "$meta" || fail "default scout metadata omitted $field" ;;
+      *) grep -Fx "$field" "$meta" >/dev/null || fail "default scout metadata omitted $field" ;;
+    esac
+  done
+  for field in pane tab agent_slot agent_identity; do
+    grep -q "^$field=" "$meta" && fail "default scout metadata unexpectedly recorded $field"
+  done
+  grep -E '^herdr (pane current|tab create|agent start) ' "$HERDR_LOG" >/dev/null \
+    && fail "default scout touched Herdr: $(cat "$HERDR_LOG")"
+  pass "default scout prepares pane-free OMP Task metadata without Herdr"
+}
+
 run_batch_spawn() {
   local own_workspace=$1 env_workspace=$2
   shift 2
@@ -149,7 +199,7 @@ reset_herdr_log() {
 test_spawn_uses_own_workspace() {
   local out tab_create
   reset_herdr_log
-  out=$(run_spawn owner-ws '' workspace-own-z1)
+  out=$(run_spawn owner-ws '' workspace-own-z1 --visible)
   printf '%s\n' "$out" | grep -F 'spawned workspace-own-z1' >/dev/null \
     || fail "ship spawn did not complete: $out"
   tab_create=$(last_tab_create)
@@ -157,13 +207,19 @@ test_spawn_uses_own_workspace() {
     || fail "ship tab did not use owner workspace: $tab_create"
   printf '%s\n' "$tab_create" | grep -F 'focused-ws' >/dev/null \
     && fail "ship tab used focused workspace: $tab_create"
+  grep -Fx 'pane=w-target:p1' "$FM_TEST_HOME/state/workspace-own-z1.meta" >/dev/null \
+    || fail "visible ship metadata omitted its pane"
+  grep -Fx 'tab=w-target:t1' "$FM_TEST_HOME/state/workspace-own-z1.meta" >/dev/null \
+    || fail "visible ship metadata omitted its tab"
+  grep -Fx 'agent_slot=workspace-own-z1' "$FM_TEST_HOME/state/workspace-own-z1.meta" >/dev/null \
+    || fail "visible ship metadata omitted its agent slot"
   pass "ship spawn pins its tab to herdr pane current workspace"
 }
 
 test_explicit_workspace_overrides_are_honored() {
   local out tab_create
   reset_herdr_log
-  out=$(run_spawn owner-ws '' workspace-cli-z2 --workspace cli-ws)
+  out=$(run_spawn owner-ws '' workspace-cli-z2 --visible --workspace cli-ws)
   printf '%s\n' "$out" | grep -F 'spawned workspace-cli-z2' >/dev/null \
     || fail "CLI workspace override spawn did not complete: $out"
   tab_create=$(last_tab_create)
@@ -173,7 +229,7 @@ test_explicit_workspace_overrides_are_honored() {
     && fail "--workspace override should not query the owner workspace"
 
   reset_herdr_log
-  out=$(run_spawn owner-ws env-ws workspace-env-z3)
+  out=$(run_spawn owner-ws env-ws workspace-env-z3 --visible)
   printf '%s\n' "$out" | grep -F 'spawned workspace-env-z3' >/dev/null \
     || fail "environment workspace override spawn did not complete: $out"
   tab_create=$(last_tab_create)
@@ -187,7 +243,7 @@ test_explicit_workspace_overrides_are_honored() {
 test_spawn_refuses_without_workspace() {
   local out status
   reset_herdr_log
-  out=$(run_spawn '' '' workspace-none-z4)
+  out=$(run_spawn '' '' workspace-none-z4 --visible)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn without a resolvable workspace should fail"
   printf '%s\n' "$out" | grep -F "cannot resolve this firstmate's herdr workspace" >/dev/null \
@@ -202,7 +258,7 @@ test_crew_model_flag_injected_for_template_harnesses() {
   for harness in omp claude codex opencode pi; do
     reset_herdr_log
     id="model-${harness}-z5"
-    out=$(run_spawn_harness owner-ws '' "$id" "$harness" --crew-model openai/gpt-5)
+    out=$(run_spawn_harness owner-ws '' "$id" "$harness" --visible --crew-model openai/gpt-5)
     printf '%s\n' "$out" | grep -F "spawned $id" >/dev/null \
       || fail "$harness spawn with --crew-model did not complete: $out"
     agent_start=$(last_agent_start)
@@ -230,7 +286,7 @@ test_no_model_keeps_existing_command_untouched() {
   local id out agent_start expected
   reset_herdr_log
   id=model-none-z10
-  out=$(run_spawn owner-ws '' "$id")
+  out=$(run_spawn owner-ws '' "$id" --visible)
   printf '%s\n' "$out" | grep -F "spawned $id" >/dev/null \
     || fail "spawn without a crew model did not complete: $out"
   agent_start=$(last_agent_start)
@@ -248,7 +304,7 @@ test_fm_crew_model_default_is_used() {
   local id out agent_start
   reset_herdr_log
   id=model-env-z11
-  out=$(FM_TEST_CREW_MODEL=env/default-model run_spawn owner-ws '' "$id")
+  out=$(FM_TEST_CREW_MODEL=env/default-model run_spawn owner-ws '' "$id" --visible)
   printf '%s\n' "$out" | grep -F "spawned $id" >/dev/null \
     || fail "spawn with FM_CREW_MODEL default did not complete: $out"
   agent_start=$(last_agent_start)
@@ -263,7 +319,7 @@ test_slash_containing_model_stays_intact() {
   local id out agent_start
   reset_herdr_log
   id=model-slash-z12
-  out=$(run_spawn_harness owner-ws '' "$id" opencode --crew-model=provider/team/model-v1)
+  out=$(run_spawn_harness owner-ws '' "$id" opencode --visible --crew-model=provider/team/model-v1)
   printf '%s\n' "$out" | grep -F "spawned $id" >/dev/null \
     || fail "spawn with slash-containing crew model did not complete: $out"
   agent_start=$(last_agent_start)
@@ -279,7 +335,7 @@ test_batch_spawn_forwards_crew_model() {
   reset_herdr_log
   id=model-batch-z13
   make_brief "$id"
-  out=$(run_batch_spawn owner-ws '' "$id=projects/app" --crew-model batch/model)
+  out=$(run_batch_spawn owner-ws '' "$id=projects/app" --visible --crew-model batch/model)
   printf '%s\n' "$out" | grep -F "spawned $id" >/dev/null \
     || fail "batch spawn with --crew-model did not complete: $out"
   agent_start=$(last_agent_start)
@@ -290,6 +346,7 @@ test_batch_spawn_forwards_crew_model() {
   pass "batch id=repo dispatch forwards --crew-model to the re-execed spawn"
 }
 
+test_default_scout_prepares_omp_task_without_herdr
 test_crew_model_flag_injected_for_template_harnesses
 test_no_model_keeps_existing_command_untouched
 test_fm_crew_model_default_is_used

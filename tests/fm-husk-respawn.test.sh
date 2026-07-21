@@ -217,7 +217,7 @@ chmod +x "$spawn_bin/omp"
 spawn_log="$TMP_ROOT/spawn.log"
 spawn_out=$(PATH="$spawn_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$spawn_log" \
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
-  "$ROOT/sbin/fm" spawn label-check-k3 projects/demo omp 2>&1) \
+  "$ROOT/sbin/fm" spawn label-check-k3 projects/demo omp --visible 2>&1) \
   || fail "spawn should create a labeled replacement tab: $spawn_out"
 case "$spawn_out" in *'spawned label-check-k3'*) : ;; *) fail "spawn did not report success: $spawn_out" ;; esac
 grep -qF 'agent start label-check-k3' "$spawn_log" || fail "task id was not used as the herdr slot"
@@ -235,7 +235,7 @@ mkdir -p "$spawn_home/data/scout-check-k4"
 printf 'brief\n' > "$spawn_home/data/scout-check-k4/brief.md"
 scout_out=$(PATH="$spawn_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$spawn_log" \
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
-  "$ROOT/sbin/fm" spawn scout-check-k4 projects/demo omp --scout 2>&1) \
+  "$ROOT/sbin/fm" spawn scout-check-k4 projects/demo omp --scout --visible 2>&1) \
   || fail "scout spawn should create a labeled replacement tab: $scout_out"
 grep -qE -- '^- \[ \] scout-check-k4 - scout task .*\(repo: demo\).*\(since [0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$spawn_home/data/backlog.md" \
   || fail "scout spawn did not record its in-flight backlog entry"
@@ -247,7 +247,7 @@ printf 'brief\n' > "$spawn_home/data/batch-b-k6/brief.md"
 batch_log="$TMP_ROOT/batch.log"
 batch_out=$(PATH="$spawn_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$batch_log" \
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
-  "$ROOT/sbin/fm" spawn batch-a-k5=projects/demo batch-b-k6=projects/demo 2>&1) \
+  "$ROOT/sbin/fm" spawn batch-a-k5=projects/demo batch-b-k6=projects/demo --visible 2>&1) \
   || fail "batch dispatch through fm spawn should succeed: $batch_out"
 case "$batch_out" in *'spawned batch-a-k5'*'spawned batch-b-k6'*) : ;; *) fail "batch dispatch did not spawn both tasks: $batch_out" ;; esac
 grep -qF 'agent start batch-a-k5' "$batch_log" || fail "batch dispatch omitted first task"

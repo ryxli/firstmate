@@ -96,6 +96,7 @@ spawn_one() {
   local id=$1 kind=$2
   local args=("$id" projects/app codex)
   [ "$kind" = scout ] && args+=(--scout)
+  args+=(--visible)
   FM_ROOT_OVERRIDE="$ROOT" \
     FM_HOME="$HOME_DIR" \
     FM_STATE_OVERRIDE="$HOME_DIR/state" \

@@ -46,6 +46,8 @@ function loadExtension(t, options = {}) {
 	const commands = new Map();
 	const tools = new Map();
 	const listeners = new Map();
+	const activeTools = new Set(options.activeTools ?? ["unrelated_tool"]);
+	const activeToolUpdates = [];
 	const notifications = [];
 	const messages = [];
 	const messageWaiters = [];
@@ -108,6 +110,12 @@ function loadExtension(t, options = {}) {
 		setLabel() {},
 		registerShortcut() {},
 		registerTool(spec) { tools.set(spec.name, spec); },
+		getActiveTools() { return [...activeTools]; },
+		async setActiveTools(names) {
+			activeTools.clear();
+			for (const name of names) activeTools.add(name);
+			activeToolUpdates.push([...activeTools]);
+		},
 		registerCommand(name, spec) { commands.set(name, spec.handler); },
 		on(event, handler) { listeners.set(event, handler); },
 		sendMessage(message, sendOptions) {
@@ -124,7 +132,19 @@ function loadExtension(t, options = {}) {
 	whiteboard(pi);
 	const statusUpdates = [];
 	const ctx = { hasUI: true, ui: { notify(message, level = "info") { notifications.push({ message, level }); }, setStatus(key, text) { statusUpdates.push({ key, text }); } } };
-	return { commands, listeners, notifications, messages, tools, ctx, statusUpdates, paths, waitForMessageCount };
+	return {
+		commands,
+		listeners,
+		notifications,
+		messages,
+		tools,
+		ctx,
+		statusUpdates,
+		paths,
+		waitForMessageCount,
+		activeTools: () => [...activeTools],
+		activeToolUpdates,
+	};
 }
 
 const waitForTimers = () => new Promise(resolve => setTimeout(resolve, 10));
@@ -203,11 +223,12 @@ test("only /wb is registered - no /whiteboard or /wbl commands exist", { concurr
 // ---------------------------------------------------------------------------
 // Required: exact tool surface
 
-test("exactly whiteboard_read, whiteboard_write, and whiteboard_checkpoint are registered", { concurrency: false }, t => {
+test("exactly whiteboard_read, whiteboard_write, and whiteboard_checkpoint are registered inactive", { concurrency: false }, t => {
 	const app = loadExtension(t, { agentId: "solo" });
-	assert.equal(app.tools.has("whiteboard_read"), true);
-	assert.equal(app.tools.has("whiteboard_write"), true);
-	assert.equal(app.tools.has("whiteboard_checkpoint"), true);
+	for (const name of ["whiteboard_read", "whiteboard_write", "whiteboard_checkpoint"]) {
+		assert.equal(app.tools.has(name), true);
+		assert.equal(app.tools.get(name).defaultInactive, true);
+	}
 	// Removed tools must not exist.
 	assert.equal(app.tools.has("whiteboard_append"), false);
 	assert.equal(app.tools.has("whiteboard_replace"), false);
@@ -216,6 +237,34 @@ test("exactly whiteboard_read, whiteboard_write, and whiteboard_checkpoint are r
 	assert.equal(app.tools.has("whiteboard_replace_section"), false);
 	assert.equal(app.tools.has("whiteboard_log_append"), false);
 	assert.equal(app.tools.has("whiteboard_schedule"), false);
+	assert.deepEqual(app.activeTools(), ["unrelated_tool"]);
+});
+
+test("/wb view and status leave inactive whiteboard tools out of the active set", { concurrency: false }, async t => {
+	const app = loadExtension(t, { agentId: "solo" });
+	await command(app, "view");
+	await command(app, "status");
+	assert.deepEqual(app.activeTools(), ["unrelated_tool"]);
+	assert.equal(app.activeToolUpdates.length, 0);
+});
+
+test("/wb loop activates and deactivates whiteboard tools without replacing unrelated tools", { concurrency: false }, async t => {
+	const app = loadExtension(t, { agentId: "solo" });
+	await command(app, "loop");
+	assert.deepEqual(app.activeTools(), ["unrelated_tool", "whiteboard_read", "whiteboard_write", "whiteboard_checkpoint"]);
+	assert.equal(app.messages.length, 1, "tools activate before the first loop turn queues");
+	await command(app, "loop");
+	assert.deepEqual(app.activeTools(), ["unrelated_tool"]);
+});
+
+test("/wb tick and /wb tick! activate for one explicit turn then deactivate", { concurrency: false }, async t => {
+	const app = loadExtension(t, { agentId: "solo" });
+	for (const verb of ["tick", "tick!"]) {
+		await command(app, verb);
+		assert.deepEqual(app.activeTools(), ["unrelated_tool", "whiteboard_read", "whiteboard_write", "whiteboard_checkpoint"]);
+		await app.listeners.get("agent_end")();
+		assert.deepEqual(app.activeTools(), ["unrelated_tool"]);
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -906,7 +955,8 @@ test("session_switch clears all loop state", { concurrency: false }, async t => 
 	const app = loadExtension(t, { agentId: "solo" });
 	await command(app, "loop");
 	assert.equal(app.messages.length, 1);
-	app.listeners.get("session_switch")();
+	await app.listeners.get("session_switch")();
+	assert.deepEqual(app.activeTools(), ["unrelated_tool"]);
 	// Checkpoint after switch should report no active turn.
 	const result = await appCheckpoint(app, "progress", "post-switch");
 	assert.equal(result.details.active, false);
@@ -918,7 +968,8 @@ test("session_switch clears all loop state", { concurrency: false }, async t => 
 test("session_branch clears all loop state", { concurrency: false }, async t => {
 	const app = loadExtension(t, { agentId: "solo" });
 	await command(app, "loop");
-	app.listeners.get("session_branch")();
+	await app.listeners.get("session_branch")();
+	assert.deepEqual(app.activeTools(), ["unrelated_tool"]);
 	const result = await appCheckpoint(app, "progress", "post-branch");
 	assert.equal(result.details.active, false);
 	app.listeners.get("agent_end")();
