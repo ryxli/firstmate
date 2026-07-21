@@ -522,8 +522,14 @@ function paneCwdKey(pane: HerdrAgent): string {
 	return pane.cwdKey ?? normalizeHomePath(pane.cwd);
 }
 
-function paneMatchesHome(pane: HerdrAgent | undefined, targetKey: string, allowDescendant = false): boolean {
-	if (!pane || (pane.agent && pane.agent !== "omp") || !targetKey) return false;
+function paneMatchesHome(
+	pane: HerdrAgent | undefined,
+	targetKey: string,
+	allowDescendant = false,
+	allowNonOmp = false,
+): boolean {
+	if (!pane || !targetKey) return false;
+	if (!allowNonOmp && pane.agent && pane.agent !== "omp") return false;
 	const cwd = paneCwdKey(pane);
 	return cwd === targetKey || (allowDescendant && cwd.startsWith(`${targetKey}/`));
 }
@@ -538,8 +544,20 @@ function paneForAgent(home: ParsedHome, meta: Meta | undefined, herdrByPane: Map
 	return paneMatchesHome(pane, target) ? pane : undefined;
 }
 
+export interface ResolveHomePaneOptions {
+	/** When true, match Claude/Codex/etc. panes so callers can gate OMP-only rules. */
+	allowNonOmp?: boolean;
+}
+
 /** Resolve a home pane from canonical linked metadata, receipt, then cwd. */
-export function resolveHomePane(home: ParsedHome, homes: ParsedHome[], herdrByPane: Map<string, HerdrAgent>, herdrAll: HerdrAgent[]): HerdrAgent | undefined {
+export function resolveHomePane(
+	home: ParsedHome,
+	homes: ParsedHome[],
+	herdrByPane: Map<string, HerdrAgent>,
+	herdrAll: HerdrAgent[],
+	options?: ResolveHomePaneOptions,
+): HerdrAgent | undefined {
+	const allowNonOmp = options?.allowNonOmp === true;
 	const targetKey = homePathKey(home);
 	// The main-home secondmate meta is the durable link. Prefer it over a
 	// child receipt: receipts can be stale while the linked pane remains live.
@@ -548,16 +566,16 @@ export function resolveHomePane(home: ParsedHome, homes: ParsedHome[], herdrByPa
 		.map(agent => agent.meta.pane as string);
 	for (const paneId of linkedPanes) {
 		const linked = herdrByPane.get(paneId);
-		if (paneMatchesHome(linked, targetKey, true)) return linked;
+		if (paneMatchesHome(linked, targetKey, true, allowNonOmp)) return linked;
 	}
 	if (home.activationPane) {
 		const receiptPane = herdrByPane.get(home.activationPane);
-		if (paneMatchesHome(receiptPane, targetKey, true)) return receiptPane;
+		if (paneMatchesHome(receiptPane, targetKey, true, allowNonOmp)) return receiptPane;
 	}
-	const exact = herdrAll.filter(agent => paneMatchesHome(agent, targetKey));
+	const exact = herdrAll.filter(agent => paneMatchesHome(agent, targetKey, false, allowNonOmp));
 	if (exact.length === 1) return exact[0];
 	if (exact.length > 1) return undefined;
-	const candidates = herdrAll.filter(agent => paneMatchesHome(agent, targetKey, true));
+	const candidates = herdrAll.filter(agent => paneMatchesHome(agent, targetKey, true, allowNonOmp));
 	return candidates.length === 1 ? candidates[0] : undefined;
 }
 

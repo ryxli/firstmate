@@ -53,6 +53,8 @@ make_sm_home() {
   : > "$dir/AGENTS.md"
   : > "$dir/config/shared-skills"
   : > "$dir/config/local-skills"
+  # OMP secondmate spawn fail-closes without a non-empty regular charter.
+  printf '# Charter\n%s domain\n' "$id" > "$dir/data/charter.md"
   ( cd "$dir" && pwd -P )
 }
 

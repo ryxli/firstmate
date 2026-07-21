@@ -10,6 +10,8 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSyn
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+import { CHARTER_REL_PATH, currentSafeCharterDigest, readSafeCharterFile } from "../cli/lib/omp-system-context";
+
 import {
 	basename,
 	buildSnapshot,
@@ -464,12 +466,17 @@ export function attentionFor(agents: AgentRow[], homes: ParsedHome[], now: strin
 }
 
 
-function paneForHome(home: string, homes: ParsedHome[], panes: HerdrAgent[]): HerdrAgent | undefined {
+function paneForHome(
+	home: string,
+	homes: ParsedHome[],
+	panes: HerdrAgent[],
+	options?: { allowNonOmp?: boolean },
+): HerdrAgent | undefined {
 	const parsed = homes.find(candidate => canonicalPath(candidate.path) === canonicalPath(home));
 	if (!parsed) return undefined;
 	const byPane = new Map<string, HerdrAgent>();
 	for (const pane of panes) if (pane.pane_id) byPane.set(pane.pane_id, pane);
-	return resolveHomePane(parsed, homes, byPane, panes);
+	return resolveHomePane(parsed, homes, byPane, panes, options);
 }
 
 function topologyForFleet(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null, herdrOk: boolean, startingMain = false): TopologySummary {
@@ -534,14 +541,52 @@ function validActivationReceipt(value: unknown): value is Record<string, unknown
 		hash.update(entry.sha256);
 		hash.update("\0");
 	}
-	return hash.digest("hex") === digest.toLowerCase();
+	if (hash.digest("hex") !== digest.toLowerCase()) return false;
+
+	// Charter fields: both absent (valid), both present and well-formed, or malformed.
+	const charterPathDefined = record.charter_path !== undefined;
+	const charterDigestDefined = record.charter_digest !== undefined;
+	if (charterPathDefined !== charterDigestDefined) return false;
+	if (charterPathDefined) {
+		const charterPath = stringValue(record.charter_path);
+		const charterDigest = stringValue(record.charter_digest);
+		if (charterPath !== CHARTER_REL_PATH || !charterDigest || !/^[0-9a-f]{64}$/i.test(charterDigest)) return false;
+	}
+	return true;
+}
+
+function secondmateCharterFreshness(
+	home: string,
+	receiptRecord: Record<string, unknown>,
+	notes: string[],
+): "fresh" | "stale" {
+	try {
+		readSafeCharterFile(home);
+	} catch {
+		notes.push(`activation charter missing for ${home}`);
+		return "stale";
+	}
+	const claimPath = stringValue(receiptRecord.charter_path);
+	const claimDigest = stringValue(receiptRecord.charter_digest);
+	if (!claimPath && !claimDigest) {
+		notes.push(`activation charter claim absent for ${home}`);
+		return "stale";
+	}
+	const current = currentSafeCharterDigest(home);
+	if (!current || current !== claimDigest!.toLowerCase()) {
+		notes.push(`activation charter digest mismatch for ${home}`);
+		return "stale";
+	}
+	return "fresh";
 }
 
 function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHome[], main: string | null, notes: string[]): { activation: ActivationSummary; identity: IdentitySummary } {
 	const activation: ActivationSummary = { state: "unknown", total: homePaths.length, fresh: 0, stale: 0, unknown: 0 };
 	const identity: IdentitySummary = { state: "unknown", bound: 0, mismatch: 0, unknown: 0 };
 	for (const home of homePaths) {
-		const pane = paneForHome(home, homes, panes);
+		// Activation must see non-OMP live panes so charter rules can be skipped
+		// for Claude/Codex secondmates instead of treating them as missing.
+		const pane = paneForHome(home, homes, panes, { allowNonOmp: true });
 		let activationState: "fresh" | "stale" | "unknown" = "unknown";
 		let identityState: "bound" | "mismatch" | "unknown" = "unknown";
 		const parsedHome = homes.find(candidate => canonicalPath(candidate.path) === canonicalPath(home));
@@ -565,6 +610,12 @@ function activationFor(homePaths: string[], panes: HerdrAgent[], homes: ParsedHo
 			}
 			if (current.hash === manifest) activationState = "fresh";
 			else if (current.hash) activationState = "stale";
+			const isRegisteredSecondmate = Boolean(parsedHome && !parsedHome.isMain);
+			const isOmpPane = pane.agent === "omp";
+			if (isRegisteredSecondmate && isOmpPane) {
+				// Definite charter failure overrides manifest unknown/fresh.
+				if (secondmateCharterFreshness(home, receiptRecord, notes) === "stale") activationState = "stale";
+			}
 		}
 		activation[activationState] += 1;
 		identity[identityState] += 1;

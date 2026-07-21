@@ -48,6 +48,15 @@ import { getHarnessAdapter } from "../lib/harness-adapters";
 import { herdrReapHuskSlot, jsonGet, metaSet, metaValue } from "../lib/herdr";
 import { shellQuote } from "../lib/spawn";
 import { ensureSecondmateHomeSkills, injectOmpHomeConfig } from "../lib/ensure-home-skills";
+import {
+	CharterLoadError,
+	charterInjectionEnv,
+	charterSystemBlock,
+	injectOmpAppendSystemPrompts,
+	isOmpLaunchCommand,
+	loadRequiredCharter,
+	parseOmpLaunchCommand,
+} from "../lib/omp-system-context";
 import { crewRoleContract, ensureSecondmateParentIdentity, secondmateRoleContract } from "../lib/role-contract";
 
 // Equivalent of the former script's SCRIPT_DIR/.. (sbin's parent = repo root),
@@ -262,12 +271,6 @@ function firstCommandWordFromRaw(cmd: string): string {
 		return parts[parts.length - 1];
 	}
 	return "";
-}
-
-export function injectOmpRoleContract(command: string, contract: string): string {
-	if (!command.startsWith("omp")) return command;
-	const rest = command.slice(3);
-	return `omp --append-system-prompt=${shellQuote(contract)}${rest}`;
 }
 
 function crewHarness(fmRoot: string): string {
@@ -761,6 +764,7 @@ async function run(argv: string[]): Promise<number> {
 	let projAbs: string;
 	let wt: string;
 	let brief: string;
+	let injectedCharter: ReturnType<typeof loadRequiredCharter> | undefined;
 
 	if (kind === "secondmate") {
 		if (!firstmateHome) {
@@ -772,7 +776,18 @@ async function run(argv: string[]): Promise<number> {
 		projAbs = validated.value;
 		wt = projAbs;
 		const charterPath = `${projAbs}/data/charter.md`;
-		brief = existsSync(charterPath) ? charterPath : `${data}/mates/${id}/brief.md`;
+		if (harness === "omp") {
+			try {
+				injectedCharter = loadRequiredCharter(projAbs);
+			} catch (error) {
+				const detail = error instanceof CharterLoadError ? error.message : String(error);
+				process.stderr.write(`error: secondmate ${id} charter required before OMP launch: ${detail}\n`);
+				return 1;
+			}
+			brief = charterPath;
+		} else {
+			brief = existsSync(charterPath) ? charterPath : `${data}/mates/${id}/brief.md`;
+		}
 	} else {
 		const cdRes = cdPwd(resolveProjectDirArg(projects, proj));
 		if (!cdRes.ok) return 1;
@@ -793,9 +808,11 @@ async function run(argv: string[]): Promise<number> {
 		}
 	}
 
-	if (!existsSync(brief)) {
-		process.stderr.write(`error: no brief at ${brief}\n`);
-		return 1;
+	if (kind !== "secondmate" || harness !== "omp") {
+		if (!existsSync(brief)) {
+			process.stderr.write(`error: no brief at ${brief}\n`);
+			return 1;
+		}
 	}
 
 	// Preflight: validate harness binary and worktree base before creating anything.
@@ -858,12 +875,15 @@ async function run(argv: string[]): Promise<number> {
 		yolo = parts[1] ?? "";
 	}
 
-	// Build the launch command. A secondmate OMP respawn continues its
-	// persisted session rather than injecting the charter as a new prompt.
+	// Build the launch command. OMP secondmates get role contract + charter as
+	// system appends (new session or persisted-session resume with -c). Non-OMP
+	// secondmates still receive the brief as a positional user prompt.
 	const sqBrief = shellQuote(brief);
 	let launchCmd: string;
 	if (harness === "omp" && kind === "secondmate" && secondmateResume) {
 		launchCmd = "omp --auto-approve -c";
+	} else if (harness === "omp" && kind === "secondmate" && launchFromTemplate) {
+		launchCmd = "omp --auto-approve";
 	} else {
 		launchCmd = launch.split("__BRIEF__").join(sqBrief);
 	}
@@ -874,16 +894,47 @@ async function run(argv: string[]): Promise<number> {
 	if (launchFromTemplate && kind === "secondmate" && harness === "omp") {
 		launchCmd = injectOmpHomeConfig(launchCmd, projAbs);
 	}
-	if (harness === "omp") {
+	let charterMarkers: Record<string, string> | undefined;
+	if (harness === "omp" || isOmpLaunchCommand(launchCmd)) {
+		if (!parseOmpLaunchCommand(launchCmd)) {
+			process.stderr.write(`error: cannot inject OMP system context into launch command for ${id}\n`);
+			return 1;
+		}
 		const contract = kind === "secondmate"
 			? secondmateRoleContract({ home: projAbs, mainHome: fmHome })
 			: crewRoleContract({ home: projAbs, mainHome: fmHome, crewId: id, launchingSupervisor: supervisorName(config) });
 		if (kind === "secondmate") ensureSecondmateParentIdentity(projAbs, supervisorName(config));
-		launchCmd = injectOmpRoleContract(launchCmd, contract);
+		const blocks = kind === "secondmate" && injectedCharter
+			? [contract, charterSystemBlock(injectedCharter.text)]
+			: [contract];
+		const beforeInject = launchCmd;
+		launchCmd = injectOmpAppendSystemPrompts(launchCmd, blocks);
+		if (launchCmd === beforeInject || !launchCmd.includes("--append-system-prompt=")) {
+			process.stderr.write(`error: OMP system-context injection failed for ${id}\n`);
+			return 1;
+		}
+		// Markers only after confirmed append injection of the charter payload.
+		if (kind === "secondmate" && injectedCharter && blocks.length > 1) {
+			charterMarkers = charterInjectionEnv(injectedCharter.digest);
+		}
 	}
 	if (kind === "secondmate") {
 		const sqHome = shellQuote(projAbs);
-		launchCmd = `FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=${sqHome} ${launchCmd}`;
+		const charterEnv = charterMarkers
+			? Object.entries(charterMarkers)
+				.map(([key, value]) => `${key}=${shellQuote(value)}`)
+				.join(" ")
+			: "";
+		const prefix = [
+			"FM_ROOT_OVERRIDE=",
+			"FM_STATE_OVERRIDE=",
+			"FM_DATA_OVERRIDE=",
+			"FM_PROJECTS_OVERRIDE=",
+			"FM_CONFIG_OVERRIDE=",
+			...(charterEnv ? [charterEnv] : []),
+			`FM_HOME=${sqHome}`,
+		].join(" ");
+		launchCmd = `${prefix} ${launchCmd}`;
 	}
 	const paneCmd = `${launchCmd}; exec "\${SHELL:-/bin/zsh}" -l`;
 

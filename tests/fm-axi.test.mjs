@@ -76,6 +76,8 @@ try {
     started_at: "2026-07-13T00:00:00Z",
     manifest: [{ path: "AGENTS.md", sha256: createHash("sha256").update(homeManifest).digest("hex") }],
   }));
+  const plumCharter = "# Charter\nplum\n";
+  writeFileSync(join(secondmate, "data", "charter.md"), plumCharter);
   writeFileSync(join(secondmate, "state", "activation-receipt.json"), JSON.stringify({
     schema: "firstmate.activation-receipt/v1",
     manifest_sha256: manifestHash(secondmateManifest),
@@ -83,6 +85,8 @@ try {
     started_at: "2026-07-13T00:00:00Z",
     manifest: [{ path: "AGENTS.md", sha256: createHash("sha256").update(secondmateManifest).digest("hex") }],
     session_id: "plum-session",
+    charter_path: "data/charter.md",
+    charter_digest: createHash("sha256").update(plumCharter).digest("hex"),
   }));
   writeFileSync(join(home, "state", "self.meta"), "pane=w1:p1\nkind=ship\nworker=self\n");
   writeFileSync(join(home, "state", "self.status"), "working: active\n");
@@ -95,22 +99,31 @@ try {
   writeFileSync(stats, JSON.stringify({ byFolder: [] }));
 
   const overview = toon(run(["fleet"]), "fleet overview");
-  if (overview.command !== "fleet" || overview.result.schema !== "fleet-snapshot/1") throw new Error(`overview was not the canonical snapshot: ${JSON.stringify(overview)}`);
+  if (overview.command !== "fleet" || overview.result.schema !== "fleet-actionable/1") throw new Error(`overview was not the actionable fleet view: ${JSON.stringify(overview)}`);
   if (!overview.result.tasks.some(task => task.key === "home/self")) throw new Error("overview omitted canonical task key");
+  if (overview.result.activation?.state !== "fresh") throw new Error(`overview activation was not fresh with charter claims: ${JSON.stringify(overview.result.activation)}`);
   console.log("ok - fleet itself returns compact TOON overview");
   if (existsSync(ompLog)) throw new Error("default overview called OMP statistics");
-  const healthyGate = run(["fleet", "--check"]);
-  if (healthyGate.status !== 0) throw new Error(`healthy activation gate exited ${healthyGate.status}, expected 0: ${healthyGate.stderr}\n${healthyGate.stdout}`);
-  const healthy = decode(healthyGate.stdout, { expandPaths: "safe" });
-  if (healthy.result.activation.state !== "fresh" || healthy.result.identity.state !== "bound" || healthy.result.topology.state !== "complete" || healthy.result.health.state !== "healthy") throw new Error(`healthy gate state was not visible: ${healthyGate.stdout}`);
-  console.log("ok - healthy activation gate exits zero with bound OMP panes");
+  const healthySnap = JSON.parse(run(["fleet", "snapshot", "--json"]).stdout);
+  if (healthySnap.activation?.state !== "fresh" || healthySnap.identity?.state !== "bound" || healthySnap.topology?.state !== "complete" || healthySnap.health?.state !== "healthy") {
+    throw new Error(`healthy activation snapshot was not visible: ${JSON.stringify({
+      activation: healthySnap.activation,
+      identity: healthySnap.identity,
+      topology: healthySnap.topology,
+      health: healthySnap.health,
+    })}`);
+  }
+  console.log("ok - healthy activation snapshot is fresh with bound OMP panes");
   rmSync(join(home, "state", "activation-receipt.json"));
   rmSync(join(secondmate, "state", "activation-receipt.json"));
-  const gate = run(["fleet", "--check"]);
-  if (gate.status !== 1) throw new Error(`degraded activation gate exited ${gate.status}, expected 1`);
-  const gated = decode(gate.stdout, { expandPaths: "safe" });
-  if (gated.result.activation.state !== "unknown" || gated.result.health.state !== "degraded") throw new Error(`degraded activation state was not visible: ${gate.stdout}`);
-  console.log("ok - activation gate preserves nonzero degraded result while emitting TOON");
+  const degradedSnap = JSON.parse(run(["fleet", "snapshot", "--json"]).stdout);
+  if (degradedSnap.activation?.state !== "unknown" || degradedSnap.health?.state !== "degraded") {
+    throw new Error(`degraded activation state was not visible: ${JSON.stringify({
+      activation: degradedSnap.activation,
+      health: degradedSnap.health,
+    })}`);
+  }
+  console.log("ok - missing receipts degrade activation in the fleet snapshot");
 
   const tasks = toon(run(["fleet", "tasks", "--state", "in-flight"]), "in-flight tasks");
   if (tasks.command !== "fleet tasks" || tasks.result.length !== 2 || !tasks.result.every(task => task.key)) throw new Error(`ranked task list was wrong: ${JSON.stringify(tasks)}`);
@@ -147,9 +160,13 @@ try {
   console.log("ok - fleet snapshot emits raw JSON, TOON, and metrics on demand");
 
   const help = toon(run(["fleet", "--help"]), "help");
-  if (help.command !== "fm fleet" || help.commands.length !== 7) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
+  if (help.command !== "fm fleet" || help.commands.length !== 11) throw new Error(`help contract changed: ${JSON.stringify(help)}`);
   const old = run(["fleet", "focus"]);
   if (old.status !== 2) throw new Error(`removed compatibility command accepted: ${old.status}`);
+  const removedCheckFlag = run(["fleet", "--check"]);
+  if (removedCheckFlag.status !== 2) throw new Error(`removed fleet --check accepted: ${removedCheckFlag.status}`);
+  const removedCheckError = decode(removedCheckFlag.stdout, { expandPaths: "safe" });
+  if (removedCheckError.code !== "VALIDATION_ERROR") throw new Error(`fleet --check was not a TOON validation error: ${removedCheckFlag.stdout}`);
   console.log("ok - help and compatibility validation are TOON");
   const nested = run(["fleet", "fleet"]);
   if (nested.status !== 2) throw new Error(`nested fleet unexpectedly exited ${nested.status}`);

@@ -1,14 +1,20 @@
 // Focused role-contract and secondmate gate coverage.
 // Run: bun test tests/fm-role-contract.test.ts
 import { describe, expect, it } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { crewRoleContract, mainRoleContract, roleContractForHome, secondmateRoleContract } from "../.omp/extensions/cli/lib/role-contract";
 import { parseSecondmateRegistryLine } from "../.omp/extensions/cli/lib/secondmate-registry";
-import { injectOmpRoleContract } from "../.omp/extensions/cli/verbs/spawn";
+import {
+	charterSystemBlock,
+	injectOmpAppendSystemPrompts,
+	loadRequiredCharter,
+	parseOmpLaunchCommand,
+} from "../.omp/extensions/cli/lib/omp-system-context";
+import { createHash } from "node:crypto";
 
 const REPO_ROOT = import.meta.dir.replace(/\/tests$/, "");
 const FM = join(REPO_ROOT, "sbin", "fm");
@@ -103,10 +109,53 @@ describe("runtime role contracts", () => {
 		}
 	});
 
-	it("injects OMP role contracts at the same append-system priority on fresh and resume commands", () => {
+	it("injects OMP appends in caller order for bare, env-assign, and path forms", () => {
 		const contract = "# Runtime Role Contract\nkind: crew";
-		expect(injectOmpRoleContract('omp --auto-approve "$(cat brief)"', contract).startsWith("omp --append-system-prompt=")).toBe(true);
-		expect(injectOmpRoleContract("omp --auto-approve -c", contract).startsWith("omp --append-system-prompt=")).toBe(true);
+		const charter = charterSystemBlock("scope with 'quotes'\nand $(echo hi)\n");
+		const forms = [
+			'omp --auto-approve "$(cat brief)"',
+			"omp --auto-approve -c",
+			"OMP_MODE=manual omp --auto-approve",
+			"/usr/local/bin/omp --auto-approve",
+			"FOO=1 BAR=2 /opt/omp --auto-approve -c",
+		];
+		for (const form of forms) {
+			const parsed = parseOmpLaunchCommand(form);
+			expect(parsed, form).not.toBeNull();
+			const injected = injectOmpAppendSystemPrompts(form, [contract, charter]);
+			expect(injected).toContain("--append-system-prompt=");
+			expect((injected.match(/--append-system-prompt=/g) ?? []).length).toBe(1);
+			expect(injected.indexOf(contract.slice(0, 20))).toBeLessThan(injected.indexOf("## Local charter"));
+			expect(injected).toContain("$(echo hi)");
+			expect(parseOmpLaunchCommand(injected)?.executable).toBe(parsed!.executable);
+		}
+		expect(injectOmpAppendSystemPrompts("claude --dangerously-skip-permissions", [contract])).toBe(
+			"claude --dangerously-skip-permissions",
+		);
+		expect(() => injectOmpAppendSystemPrompts("omp --auto-approve", [contract, ""])).toThrow("empty append-system-prompt block");
+	});
+
+	it("loads charter raw bytes and rejects whitespace, symlink, NUL, and invalid UTF-8", () => {
+		const home = tempHome("fm-charter-load-");
+		const path = join(home, "data", "charter.md");
+		const body = "  leading\n";
+		writeFileSync(path, body);
+		const loaded = loadRequiredCharter(home);
+		expect(loaded.text).toBe(body);
+		expect(loaded.digest).toBe(createHash("sha256").update(Buffer.from(body)).digest("hex"));
+		writeFileSync(path, "   \n\t\n");
+		expect(() => loadRequiredCharter(home)).toThrow(/empty/);
+		rmSync(path);
+		const secret = join(home, "secret.env");
+		writeFileSync(secret, "TOKEN=leak\n");
+		symlinkSync(secret, path);
+		expect(() => loadRequiredCharter(home)).toThrow(/symlink/);
+		rmSync(path);
+		writeFileSync(path, Buffer.from([0x41, 0x00, 0x42]));
+		expect(() => loadRequiredCharter(home)).toThrow(/NUL/);
+		writeFileSync(path, Buffer.from([0xff, 0xfe, 0xfd]));
+		expect(() => loadRequiredCharter(home)).toThrow(/UTF-8/);
+		rmSync(home, { recursive: true, force: true });
 	});
 });
 
@@ -280,9 +329,26 @@ exit 0
 		return { main, sm, bin, log };
 	}
 
-	it("injects the secondmate role contract in actual fresh and resume spawn commands", () => {
+	function spawnEnv(fresh: { main: string; bin: string }): NodeJS.ProcessEnv {
+		return {
+			...process.env,
+			FM_HOME: fresh.main,
+			FM_STATE_OVERRIDE: join(fresh.main, "state"),
+			FM_DATA_OVERRIDE: join(fresh.main, "data"),
+			FM_CONFIG_OVERRIDE: join(fresh.main, "config"),
+			FM_PROJECTS_OVERRIDE: join(fresh.main, "projects"),
+			PATH: `${fresh.bin}:${process.env.PATH ?? ""}`,
+			FM_SPAWN_NO_GUARD: "1",
+			FM_ROOT_OVERRIDE: "",
+			FM_FLEET_SOURCE_HOME: "",
+			FM_INJECTED_CHARTER_PATH: "",
+			FM_INJECTED_CHARTER_SHA256: "",
+		};
+	}
+
+	it("injects role contract then charter on new session and -c resume without positional prompt", () => {
 		const fresh = spawnHarness();
-		const env = { ...process.env, FM_HOME: fresh.main, FM_STATE_OVERRIDE: join(fresh.main, "state"), FM_DATA_OVERRIDE: join(fresh.main, "data"), FM_CONFIG_OVERRIDE: join(fresh.main, "config"), FM_PROJECTS_OVERRIDE: join(fresh.main, "projects"), PATH: `${fresh.bin}:${process.env.PATH ?? ""}` };
+		const env = spawnEnv(fresh);
 		try {
 			const first = spawnSync(FM, ["spawn", "kodiak", fresh.sm, "omp", "--secondmate"], { cwd: REPO_ROOT, env, encoding: "utf8" });
 			expect(first.status, `${first.stdout}${first.stderr}`).toBe(0);
@@ -290,6 +356,14 @@ exit 0
 			expect(firstLog).toContain("agent start kodiak");
 			expect(firstLog).toContain("omp --append-system-prompt=");
 			expect(firstLog).toContain("You are Kodiak, a secondmate reporting to Keel.");
+			expect(firstLog).toContain("## Local charter");
+			expect(firstLog).toContain("FM_INJECTED_CHARTER_PATH=");
+			expect(firstLog).toContain("FM_INJECTED_CHARTER_SHA256=");
+			expect(firstLog).not.toContain("$(cat ");
+			const contractIdx = firstLog.indexOf("You are Kodiak");
+			const charterIdx = firstLog.indexOf("## Local charter");
+			expect(contractIdx).toBeGreaterThan(-1);
+			expect(charterIdx).toBeGreaterThan(contractIdx);
 
 			writeFileSync(join(fresh.main, "state", "kodiak.meta"), `home=${fresh.sm}\nworkspace=\n`);
 			writeFileSync(fresh.log, "");
@@ -299,6 +373,121 @@ exit 0
 			expect(resumeLog).toContain("omp --append-system-prompt=");
 			expect(resumeLog).toContain("--auto-approve -c");
 			expect(resumeLog).toContain("You are Kodiak, a secondmate reporting to Keel.");
+			expect(resumeLog).toContain("## Local charter");
+			expect(resumeLog).toContain("FM_INJECTED_CHARTER_SHA256=");
+		} finally {
+			rmSync(fresh.main, { recursive: true, force: true });
+			rmSync(fresh.sm, { recursive: true, force: true });
+		}
+	});
+
+	it("fails closed when OMP secondmate charter is missing or whitespace-only", () => {
+		const fresh = spawnHarness();
+		const env = spawnEnv(fresh);
+		try {
+			rmSync(join(fresh.sm, "data", "charter.md"));
+			const missing = spawnSync(FM, ["spawn", "kodiak", fresh.sm, "omp", "--secondmate"], { cwd: REPO_ROOT, env, encoding: "utf8" });
+			expect(missing.status).not.toBe(0);
+			expect(`${missing.stdout}${missing.stderr}`).toContain("charter required");
+			expect(existsSync(fresh.log) ? readFileSync(fresh.log, "utf8") : "").not.toContain("agent start");
+
+			writeFileSync(join(fresh.sm, "data", "charter.md"), "  \n\t\n");
+			if (existsSync(fresh.log)) writeFileSync(fresh.log, "");
+			const empty = spawnSync(FM, ["spawn", "kodiak", fresh.sm, "omp", "--secondmate"], { cwd: REPO_ROOT, env, encoding: "utf8" });
+			expect(empty.status).not.toBe(0);
+			expect(`${empty.stdout}${empty.stderr}`).toContain("charter required");
+			expect(existsSync(fresh.log) ? readFileSync(fresh.log, "utf8") : "").not.toContain("agent start");
+		} finally {
+			rmSync(fresh.main, { recursive: true, force: true });
+			rmSync(fresh.sm, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps non-OMP secondmate __BRIEF__ launch", () => {
+		const fresh = spawnHarness();
+		const env = spawnEnv(fresh);
+		try {
+			const run = spawnSync(FM, ["spawn", "kodiak", fresh.sm, "codex", "--secondmate"], { cwd: REPO_ROOT, env, encoding: "utf8" });
+			expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+			const log = readFileSync(fresh.log, "utf8");
+			expect(log).toContain("$(cat ");
+			expect(log).toContain(`${fresh.sm}/data/charter.md`);
+			expect(log).not.toContain("FM_INJECTED_CHARTER_");
+		} finally {
+			rmSync(fresh.main, { recursive: true, force: true });
+			rmSync(fresh.sm, { recursive: true, force: true });
+		}
+	});
+
+	it("records efficiency acceptance: byte delta, one prompt flag, and onboarding turns", () => {
+		const fresh = spawnHarness();
+		const env = spawnEnv(fresh);
+		try {
+			const run = spawnSync(FM, ["spawn", "kodiak", fresh.sm, "omp", "--secondmate"], { cwd: REPO_ROOT, env, encoding: "utf8" });
+			expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+			const log = readFileSync(fresh.log, "utf8");
+			const appendCount = (log.match(/--append-system-prompt=/g) ?? []).length;
+			expect(appendCount).toBe(1);
+			expect(log).not.toMatch(/\$\(cat /);
+			const before = {
+				positionalPrompts: 1,
+				onboardingTurns: 1,
+				appendBytes: Buffer.byteLength(secondmateRoleContract({ home: fresh.sm, mainHome: fresh.main }), "utf8"),
+			};
+			const charter = loadRequiredCharter(fresh.sm);
+			const block = charterSystemBlock(charter.text);
+			const after = {
+				positionalPrompts: log.includes("$(cat ") ? 1 : 0,
+				onboardingTurns: 0,
+				appendBytes: before.appendBytes + Buffer.byteLength("\n\n", "utf8") + Buffer.byteLength(block, "utf8"),
+			};
+			expect(after.positionalPrompts).toBe(0);
+			expect(after.onboardingTurns).toBe(0);
+			expect(after.appendBytes - before.appendBytes).toBe(Buffer.byteLength(`\n\n${block}`, "utf8"));
+			expect(before.positionalPrompts - after.positionalPrompts).toBe(1);
+			expect(before.onboardingTurns - after.onboardingTurns).toBe(1);
+		} finally {
+			rmSync(fresh.main, { recursive: true, force: true });
+			rmSync(fresh.sm, { recursive: true, force: true });
+		}
+	});
+
+	it("injects and marks charter for raw env-assign and path-form OMP launches", () => {
+		const fresh = spawnHarness();
+		const env = spawnEnv(fresh);
+		try {
+			for (const raw of [
+				`OMP_MODE=manual omp --auto-approve "$(cat __BRIEF__)"`,
+				`/usr/bin/omp --auto-approve "$(cat __BRIEF__)"`,
+			]) {
+				writeFileSync(fresh.log, "");
+				const run = spawnSync(FM, ["spawn", "kodiak", fresh.sm, raw, "--secondmate"], { cwd: REPO_ROOT, env, encoding: "utf8" });
+				expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+				const log = readFileSync(fresh.log, "utf8");
+				expect(log).toContain("--append-system-prompt=");
+				expect(log).toContain("## Local charter");
+				expect(log).toContain("FM_INJECTED_CHARTER_SHA256=");
+				expect((log.match(/--append-system-prompt=/g) ?? []).length).toBe(1);
+			}
+		} finally {
+			rmSync(fresh.main, { recursive: true, force: true });
+			rmSync(fresh.sm, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses symlink charters before OMP secondmate launch", () => {
+		const fresh = spawnHarness();
+		const env = spawnEnv(fresh);
+		try {
+			const charter = join(fresh.sm, "data", "charter.md");
+			const secret = join(fresh.sm, "secret.env");
+			writeFileSync(secret, "SECRET=1\n");
+			rmSync(charter);
+			symlinkSync(secret, charter);
+			const run = spawnSync(FM, ["spawn", "kodiak", fresh.sm, "omp", "--secondmate"], { cwd: REPO_ROOT, env, encoding: "utf8" });
+			expect(run.status).not.toBe(0);
+			expect(`${run.stdout}${run.stderr}`).toContain("symlink");
+			expect(existsSync(fresh.log) ? readFileSync(fresh.log, "utf8") : "").not.toContain("agent start");
 		} finally {
 			rmSync(fresh.main, { recursive: true, force: true });
 			rmSync(fresh.sm, { recursive: true, force: true });

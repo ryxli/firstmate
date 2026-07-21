@@ -10,6 +10,7 @@ import {
 	SUB_HOME_MARKER,
 	syncHomeSkills,
 } from "./home-skills";
+import { parseOmpLaunchCommand } from "./omp-system-context";
 
 /** True when path is a seeded secondmate home (real marker file). */
 export function isSecondmateHome(home: string): boolean {
@@ -18,18 +19,16 @@ export function isSecondmateHome(home: string): boolean {
 
 /**
  * Inject `--config <home>/config/omp.yml` into an omp launch command when the
- * command starts with `omp` and does not already pass `--config`.
+ * command is OMP (including env-assign / path forms) and does not already pass
+ * `--config`.
  */
 export function injectOmpHomeConfig(cmd: string, home: string): string {
-	const trimmed = cmd.trimStart();
-	if (!trimmed.startsWith("omp")) return cmd;
-	if (/(?:^|\s)--config(?:\s|=)/.test(trimmed)) return cmd;
+	const parsed = parseOmpLaunchCommand(cmd);
+	if (!parsed) return cmd;
+	if (/(?:^|\s)--config(?:\s|=)/.test(parsed.rest)) return cmd;
 	const configPath = join(home, "config", "omp.yml");
-	const prefixLen = cmd.length - trimmed.length;
-	const prefix = cmd.slice(0, prefixLen);
-	const rest = trimmed.slice(3);
 	const quoted = `'${configPath.replaceAll("'", "'\\''")}'`;
-	return `${prefix}omp --config ${quoted}${rest}`;
+	return `${parsed.prefix}${parsed.executable} --config ${quoted}${parsed.rest}`;
 }
 
 /**

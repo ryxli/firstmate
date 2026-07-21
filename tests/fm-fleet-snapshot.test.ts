@@ -165,6 +165,8 @@ describe("canonical FleetSnapshot collector", () => {
 			mkdirSync(join(child, "state"), { recursive: true });
 			writeFileSync(join(child, "AGENTS.md"), "child manifest\n");
 			writeFileSync(join(child, "data", "backlog.md"), "");
+			const childCharter = "# Charter\nplum\n";
+			writeFileSync(join(child, "data", "charter.md"), childCharter);
 			writeFileSync(join(child, "state", "activation-receipt.json"), JSON.stringify({
 				schema: "firstmate.activation-receipt/v1",
 				manifest_sha256: receiptManifestHash("child manifest\n"),
@@ -172,12 +174,16 @@ describe("canonical FleetSnapshot collector", () => {
 				session_id: "child-session",
 				started_at: "2026-07-13T00:00:00Z",
 				manifest: [manifestEntry("AGENTS.md", "child manifest\n")],
+				charter_path: "data/charter.md",
+				charter_digest: createHash("sha256").update(childCharter).digest("hex"),
 			}));
 			const gauge = join(child, "gauge");
 			mkdirSync(join(gauge, "data"), { recursive: true });
 			mkdirSync(join(gauge, "state"), { recursive: true });
 			writeFileSync(join(gauge, "AGENTS.md"), "gauge manifest\n");
 			writeFileSync(join(gauge, "data", "backlog.md"), "");
+			const gaugeCharter = "# Charter\ngauge\n";
+			writeFileSync(join(gauge, "data", "charter.md"), gaugeCharter);
 			writeFileSync(join(gauge, "state", "activation-receipt.json"), JSON.stringify({
 				schema: "firstmate.activation-receipt/v1",
 				manifest_sha256: receiptManifestHash("gauge manifest\n"),
@@ -185,6 +191,8 @@ describe("canonical FleetSnapshot collector", () => {
 				session_id: "gauge-session",
 				started_at: "2026-07-13T00:00:00Z",
 				manifest: [manifestEntry("AGENTS.md", "gauge manifest\n")],
+				charter_path: "data/charter.md",
+				charter_digest: createHash("sha256").update(gaugeCharter).digest("hex"),
 			}));
 			writeFileSync(join(child, "data", "secondmates.md"), `- gauge - nested child (home: ${gauge})\n`);
 			writeFileSync(join(child, "state", "gauge.meta"), `kind=secondmate\nhome=${gauge}\npane=w1:p3\n`);
@@ -378,6 +386,8 @@ describe("canonical FleetSnapshot collector", () => {
 			started_at: "2026-07-13T00:00:00Z",
 			manifest: [manifestEntry("AGENTS.md", "main alias manifest\n")],
 		}));
+		const aliasCharter = "# Charter\nalias plum\n";
+		writeFileSync(join(child, "data", "charter.md"), aliasCharter);
 		writeFileSync(join(child, "state", "activation-receipt.json"), JSON.stringify({
 			schema: "firstmate.activation-receipt/v1",
 			manifest_sha256: receiptManifestHash("child alias manifest\n"),
@@ -385,6 +395,8 @@ describe("canonical FleetSnapshot collector", () => {
 			session_id: "child-session",
 			started_at: "2026-07-13T00:00:00Z",
 			manifest: [manifestEntry("AGENTS.md", "child alias manifest\n")],
+			charter_path: "data/charter.md",
+			charter_digest: createHash("sha256").update(aliasCharter).digest("hex"),
 		}));
 		symlinkSync(home, alias, "dir");
 		const panes = join(root, "panes.json");
@@ -743,6 +755,24 @@ describe("canonical FleetSnapshot collector", () => {
 				{ schema: "firstmate.activation-receipt/v1", manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST), pane_id: 7, started_at: "2026-07-13T00:00:00Z", manifest: [] },
 				{ schema: "firstmate.activation-receipt/v1", manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST), pane_id: "w1:p1", started_at: "2026-07-13T00:00:00Z", manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)] },
 				{ schema: "firstmate.activation-receipt/v1", manifest_sha256: "0".repeat(64), pane_id: "w1:p1", started_at: "2026-07-13T00:00:00Z", manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)] },
+				{
+					schema: "firstmate.activation-receipt/v1",
+					manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST),
+					pane_id: "w1:p1",
+					session_id: "session-1",
+					started_at: "2026-07-13T00:00:00Z",
+					manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)],
+					charter_path: "data/charter.md",
+				},
+				{
+					schema: "firstmate.activation-receipt/v1",
+					manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST),
+					pane_id: "w1:p1",
+					session_id: "session-1",
+					started_at: "2026-07-13T00:00:00Z",
+					manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)],
+					charter_digest: "a".repeat(64),
+				},
 			]) {
 				writeFileSync(receiptPath, JSON.stringify(receipt));
 				const snapshot = await collectSnapshot("2026-07-13T00:00:00Z");
@@ -755,6 +785,104 @@ describe("canonical FleetSnapshot collector", () => {
 			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
 			else process.env.FM_FLEET_PANES_FILE = oldPanes;
 			rmSync(join(fixture.home, ".."), { recursive: true, force: true });
+		}
+	});
+
+	it("marks live registered secondmates stale for absent, mismatched, or missing charters", async () => {
+		const root = mkdtempSync(join(tmpdir(), "fleet-charter-"));
+		const home = join(root, "main");
+		const child = join(root, "mate");
+		const panes = join(root, "panes.json");
+		mkdirSync(join(home, "data"), { recursive: true });
+		mkdirSync(join(home, "state"), { recursive: true });
+		mkdirSync(join(home, "sbin"), { recursive: true });
+		mkdirSync(join(child, "data"), { recursive: true });
+		mkdirSync(join(child, "state"), { recursive: true });
+		writeFileSync(join(home, "sbin", "fm-spawn.sh"), "");
+		writeFileSync(join(home, "AGENTS.md"), FIXTURE_MANIFEST);
+		writeFileSync(join(home, "data", "backlog.md"), "");
+		writeFileSync(join(home, "data", "secondmates.md"), `- mate - domain (home: ${child})\n`);
+		writeFileSync(join(home, "state", "mate.meta"), `kind=secondmate\nhome=${child}\npane=w1:p2\n`);
+		writeFileSync(join(home, "state", "activation-receipt.json"), JSON.stringify({
+			schema: "firstmate.activation-receipt/v1",
+			manifest_sha256: receiptManifestHash(FIXTURE_MANIFEST),
+			pane_id: "w1:p1",
+			session_id: "main-session",
+			started_at: "2026-07-13T00:00:00Z",
+			manifest: [manifestEntry("AGENTS.md", FIXTURE_MANIFEST)],
+		}));
+		writeFileSync(join(child, "AGENTS.md"), "mate manifest\n");
+		writeFileSync(join(child, "data", "backlog.md"), "");
+		const charter = "# Charter\nmate\n";
+		writeFileSync(join(child, "data", "charter.md"), charter);
+		const baseReceipt = {
+			schema: "firstmate.activation-receipt/v1",
+			manifest_sha256: receiptManifestHash("mate manifest\n"),
+			pane_id: "w1:p2",
+			session_id: "mate-session",
+			started_at: "2026-07-13T00:00:00Z",
+			manifest: [manifestEntry("AGENTS.md", "mate manifest\n")],
+		};
+		writeFileSync(panes, JSON.stringify({ result: { panes: [
+			{ pane_id: "w1:p1", cwd: home, agent_status: "idle", agent_session_id: "main-session", agent: "omp" },
+			{ pane_id: "w1:p2", cwd: child, agent_status: "idle", agent_session_id: "mate-session", agent: "omp" },
+		] } }));
+		const oldHome = process.env.FM_HOME;
+		const oldPanes = process.env.FM_FLEET_PANES_FILE;
+		process.env.FM_HOME = home;
+		process.env.FM_FLEET_PANES_FILE = panes;
+		try {
+			writeFileSync(join(child, "state", "activation-receipt.json"), JSON.stringify(baseReceipt));
+			const absent = await collectSnapshot("2026-07-13T00:00:00Z");
+			expect(absent.activation?.state).toBe("stale");
+			expect(absent.notes.some(note => note.includes("activation charter claim absent"))).toBe(true);
+
+			writeFileSync(join(child, "state", "activation-receipt.json"), JSON.stringify({
+				...baseReceipt,
+				charter_path: "data/charter.md",
+				charter_digest: createHash("sha256").update(charter).digest("hex"),
+			}));
+			const fresh = await collectSnapshot("2026-07-13T00:00:01Z");
+			expect(fresh.activation?.state).toBe("fresh");
+
+			writeFileSync(join(child, "data", "charter.md"), "# Charter\nedited\n");
+			const edited = await collectSnapshot("2026-07-13T00:00:02Z");
+			expect(edited.activation?.state).toBe("stale");
+			expect(edited.notes.some(note => note.includes("activation charter digest mismatch"))).toBe(true);
+
+			rmSync(join(child, "data", "charter.md"));
+			const missingCharter = await collectSnapshot("2026-07-13T00:00:03Z");
+			expect(missingCharter.activation?.state).toBe("stale");
+			expect(missingCharter.notes.some(note => note.includes("activation charter missing"))).toBe(true);
+
+			writeFileSync(join(child, "data", "charter.md"), charter);
+			writeFileSync(join(child, "state", "activation-receipt.json"), JSON.stringify(baseReceipt));
+			writeFileSync(panes, JSON.stringify({ result: { panes: [
+				{ pane_id: "w1:p1", cwd: home, agent_status: "idle", agent_session_id: "main-session", agent: "omp" },
+				{ pane_id: "w1:p2", cwd: child, agent_status: "idle", agent_session_id: "mate-session", agent: "claude" },
+			] } }));
+			const nonOmp = await collectSnapshot("2026-07-13T00:00:04Z");
+			expect(nonOmp.activation?.state).toBe("fresh");
+			expect(nonOmp.notes.some(note => note.includes("activation charter"))).toBe(false);
+
+			writeFileSync(panes, JSON.stringify({ result: { panes: [
+				{ pane_id: "w1:p1", cwd: home, agent_status: "idle", agent_session_id: "main-session", agent: "omp" },
+				{ pane_id: "w1:p2", cwd: child, agent_status: "idle", agent_session_id: "mate-session", agent: "omp" },
+			] } }));
+			writeFileSync(join(child, "state", "activation-receipt.json"), JSON.stringify(baseReceipt));
+			// Degrade live manifest hashing (no current.hash) while keeping a valid receipt shape.
+			rmSync(join(child, "AGENTS.md"));
+			mkdirSync(join(child, "AGENTS.md"));
+			const unknownManifest = await collectSnapshot("2026-07-13T00:00:05Z");
+			expect(unknownManifest.activation?.state).toBe("stale");
+			expect(unknownManifest.notes.some(note => note.includes("activation manifest degraded"))).toBe(true);
+			expect(unknownManifest.notes.some(note => note.includes("activation charter claim absent"))).toBe(true);
+		} finally {
+			if (oldHome === undefined) delete process.env.FM_HOME;
+			else process.env.FM_HOME = oldHome;
+			if (oldPanes === undefined) delete process.env.FM_FLEET_PANES_FILE;
+			else process.env.FM_FLEET_PANES_FILE = oldPanes;
+			rmSync(root, { recursive: true, force: true });
 		}
 	});
 });

@@ -71,11 +71,51 @@ if (!/^[0-9a-f]{40}$/.test(receipt.source_revision)) throw new Error("source rev
 if (receipt.required_probe_result?.activation !== "ok") throw new Error("required probe result missing from receipt");
 if (!Array.isArray(receipt.manifest) || receipt.manifest.length === 0) throw new Error("receipt manifest missing");
 if (!receipt.manifest.some((entry) => entry.path === ".omp/extensions/bridge/index.ts")) throw new Error("recursive extension manifest missing");
+if (receipt.charter_path !== undefined || receipt.charter_digest !== undefined) {
+  throw new Error("receipt claimed charter injection without launcher markers");
+}
 const { collectSnapshot } = await import(pathToFileURL(join(root, ".omp/extensions/bridge/collect.ts")).href);
 const snapshot = await collectSnapshot("2026-07-14T00:00:00Z");
 if (snapshot.activation?.state !== "fresh" || snapshot.activation.fresh !== 1) throw new Error("collector did not accept override receipt");
 if (existsSync(join(defaultState, "activation-receipt.json"))) throw new Error("receipt was written outside FM_STATE_OVERRIDE");
 await handlers.get("session_shutdown")();
 if (existsSync(receiptPath)) throw new Error("matching shutdown did not remove activation receipt");
+
+// Secondmate with valid launcher markers records both charter fields.
+const { createHash } = await import("node:crypto");
+writeFileSync(join(home, ".fm-secondmate-home"), "riggs\n");
+const charterBody = "# Charter\nRiggs domain\n";
+writeFileSync(join(home, "data", "charter.md"), charterBody);
+const charterDigest = createHash("sha256").update(charterBody).digest("hex");
+process.env.FM_INJECTED_CHARTER_PATH = "data/charter.md";
+process.env.FM_INJECTED_CHARTER_SHA256 = charterDigest;
+await handlers.get("session_start")({}, ctx);
+const claimed = JSON.parse(readFileSync(receiptPath, "utf8"));
+if (claimed.charter_path !== "data/charter.md") throw new Error("marked launch omitted charter_path");
+if (claimed.charter_digest !== charterDigest) throw new Error("marked launch omitted matching charter_digest");
+await handlers.get("session_shutdown")();
+
+// Invalid marker digest omits both fields.
+process.env.FM_INJECTED_CHARTER_SHA256 = "0".repeat(64);
+await handlers.get("session_start")({}, ctx);
+const omitted = JSON.parse(readFileSync(receiptPath, "utf8"));
+if (omitted.charter_path !== undefined || omitted.charter_digest !== undefined) {
+  throw new Error("invalid marker still claimed charter injection");
+}
+await handlers.get("session_shutdown")();
+
+for (const key of [
+  "FM_HOME",
+  "FM_STATE_OVERRIDE",
+  "FM_ROOT_OVERRIDE",
+  "FM_FLEET_SOURCE_HOME",
+  "FM_FLEET_SOURCE_REVISION",
+  "HERDR_SOCKET_PATH",
+  "FM_FLEET_PANES_FILE",
+  "FM_INJECTED_CHARTER_PATH",
+  "FM_INJECTED_CHARTER_SHA256",
+]) {
+  delete process.env[key];
+}
 rmSync(home, { recursive: true, force: true });
 console.log("supervisor activation receipt lifecycle passed");

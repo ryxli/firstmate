@@ -98,6 +98,7 @@ import { capabilityForHome, readCapabilityRegistry, readSourceRevision } from ".
 import { sourceRootForHome } from "./bridge/collect";
 import { connect, type Socket } from "node:net";
 import { resolveHome as resolveIdentityHome, resolveIdentity } from "./fm-identity/identity";
+import { resolveValidatedCharterClaim } from "./cli/lib/omp-system-context";
 
 import { dependencyDeliveries, parseDependencyEdge, prioritizeDependencyEdges, validateBlockedReport, type DependencyEdge } from "./dependency-handoff";
 
@@ -292,6 +293,9 @@ export interface ActivationReceipt {
 	manifest: ActivationManifestEntry[];
 	source_revision?: string;
 	required_probe_result?: unknown;
+	/** Present only when launcher markers prove charter was injected. Always both or neither. */
+	charter_path?: string;
+	charter_digest?: string;
 }
 
 interface ActivationIdentity {
@@ -440,6 +444,7 @@ async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 	const capability = capabilityForHome(readCapabilityRegistry(sourceHome).registry, operationalHome);
 	const observedProbe = { activation: manifest.length > 0 ? "ok" : "unknown" };
 	const fleetId = resolveFleetId(operationalHome);
+	const charterClaim = resolveValidatedCharterClaim(operationalHome);
 	const receipt: ActivationReceipt = {
 		schema: "firstmate.activation-receipt/v1",
 		...identity,
@@ -450,6 +455,7 @@ async function writeActivationReceipt(sup: Supervisor): Promise<void> {
 		manifest,
 		...(source.revision ? { source_revision: source.revision } : {}),
 		...(capability?.requiredProbe !== undefined ? { required_probe_result: observedProbe } : {}),
+		...(charterClaim ?? {}),
 	};
 	const path = activationReceiptPath(sup.ctx);
 	const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;

@@ -191,7 +191,10 @@ mkdir -p "$secondmate_home/data" "$secondmate_home/state" "$secondmate_home/conf
 printf 'anchor\n' > "$secondmate_home/.fm-secondmate-home"
 : > "$secondmate_home/AGENTS.md"
 secondmate_home_real=$(cd "$secondmate_home" && pwd -P)
-printf 'charter prompt that must not be resent\n' > "$secondmate_home/data/charter.md"
+printf 'charter prompt refreshed on resume\n' > "$secondmate_home/data/charter.md"
+mkdir -p "$secondmate_home/.omp/skills" "$secondmate_home/config"
+: > "$secondmate_home/config/shared-skills"
+: > "$secondmate_home/config/local-skills"
 mkdir -p "$spawn_home/state"
 printf 'kind=secondmate\nhome=%s\n' "$secondmate_home" > "$spawn_home/state/anchor.meta"
 printf '%s\n' '- anchor - anchor domain (home: '"$secondmate_home"'; workspace: w-anchor; name: Plum; scope: anchor domain; projects: (none); added 2026-07-11)' > "$spawn_home/data/secondmates.md"
@@ -204,8 +207,12 @@ resume_out=$(PATH="$resume_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$resume_l
   || fail "secondmate OMP recovery spawn should succeed: $resume_out"
 grep -qF 'omp --append-system-prompt=' "$resume_log" || fail "OMP respawn did not inject the runtime role contract"
 grep -qF -- '--auto-approve -c' "$resume_log" || fail "OMP respawn did not continue the saved session"
-if grep -qF 'charter prompt that must not be resent' "$resume_log"; then
-  fail "OMP respawn resent the charter instead of continuing"
+grep -qF 'charter prompt refreshed on resume' "$resume_log" \
+  || fail "OMP respawn did not refresh charter into append-system-prompt"
+grep -qF 'FM_INJECTED_CHARTER_SHA256=' "$resume_log" || fail "OMP respawn omitted charter injection marker"
+# shellcheck disable=SC2016 # literal cat prompt must not appear on OMP secondmate resume
+if grep -qF '$(cat ' "$resume_log"; then
+  fail "OMP respawn used positional charter prompt instead of system append"
 fi
 grep -qF "home=$secondmate_home_real" "$spawn_home/state/anchor.meta" || fail "recovery metadata did not preserve the durable home"
 grep -qF 'tab create --workspace w-anchor --label Plum' "$resume_log" || fail "secondmate tab did not use the registered display name"
@@ -216,9 +223,11 @@ grep -qF 'worker=Plum' "$spawn_home/state/anchor.meta" || fail "secondmate metad
 pass "secondmate respawn uses the registered display name"
 
 fallback_home="$TMP_ROOT/fallback-secondmate-home"
-mkdir -p "$fallback_home/data" "$fallback_home/state" "$fallback_home/config" "$fallback_home/projects" "$fallback_home/sbin"
+mkdir -p "$fallback_home/data" "$fallback_home/state" "$fallback_home/config" "$fallback_home/projects" "$fallback_home/sbin" "$fallback_home/.omp/skills"
 printf 'fallback\n' > "$fallback_home/.fm-secondmate-home"
 : > "$fallback_home/AGENTS.md"
+: > "$fallback_home/config/shared-skills"
+: > "$fallback_home/config/local-skills"
 printf 'charter prompt for fallback\n' > "$fallback_home/data/charter.md"
 printf '%s\n' '- fallback - fallback domain (home: '"$fallback_home"'; name: ; scope: fallback domain; projects: (none); added 2026-07-11)' >> "$spawn_home/data/secondmates.md"
 printf 'kind=secondmate\nhome=%s\n' "$fallback_home" > "$spawn_home/state/fallback.meta"
@@ -229,6 +238,6 @@ fallback_out=$(PATH="$fallback_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$fall
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
   "$ROOT/sbin/fm" spawn fallback omp --secondmate 2>&1) \
   || fail "malformed name registry fallback should still spawn: $fallback_out"
-grep -qF 'pane rename w1:p-new home' "$fallback_log" || fail "malformed name registry entry changed the fallback display label"
-grep -qF 'worker=home' "$spawn_home/state/fallback.meta" || fail "malformed name registry entry changed fallback metadata"
-pass "secondmate malformed or name-less registry entries retain home fallback"
+grep -qF 'pane rename w1:p-new fallback' "$fallback_log" || fail "malformed name registry entry did not fall back to the mate id label"
+grep -qF 'worker=fallback' "$spawn_home/state/fallback.meta" || fail "malformed name registry entry did not record the mate id as worker"
+pass "secondmate malformed or name-less registry entries fall back to the mate id"

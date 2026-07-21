@@ -3,8 +3,8 @@
 // Runs OMP from the active home so home-local identity and instructions load.
 // Main-firstmate startup executes deterministic checks before OMP, then opens
 // idle with one visible static fleet message already in developer context.
-// Secondmate homes preserve their existing startup prompt and cached context.
-// Explicit arguments are passed through to OMP verbatim.
+// Secondmate homes inject role contract + local charter/cap/backlog as system
+// context and open idle (no default kickoff). Explicit arguments pass through.
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -14,6 +14,13 @@ import { lockSnapshot, removeLockIfOwner, resolveLockPaths, sleepMs, withLockCla
 
 import { FM_START_STATIC_CONTEXT_ENV, CapContextOversizeError, mainPreloadBlock, runStartupContext } from "../lib/startup-context";
 import { ensureSecondmateHomeSkills } from "../lib/ensure-home-skills";
+import {
+	CharterLoadError,
+	charterInjectionEnv,
+	charterSystemBlock,
+	joinOmpSystemPromptBlocks,
+	loadRequiredCharter,
+} from "../lib/omp-system-context";
 import { activeHome, IdentityNameOversizeError, RoleContractOversizeError, roleContractForHome, roleKindForHome } from "../lib/role-contract";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -27,8 +34,16 @@ interface ReservedLaunch {
 	gate: string;
 }
 
+interface PreparedLaunch {
+	ompArgs: string[];
+	env: NodeJS.ProcessEnv;
+}
+
 interface LaunchOptions {
 	beforeLaunch?: () => Promise<boolean>;
+	/** Runs inside the acquired lock immediately before spawning OMP. */
+	prepareLaunch?: () => PreparedLaunch | false;
+	ompArgs?: string[];
 	launchEnv?: () => NodeJS.ProcessEnv;
 	lockHome?: string;
 }
@@ -41,24 +56,18 @@ function readOptional(path: string): string | null {
 	}
 }
 
-function secondmateContextBlock(home: string): string {
+function secondmateContextBlock(home: string, charterText: string | null): string {
 	const parts = [
 		"# Secondmate startup context",
-		"This is a model-driven secondmate startup. Stay inside your generated Runtime Role Contract, your charter routing scope, and your own home.",
+		"Stay inside your generated Runtime Role Contract, your charter routing scope, and your own home.",
 		"Do not run main-fleet governance commands. Do not use `fm home`, `fm brief --secondmate`, or `fm spawn --secondmate` from this home.",
 	];
-	const charter = readOptional(join(home, "data", "charter.md"));
-	if (charter) parts.push("## Local charter", charter);
+	if (charterText) parts.push(charterSystemBlock(charterText));
 	const cap = readOptional(join(home, "data", "cap.md"));
 	if (cap) parts.push("## Local cap context", cap);
 	const backlog = readOptional(join(home, "data", "backlog.md"));
 	if (backlog) parts.push("## Local backlog", backlog);
 	return parts.join("\n\n");
-}
-
-function secondmateKickoff(contract: string): string {
-	const line = contract.split(/\r?\n/).find(entry => entry.startsWith("You are "));
-	return `Session start: ${line ?? "You are a secondmate."} Run your local secondmate startup from the injected charter/cap context, then report local status to your supervisor channel when needed.`;
 }
 
 function envMs(name: string, fallbackMs: number): number {
@@ -153,7 +162,7 @@ async function waitForReservedChild(launch: ReservedLaunch, paths: SessionLockPa
 	return status;
 }
 
-async function waitAndLaunch(ompArgs: string[], cwd: string, options: LaunchOptions = {}): Promise<number> {
+async function waitAndLaunch(cwd: string, options: LaunchOptions = {}): Promise<number> {
 	const paths = resolveLockPaths(options.lockHome);
 	const deadlineMs = Date.now() + envMs("FM_START_LOCK_WAIT_TIMEOUT_SECS", DEFAULT_LOCK_WAIT_TIMEOUT_MS);
 	let announced = false;
@@ -177,7 +186,15 @@ async function waitAndLaunch(ompArgs: string[], cwd: string, options: LaunchOpti
 				const claimedSnapshot = lockSnapshot(paths);
 				if (claimedSnapshot.state === "live") return undefined;
 				if (options.beforeLaunch && !await options.beforeLaunch()) return false;
-				return startReservedChild(ompArgs, cwd, options.launchEnv ? options.launchEnv() : childEnv(), paths);
+				let ompArgs = options.ompArgs ?? [];
+				let env = options.launchEnv ? options.launchEnv() : childEnv();
+				if (options.prepareLaunch) {
+					const prepared = options.prepareLaunch();
+					if (prepared === false) return false;
+					ompArgs = prepared.ompArgs;
+					env = prepared.env;
+				}
+				return startReservedChild(ompArgs, cwd, env, paths);
 			});
 			if (launched === false) return 1;
 			if (launched !== undefined) return await waitForReservedChild(launched, paths);
@@ -188,23 +205,40 @@ async function waitAndLaunch(ompArgs: string[], cwd: string, options: LaunchOpti
 	}
 }
 
-async function legacyRun(argv: string[], home: string, contract: string): Promise<number> {
+async function legacyRun(argv: string[], home: string, contract: string, requireCharter: boolean): Promise<number> {
 	const skills = ensureSecondmateHomeSkills(home, { quiet: true });
 	if (skills && !skills.ok) {
 		process.stderr.write(`error: home skills reconciliation failed: ${skills.status}\n`);
 		return 1;
 	}
 	const args = argv.slice(1);
-	const context = secondmateContextBlock(home);
-	const ompArgs = [
-		`--config=${join(home, "config", "omp.yml")}`,
-		`--append-system-prompt=${contract}`,
-		`--append-system-prompt=${context}`,
-		...(args.length > 0 ? args : [secondmateKickoff(contract)]),
-	];
-	return await waitAndLaunch(ompArgs, home, {
-		launchEnv: () => childEnv({ FM_HOME: home }),
+	return await waitAndLaunch(home, {
 		lockHome: home,
+		prepareLaunch: () => {
+			// Load charter inside the reservation so lock-wait cannot ship stale bytes.
+			let charterText: string | null = null;
+			let markers: Record<string, string> = {};
+			try {
+				const charter = loadRequiredCharter(home);
+				charterText = charter.text;
+				markers = charterInjectionEnv(charter.digest);
+			} catch (error) {
+				if (requireCharter) {
+					const detail = error instanceof CharterLoadError ? error.message : String(error);
+					process.stderr.write(`fm start: secondmate charter required before OMP launch: ${detail}. OMP was not launched.\n`);
+					return false;
+				}
+			}
+			const context = secondmateContextBlock(home, charterText);
+			return {
+				ompArgs: [
+					`--config=${join(home, "config", "omp.yml")}`,
+					`--append-system-prompt=${joinOmpSystemPromptBlocks([contract, context])}`,
+					...args,
+				],
+				env: childEnv({ FM_HOME: home, ...markers }),
+			};
+		},
 	});
 }
 
@@ -218,7 +252,7 @@ async function run(argv: string[]): Promise<number> {
 	try {
 		roleContract = roleContractForHome(home);
 		if (roleKind !== "firstmate") {
-			return await legacyRun(argv, home, roleContract);
+			return await legacyRun(argv, home, roleContract, roleKind === "secondmate");
 		}
 		preload = mainPreloadBlock(home);
 	} catch (error) {
@@ -262,13 +296,13 @@ async function run(argv: string[]): Promise<number> {
 		preflightDone = true;
 		return true;
 	};
-	const ompArgs = [`--append-system-prompt=${roleContract}`, `--append-system-prompt=${preload}`, ...args];
-	return await waitAndLaunch(ompArgs, home, {
+	return await waitAndLaunch(home, {
 		beforeLaunch: async () => {
 			const ok = await beforeLaunch();
 			if (!ok) return false;
 			return true;
 		},
+		ompArgs: [`--append-system-prompt=${joinOmpSystemPromptBlocks([roleContract, preload])}`, ...args],
 		launchEnv: () => childEnv({ [FM_START_STATIC_CONTEXT_ENV]: staticFleet }),
 	});
 }
