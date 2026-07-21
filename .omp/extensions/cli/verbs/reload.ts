@@ -293,7 +293,7 @@ function paneDetails(pane: string): PaneDetails {
 // final visible compositor can establish idle; historical output before it
 // is intentionally ignored.
 const ANSI_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])/g;
-const HEADER_RE = /^╭── .+(?: ──|▶────)╮$/;
+const HEADER_RE = /^╭── .+(?: ─+|▶─+)╮$/;
 const BOTTOM_RE = /^╰─( +)─╯$/;
 const SPINNER_RE = /[⠁-⣿]|⟦esc⟧/;
 

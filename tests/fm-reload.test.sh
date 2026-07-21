@@ -195,7 +195,7 @@ case "${1:-}" in
             # Exact OMP idle compositor frame: a metadata header followed by
             # the bottom border, with no intermediate interior row.
             idle|done|empty-box) printf '╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\n╰─                          ─╯\n' ;;
-            v17-empty-box) printf '╭── ⬢ OMP · ◔ low ▶────╮\n╰─                          ─╯\n' ;;
+            v17-empty-box) printf '╭── ⬢ OMP · ◔ low ▶──────────────────────────────────╮\n╰─                          ─╯\n' ;;
             # ANSI styling around the exact idle frame must be ignored.
             ansi-empty-box) printf '\033[1;36m╭── ⬢ OMP · ◔ low ▶ 📁 /repo ──╮\033[0m\n╰─                          ─╯\n' ;;
             # A historical spinner is safe only when another nonblank line
