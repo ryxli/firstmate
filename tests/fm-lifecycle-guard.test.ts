@@ -99,6 +99,7 @@ describe("bash lifecycle and state guards", () => {
 	it("allows status files, read-only state references, and canonical fm verbs", () => {
 		for (const command of [
 			"echo state/riggs.meta rm",
+			"rm state/riggs.status",
 			"rm x; echo state/riggs.meta",
 			"cat state/riggs.meta",
 			"printf 'state/riggs.meta'",
@@ -131,6 +132,7 @@ describe("bash raw OMP secondmate wrappers", () => {
 			"fm spawn riggs /homes/riggs omp --secondmate",
 			"fm spawn riggs /homes/riggs \"prompt omp repair\" --secondmate",
 			"fm spawn riggs /homes/riggs \"omp repair\"",
+			"echo \"omp docs\"; fm spawn riggs /homes/riggs --secondmate",
 			"echo \"omp repair\"",
 			"myfm spawn riggs /homes/riggs \"omp repair\" --secondmate",
 		]) {

@@ -15,7 +15,7 @@ const STATE_META_TOKEN = /(?:^|[\s"';&|()])(?:[^\s"';&|()]*\/)?state\/[^\/\s"';&
 const STATE_META_PATH = /(^|\/)state\/[^/]+\.meta$/;
 const FM_SPAWN = /(?:^|[\s"';&|()])['"]?(?:fm|(?:[^\s"';&|()]*\/)?sbin\/fm)['"]?\s+['"]?spawn['"]?(?=$|[\s"';&|()])/;
 const SECOND_MATE = /(?:^|[\s"';&|()])['"]?--secondmate['"]?(?=$|[\s"';&|()=])/;
-const QUOTED_OMP_ASSIGNMENT = /(?:^|[\s;&|()])[A-Za-z_][A-Za-z0-9_.-]*=(['"])omp /;
+const QUOTED_OMP_ASSIGNMENT = /(?:^|[\s;&|()])[A-Za-z_][A-Za-z0-9_]*=(['"])omp /;
 const QUOTED_OMP_POSITIONAL = /(?:^|[\s;&|()])(['"])omp /;
 const HASHLINE_FILE_HEADER = /^\[([^\]\r\n#]+)#[0-9A-Fa-f]{4}\]\s*$/gm;
 
@@ -63,6 +63,7 @@ function splitShellSegments(command: string): string[] {
 }
 
 function containsStateDestruction(command: string): boolean {
+	if (!command.includes(".meta")) return false;
 	for (const segment of splitShellSegments(command)) {
 		const destructive = RM_OR_UNLINK.exec(segment);
 		const remainder = destructive ? segment.slice(destructive.index + destructive[0].length).replace(/\\\//g, "/") : "";
@@ -72,7 +73,23 @@ function containsStateDestruction(command: string): boolean {
 }
 
 function containsRawSecondmateWrapper(command: string): boolean {
-	return FM_SPAWN.test(command) && SECOND_MATE.test(command) && (QUOTED_OMP_ASSIGNMENT.test(command) || QUOTED_OMP_POSITIONAL.test(command));
+	if (
+		!FM_SPAWN.test(command) ||
+		!SECOND_MATE.test(command) ||
+		(!QUOTED_OMP_ASSIGNMENT.test(command) && !QUOTED_OMP_POSITIONAL.test(command))
+	) {
+		return false;
+	}
+	for (const segment of splitShellSegments(command)) {
+		if (
+			FM_SPAWN.test(segment) &&
+			SECOND_MATE.test(segment) &&
+			(QUOTED_OMP_ASSIGNMENT.test(segment) || QUOTED_OMP_POSITIONAL.test(segment))
+		) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function editTargetsStateMeta(patch: string): boolean {

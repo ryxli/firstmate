@@ -99,6 +99,7 @@ export function linkShipExtensions(home: string, extSrc: string, opts: ShipExtOp
 
 	return result;
 }
+
 function isEmptyDirectory(path: string): boolean {
 	try {
 		const st = lstatSync(path);
@@ -108,7 +109,7 @@ function isEmptyDirectory(path: string): boolean {
 	}
 }
 
-function hasLifecycleGuard(path: string): boolean {
+export function hasLifecycleGuard(path: string): boolean {
 	try {
 		return lstatSync(join(path, "fm-lifecycle-guard.ts")).isFile();
 	} catch {
@@ -151,7 +152,7 @@ export function linkShipPreHooks(home: string, source: string, opts: ShipExtOpti
 	result.dstExisted = isDirectory(preDst);
 
 	if (isDirectory(preDst) && hasLifecycleGuard(preDst) && isTrackedPreHooks(home)) {
-		if (opts.verbose) process.stdout.write("ship-ext: skip authoritative real pre hooks\n");
+		if (opts.verbose) process.stdout.write("ship-ext: preserve authoritative real pre hooks\n");
 		result.noop += 1;
 		return result;
 	}

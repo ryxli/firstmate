@@ -23,7 +23,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMateMiseToml } from "../lib/mise-home";
 import { checkMateHomeLayout, repairMateHomeLayout } from "../lib/mate-home-layout";
-import { isTrackedPreHooks } from "../lib/ship-ext";
+import { hasLifecycleGuard, isTrackedPreHooks } from "../lib/ship-ext";
 import {
 	existsFollow,
 	isDirectoryFollow,
@@ -187,13 +187,6 @@ function repairExtensionLink(ctx: Ctx, name: string): void {
 	}
 	ctx.status = "repaired";
 }
-function hasLifecycleGuard(path: string): boolean {
-	try {
-		return lstatSync(join(path, "fm-lifecycle-guard.ts")).isFile();
-	} catch {
-		return false;
-	}
-}
 
 function checkPreHooks(ctx: Ctx): void {
 	const ompDir = join(ctx.homePath, ".omp");
@@ -282,7 +275,6 @@ function checkPreHooks(ctx: Ctx): void {
 	}
 	ctx.status = "repaired";
 }
-
 
 function checkCurrentOmp(ctx: Ctx): void {
 	checkPreHooks(ctx);

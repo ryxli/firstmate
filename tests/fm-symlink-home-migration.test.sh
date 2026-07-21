@@ -514,16 +514,18 @@ test_current_layout_repair_discovers_shared_skills() {
   pass "home-link skips .agents; home skills exposes only selected shared skills"
 }
 
-
-
-
 test_legacy_whole_omp_link_still_passes() {
   require_slice_scripts
-  local code="$TMP_ROOT/legacy-pass-code" home="$TMP_ROOT/legacy-pass-home"
+  local code="$TMP_ROOT/legacy-pass-code" home="$TMP_ROOT/legacy-pass-home" out
   make_code_root "$code"
+  code=$(canonical "$code")
   make_link_home "$code" "$home" legacypass
-  FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check >/dev/null \
-    || fail "legacy whole-directory .omp link no longer passes"
+  rm -rf "$home/.omp"
+  ln -s "$code/.claude" "$home/.claude"
+  ln -s "$code/.omp" "$home/.omp"
+  assert_link_points "$home/.omp" "$code/.omp" "legacy whole-.omp fixture link"
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1) \
+    || fail "legacy whole-directory .omp link no longer passes: $out"
   pass "legacy whole-directory .omp symlink still passes home-link check"
 }
 
