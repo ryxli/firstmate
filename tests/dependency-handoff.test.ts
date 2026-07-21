@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dependencyDeliveries, parseDependencyEdge, prioritizeDependencyEdges, validateBlockedReport } from "../.omp/extensions/dependency-handoff";
+import { dependencyDeliveries, parseDependencyEdge, prioritizeDependencyEdges, validateBlockedReport } from "../.omp/extensions/cli/lib/dependency-handoff";
 import { writeDependencyReceiptFileForTest } from "../.omp/extensions/fm-supervisor";
 
 test("producer completion with an existing artifact wakes parent and every sibling consumer", () => {

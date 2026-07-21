@@ -10,11 +10,12 @@
 // tool probe.
 //
 // Usage: fm spawn <task-id> <project-dir> [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>] [--crew-model=<model>]
-//        fm spawn <task-id> [<firstmate-home>] [harness|launch-command] --secondmate [--workspace=<id>] [--tab=<id>]
-//   With no harness arg, the harness comes from fm harness crew (config/crew-harness,
-//   falling back to firstmate's own harness). A bare adapter name (omp|claude|codex|
-//   opencode|pi) overrides it for this spawn. A non-flag string containing whitespace
-//   is treated as a RAW launch command - the escape hatch for verifying new adapters.
+//        fm spawn <task-id> [<firstmate-home>] --secondmate [--workspace=<id>] [--tab=<id>]
+//   With no harness arg, ship/scout harness comes from fm harness crew
+//   (config/crew-harness, falling back to firstmate's own harness). A bare
+//   adapter name (omp|claude|codex|opencode|pi) overrides it for this spawn.
+//   A non-flag string containing whitespace is treated as a RAW launch command
+//   for ship/scout. Secondmates always launch through their home-local fm start.
 //   --scout records kind=scout in the task's meta (report deliverable, scratch worktree;
 //   see AGENTS.md section 6); --secondmate records kind=secondmate and launches in a
 //   provisioned firstmate home; the default is kind=ship.
@@ -37,6 +38,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	realpathSync,
+	renameSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -45,19 +47,13 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { supervisorName, workerLabel } from "../lib/identity";
 import { getHarnessAdapter } from "../lib/harness-adapters";
-import { herdrReapHuskSlot, jsonGet, metaSet, metaValue } from "../lib/herdr";
+import { herdrPaneAgentProcessVerdict, herdrReapHuskSlot, jsonGet, metaSet, metaValue } from "../lib/herdr";
 import { shellQuote } from "../lib/spawn";
-import { ensureSecondmateHomeSkills, injectOmpHomeConfig } from "../lib/ensure-home-skills";
 import {
-	CharterLoadError,
-	charterInjectionEnv,
-	charterSystemBlock,
 	injectOmpAppendSystemPrompts,
-	isOmpLaunchCommand,
-	loadRequiredCharter,
 	parseOmpLaunchCommand,
 } from "../lib/omp-system-context";
-import { crewRoleContract, ensureSecondmateParentIdentity, secondmateRoleContract } from "../lib/role-contract";
+import { crewRoleContract } from "../lib/role-contract";
 
 // Equivalent of the former script's SCRIPT_DIR/.. (sbin's parent = repo root),
 // resolved from this verb module's own location (verbs -> cli -> extensions -> .omp -> root).
@@ -351,8 +347,38 @@ function replaceRegisteredSecondmateWorkspace(dataDir: string, id: string, oldWo
 		process.stderr.write(`error: could not update workspace registration for secondmate ${id}\n`);
 		return false;
 	}
-	writeFileSync(reg, out.map(l => `${l}\n`).join(""));
-	return true;
+	const content = out.map(l => `${l}\n`).join("");
+	let tempPath = "";
+	try {
+		const prefix = `${reg}.tmp-${process.pid}-${Date.now()}-`;
+		for (let attempt = 0; ; attempt += 1) {
+			const candidate = `${prefix}${attempt}`;
+			tempPath = candidate;
+			try {
+				writeFileSync(candidate, content, { encoding: "utf8", flag: "wx" });
+				break;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+					tempPath = "";
+					continue;
+				}
+				throw error;
+			}
+		}
+		renameSync(tempPath, reg);
+		tempPath = "";
+		return true;
+	} catch {
+		if (tempPath) {
+			try {
+				rmSync(tempPath, { force: true });
+			} catch {
+				// best-effort cleanup of an incomplete sibling
+			}
+		}
+		process.stderr.write(`error: could not update workspace registration for secondmate ${id}\n`);
+		return false;
+	}
 }
 
 // replaceSecondmateMetaWorkspace: a no-op success when the meta file does not
@@ -553,12 +579,6 @@ function validateFirstmateHomeForSpawn(id: string, home: string, fmRoot: string,
 		}
 	}
 
-	const skills = ensureSecondmateHomeSkills(absHome, { quiet: true, codeRoot: fmRoot, fmHome });
-	if (skills && !skills.ok) {
-		process.stderr.write(`error: home skills reconciliation failed for secondmate home ${home}: ${skills.status}\n`);
-		return { ok: false };
-	}
-
 	if (!existsSync(`${absHome}/AGENTS.md`)) {
 		process.stderr.write(`error: ${home} is not a firstmate home (missing AGENTS.md)\n`);
 		return { ok: false };
@@ -567,6 +587,7 @@ function validateFirstmateHomeForSpawn(id: string, home: string, fmRoot: string,
 		process.stderr.write(`error: ${home} is not a firstmate home (missing sbin/)\n`);
 		return { ok: false };
 	}
+
 
 	return { ok: true, value: absHome };
 }
@@ -584,7 +605,9 @@ function findMatchingPaneId(cwd: string): string {
 		};
 		const panes = parsed?.result?.panes ?? [];
 		for (const p of panes) {
-			if (p?.agent_session && p.cwd === cwd) return p.pane_id ?? "";
+			if (!p?.agent_session || p.cwd !== cwd) continue;
+			const pane = p.pane_id ?? "";
+			if (pane && herdrPaneAgentProcessVerdict(pane) !== "shell") return pane;
 		}
 	} catch {
 		// best-effort, mirrors the python helper's `2>/dev/null || true`
@@ -592,14 +615,125 @@ function findMatchingPaneId(cwd: string): string {
 	return "";
 }
 
+// Close only the exact managed shell tab recorded for this mate. Same-CWD
+// user shell tabs are intentionally not considered cleanup candidates.
+function closeRecordedSecondmateShellTab(
+	workspace: string,
+	cwd: string,
+	keepTab: string,
+	recordedTab: string,
+	registeredWorkspace: string,
+): boolean {
+	if (!recordedTab || recordedTab === keepTab) return true;
+	if (registeredWorkspace && registeredWorkspace !== workspace) return true;
+	const res = spawnSync("herdr", ["pane", "list", "--workspace", workspace], { encoding: "utf8" });
+	if (res.error || res.status !== 0) {
+		process.stderr.write(`error: cannot inspect stale panes in secondmate workspace ${workspace}\n`);
+		return false;
+	}
+	try {
+		const parsed = JSON.parse(res.stdout ?? "") as {
+			result?: { panes?: Array<{ pane_id?: string; tab_id?: string; workspace_id?: string; cwd?: string }> };
+		};
+		const panes = parsed?.result?.panes ?? [];
+		const recordedPanes = panes.filter(pane => pane.tab_id === recordedTab);
+		// The tab has already gone away, so there is nothing left to reap.
+		if (recordedPanes.length === 0) return true;
+		// The workspace-scoped listing is the topology proof. If Herdr includes
+		// an explicit workspace field, reject any contradictory observation.
+		if (recordedPanes.some(pane => pane.workspace_id && pane.workspace_id !== workspace)) return true;
+		// Never close a tab unless every pane in that exact tab is positively
+		// identified as a shell in the expected working directory.
+		if (!recordedPanes.every(pane => pane.cwd === cwd && pane.pane_id && herdrPaneAgentProcessVerdict(pane.pane_id) === "shell")) return true;
+		const close = spawnSync("herdr", ["tab", "close", recordedTab], { encoding: "utf8" });
+		if (close.error || close.status !== 0) {
+			process.stderr.write(`error: failed to close stale secondmate shell tab ${recordedTab}\n`);
+			return false;
+		}
+		return true;
+	} catch {
+		process.stderr.write(`error: cannot parse secondmate workspace panes for ${workspace}\n`);
+		return false;
+	}
+}
+
+function closeCreatedSecondmateWorkspace(workspace: string, id: string): void {
+	if (!workspace) return;
+	const close = spawnSync("herdr", ["workspace", "close", workspace], { encoding: "utf8" });
+	if (close.error || close.status !== 0) {
+		process.stderr.write(`error: failed to close recovered workspace ${workspace} for secondmate ${id}\n`);
+	}
+}
+
+interface WorkspaceRecovery {
+	workspace: string;
+	createdWorkspace: string;
+	previousWorkspace: string;
+}
+
+function establishedWorkspaceId(createJson: string, temporaryLabel: string): string {
+	const direct = jsonGet(createJson, "result", "workspace", "workspace_id");
+	if (direct) return direct;
+
+	const listRes = spawnSync("herdr", ["workspace", "list"], { encoding: "utf8" });
+	if (listRes.error || listRes.status !== 0) return "";
+	try {
+		const parsed = JSON.parse(listRes.stdout ?? "") as {
+			result?: { workspaces?: Array<{ workspace_id?: unknown; label?: unknown }> };
+		};
+		const matches = (parsed.result?.workspaces ?? []).filter(
+			workspace => workspace?.label === temporaryLabel && typeof workspace.workspace_id === "string" && workspace.workspace_id.length > 0,
+		);
+		return matches.length === 1 ? (matches[0].workspace_id as string) : "";
+	} catch {
+		return "";
+	}
+}
+
+function rollbackRecoveredWorkspace(
+	dataDir: string,
+	state: string,
+	id: string,
+	replacementWorkspace: string,
+	previousWorkspace: string,
+): boolean {
+	let registryRolledBack = false;
+	try {
+		registryRolledBack = replaceRegisteredSecondmateWorkspace(dataDir, id, replacementWorkspace, previousWorkspace);
+	} catch {
+		registryRolledBack = false;
+	}
+	if (!registryRolledBack) {
+		process.stderr.write(`error: retaining recovered workspace ${replacementWorkspace} because registry rollback failed\n`);
+		return false;
+	}
+
+	const metaPath = `${state}/${id}.meta`;
+	if (replaceSecondmateMetaWorkspace(metaPath, previousWorkspace, id)) return true;
+
+	// A failed meta rollback leaves the durable state ambiguous. Restore the
+	// registry to the replacement so it cannot point at a workspace we close.
+	let registryRestoredToReplacement = false;
+	try {
+		registryRestoredToReplacement = replaceRegisteredSecondmateWorkspace(dataDir, id, previousWorkspace, replacementWorkspace);
+	} catch {
+		registryRestoredToReplacement = false;
+	}
+	if (!registryRestoredToReplacement) {
+		process.stderr.write(`error: retaining recovered workspace ${replacementWorkspace} because meta rollback failed and registry restoration failed\n`);
+	} else {
+		process.stderr.write(`error: retaining recovered workspace ${replacementWorkspace} because meta rollback failed\n`);
+	}
+	return false;
+}
+
 // recoverMissingRegisteredSecondmateWorkspace: for a registered secondmate
 // workspace, rename an existing Herdr workspace to the mate display label, or
 // when it is missing (herdr restarted with a fresh layout), create a
-// replacement with --label and durably update registry + meta (rolling back
-// the registry write if meta update fails). Create already names the
-// replacement, so this path never renames again.
-// Returns the (possibly unchanged) workspace to use, or null on failure
-// (having already written the error to stderr).
+// replacement under a unique temporary label. Establish its ID, rename it to
+// the display label, and only then update registry + meta. Every failed
+// post-create step closes only the established replacement after durable
+// rollback succeeds.
 function recoverMissingRegisteredSecondmateWorkspace(params: {
 	kind: Kind;
 	workspace: string;
@@ -608,24 +742,24 @@ function recoverMissingRegisteredSecondmateWorkspace(params: {
 	state: string;
 	projAbs: string;
 	label: string;
-}): string | null {
+}): WorkspaceRecovery | null {
 	const { kind, workspace, id, dataDir, state, projAbs, label } = params;
-	if (kind !== "secondmate") return workspace;
-	if (!workspace) return workspace;
+	if (kind !== "secondmate") return { workspace, createdWorkspace: "", previousWorkspace: "" };
+	if (!workspace) return { workspace, createdWorkspace: "", previousWorkspace: "" };
 	const registeredWorkspace = secondmateRegistryValue(dataDir, id, "workspace") ?? "";
-	if (workspace !== registeredWorkspace) return workspace;
+	if (workspace !== registeredWorkspace) return { workspace, createdWorkspace: "", previousWorkspace: "" };
 
 	const getRes = spawnSync("herdr", ["workspace", "get", workspace], { encoding: "utf8" });
 	if (getRes.status === 0) {
 		// Existing registered workspace: rename to the mate display label before
 		// spawn continues. No durable registry/meta mutation on this path.
 		const renameRes = spawnSync("herdr", ["workspace", "rename", workspace, label], { encoding: "utf8" });
-		if (renameRes.status !== 0) {
+		if (renameRes.error || renameRes.status !== 0) {
 			process.stderr.write(`error: herdr workspace rename failed for secondmate ${id}\n`);
 			process.stderr.write(`${(renameRes.stdout ?? "") + (renameRes.stderr ?? "")}\n`);
 			return null;
 		}
-		return workspace;
+		return { workspace, createdWorkspace: "", previousWorkspace: "" };
 	}
 
 	const combined = (getRes.stdout ?? "") + (getRes.stderr ?? "");
@@ -635,32 +769,50 @@ function recoverMissingRegisteredSecondmateWorkspace(params: {
 		return null;
 	}
 
-	// Missing registered workspace: create already assigns --label <mate>, so
-	// do not rename again. Registry/meta commits below roll back on failure.
-	const createRes = spawnSync("herdr", ["workspace", "create", "--cwd", projAbs, "--label", label, "--no-focus"], {
+	const temporaryLabel = `${label} [fm-recovery-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}]`;
+	const createRes = spawnSync("herdr", ["workspace", "create", "--cwd", projAbs, "--label", temporaryLabel, "--no-focus"], {
 		encoding: "utf8",
 	});
-	if (createRes.status !== 0) {
+	if (createRes.error || createRes.status !== 0) {
 		process.stderr.write(`error: herdr workspace create failed while recovering secondmate ${id}\n`);
 		process.stderr.write(`${(createRes.stdout ?? "") + (createRes.stderr ?? "")}\n`);
 		return null;
 	}
 	const replacementJson = createRes.stdout ?? "";
-	const replacementWorkspace = jsonGet(replacementJson, "result", "workspace", "workspace_id");
+	const replacementWorkspace = establishedWorkspaceId(replacementJson, temporaryLabel);
 	if (!replacementWorkspace) {
-		process.stderr.write(`error: herdr workspace create did not return a workspace_id while recovering secondmate ${id}\n`);
+		process.stderr.write(`error: herdr workspace create did not establish a workspace_id while recovering secondmate ${id}\n`);
 		process.stderr.write(`${replacementJson}\n`);
 		return null;
 	}
 
-	if (!replaceRegisteredSecondmateWorkspace(dataDir, id, workspace, replacementWorkspace)) return null;
-	const metaPath = `${state}/${id}.meta`;
-	if (!replaceSecondmateMetaWorkspace(metaPath, replacementWorkspace, id)) {
-		replaceRegisteredSecondmateWorkspace(dataDir, id, replacementWorkspace, workspace);
+	const renameRes = spawnSync("herdr", ["workspace", "rename", replacementWorkspace, label], { encoding: "utf8" });
+	if (renameRes.error || renameRes.status !== 0) {
+		process.stderr.write(`error: herdr workspace rename failed for recovered secondmate ${id}\n`);
+		closeCreatedSecondmateWorkspace(replacementWorkspace, id);
 		return null;
 	}
-	return replacementWorkspace;
+
+	let registryUpdated = false;
+	try {
+		registryUpdated = replaceRegisteredSecondmateWorkspace(dataDir, id, workspace, replacementWorkspace);
+	} catch {
+		process.stderr.write(`error: could not update workspace registration for secondmate ${id}\n`);
+	}
+	if (!registryUpdated) {
+		closeCreatedSecondmateWorkspace(replacementWorkspace, id);
+		return null;
+	}
+	const metaPath = `${state}/${id}.meta`;
+	if (!replaceSecondmateMetaWorkspace(metaPath, replacementWorkspace, id)) {
+		if (rollbackRecoveredWorkspace(dataDir, state, id, replacementWorkspace, workspace)) {
+			closeCreatedSecondmateWorkspace(replacementWorkspace, id);
+		}
+		return null;
+	}
+	return { workspace: replacementWorkspace, createdWorkspace: replacementWorkspace, previousWorkspace: workspace };
 }
+
 
 // --- main -----------------------------------------------------------------------
 
@@ -711,20 +863,27 @@ async function run(argv: string[]): Promise<number> {
 		arg3 = pos[2] ?? "";
 	}
 
-	// Resolve the harness and its launch command. A non-flag string containing
-	// whitespace is a raw launch command (the escape hatch for unverified
-	// adapters); otherwise resolve a named or auto-detected harness against the
-	// verified launch templates above.
-	let harness: string;
-	let launch: string;
-	let launchFromTemplate = false;
+	// Secondmates are always launched by their home-local fm start contract.
+	// Explicit adapter names and raw commands would bypass that contract.
+	if (kind === "secondmate" && arg3 !== "" && arg3 !== "omp") {
+		process.stderr.write("error: fm spawn --secondmate uses fm start and does not accept a harness or launch command\n");
+		return 1;
+	}
 
-	if (/\s/.test(arg3)) {
+	// Resolve the harness and its launch command for ship/scout tasks. A
+	// non-flag string containing whitespace is a raw launch command; otherwise
+	// resolve a named or auto-detected harness against the verified templates.
+	let harness: string;
+	let launch = "";
+	let launchFromTemplate = false;
+	if (kind === "secondmate") {
+		harness = "omp";
+	} else if (/\s/.test(arg3)) {
 		launch = arg3;
 		harness = firstCommandWordFromRaw(launch);
 	} else if (arg3 === "") {
 		harness = crewHarness(fmRoot);
-		const tmpl = kind === "secondmate" ? launchTemplate(harness) : launchTemplate(harness, crewModel);
+		const tmpl = launchTemplate(harness, crewModel);
 		if (tmpl === null) {
 			process.stderr.write(
 				`error: no launch template for harness '${harness}' (from config/crew-harness or detection); pass a raw launch command to use an unverified adapter\n`,
@@ -735,24 +894,28 @@ async function run(argv: string[]): Promise<number> {
 		launchFromTemplate = true;
 	} else {
 		harness = arg3;
-		const tmpl = kind === "secondmate" ? launchTemplate(harness) : launchTemplate(harness, crewModel);
+		const tmpl = launchTemplate(harness, crewModel);
 		if (tmpl === null) {
 			process.stderr.write(`error: unknown harness '${harness}'; pass a raw launch command to use an unverified adapter\n`);
 			return 1;
+
 		}
 		launch = tmpl;
 		launchFromTemplate = true;
 	}
-
-	// A secondmate resume: reuse the persisted home/workspace registration
-	// instead of requiring them to be re-specified on every respawn.
-	let secondmateResume = false;
+	// Capture the supervisor's last managed tab before recovery or the new
+	// spawn overwrites this mate's metadata.
+	let recordedSecondmateTab = "";
+	let registeredSecondmateWorkspace = "";
 	if (kind === "secondmate") {
 		const ownMeta = `${state}/${id}.meta`;
-		if (existsSync(ownMeta)) secondmateResume = true;
-		if (!firstmateHome && secondmateResume) {
-			firstmateHome = metaValue(ownMeta, "home");
+		try {
+			recordedSecondmateTab = metaValue(ownMeta, "tab");
+		} catch {
+			recordedSecondmateTab = "";
 		}
+		if (!firstmateHome) firstmateHome = metaValue(ownMeta, "home");
+		registeredSecondmateWorkspace = secondmateRegistryValue(data, id, "workspace") ?? "";
 		if (!firstmateHome) {
 			firstmateHome = secondmateRegistryValue(data, id, "home") ?? "";
 		}
@@ -763,8 +926,7 @@ async function run(argv: string[]): Promise<number> {
 
 	let projAbs: string;
 	let wt: string;
-	let brief: string;
-	let injectedCharter: ReturnType<typeof loadRequiredCharter> | undefined;
+	let brief = "";
 
 	if (kind === "secondmate") {
 		if (!firstmateHome) {
@@ -775,19 +937,6 @@ async function run(argv: string[]): Promise<number> {
 		if (!validated.ok) return 1;
 		projAbs = validated.value;
 		wt = projAbs;
-		const charterPath = `${projAbs}/data/charter.md`;
-		if (harness === "omp") {
-			try {
-				injectedCharter = loadRequiredCharter(projAbs);
-			} catch (error) {
-				const detail = error instanceof CharterLoadError ? error.message : String(error);
-				process.stderr.write(`error: secondmate ${id} charter required before OMP launch: ${detail}\n`);
-				return 1;
-			}
-			brief = charterPath;
-		} else {
-			brief = existsSync(charterPath) ? charterPath : `${data}/mates/${id}/brief.md`;
-		}
 	} else {
 		const cdRes = cdPwd(resolveProjectDirArg(projects, proj));
 		if (!cdRes.ok) return 1;
@@ -808,7 +957,7 @@ async function run(argv: string[]): Promise<number> {
 		}
 	}
 
-	if (kind !== "secondmate" || harness !== "omp") {
+	if (kind !== "secondmate") {
 		if (!existsSync(brief)) {
 			process.stderr.write(`error: no brief at ${brief}\n`);
 			return 1;
@@ -860,81 +1009,38 @@ async function run(argv: string[]): Promise<number> {
 	let mode: string;
 	let yolo: string;
 	let secondmateProjects = "";
+	let launchCmd = "";
 	if (kind === "secondmate") {
 		mode = "secondmate";
 		yolo = "off";
 		secondmateProjects = secondmateRegistryValue(data, id, "projects") ?? "";
-	} else {
-		const projName = basename(projAbs);
-		const pm = spawnSync(join(fmRoot, "sbin", "fm"), ["project-mode", projName], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "inherit"],
-		});
-		const parts = (pm.stdout ?? "").trim().split(/\s+/);
-		mode = parts[0] ?? "";
-		yolo = parts[1] ?? "";
-	}
-
-	// Build the launch command. OMP secondmates get role contract + charter as
-	// system appends (new session or persisted-session resume with -c). Non-OMP
-	// secondmates still receive the brief as a positional user prompt.
-	const sqBrief = shellQuote(brief);
-	let launchCmd: string;
-	if (harness === "omp" && kind === "secondmate" && secondmateResume) {
-		launchCmd = "omp --auto-approve -c";
-	} else if (harness === "omp" && kind === "secondmate" && launchFromTemplate) {
-		launchCmd = "omp --auto-approve";
-	} else {
-		launchCmd = launch.split("__BRIEF__").join(sqBrief);
-	}
-	// Isolated omp.yml is injected only for verified launch templates.
-	// A raw OMP secondmate command (whitespace launch string) is an
-	// operator-owned escape hatch: it bypasses automatic --config injection
-	// and must supply its own overlay if isolation is required.
-	if (launchFromTemplate && kind === "secondmate" && harness === "omp") {
-		launchCmd = injectOmpHomeConfig(launchCmd, projAbs);
-	}
-	let charterMarkers: Record<string, string> | undefined;
-	if (harness === "omp" || isOmpLaunchCommand(launchCmd)) {
-		if (!parseOmpLaunchCommand(launchCmd)) {
-			process.stderr.write(`error: cannot inject OMP system context into launch command for ${id}\n`);
-			return 1;
-		}
-		const contract = kind === "secondmate"
-			? secondmateRoleContract({ home: projAbs, mainHome: fmHome })
-			: crewRoleContract({ home: projAbs, mainHome: fmHome, crewId: id, launchingSupervisor: supervisorName(config) });
-		if (kind === "secondmate") ensureSecondmateParentIdentity(projAbs, supervisorName(config));
-		const blocks = kind === "secondmate" && injectedCharter
-			? [contract, charterSystemBlock(injectedCharter.text)]
-			: [contract];
-		const beforeInject = launchCmd;
-		launchCmd = injectOmpAppendSystemPrompts(launchCmd, blocks);
-		if (launchCmd === beforeInject || !launchCmd.includes("--append-system-prompt=")) {
-			process.stderr.write(`error: OMP system-context injection failed for ${id}\n`);
-			return 1;
-		}
-		// Markers only after confirmed append injection of the charter payload.
-		if (kind === "secondmate" && injectedCharter && blocks.length > 1) {
-			charterMarkers = charterInjectionEnv(injectedCharter.digest);
-		}
-	}
-	if (kind === "secondmate") {
 		const sqHome = shellQuote(projAbs);
-		const charterEnv = charterMarkers
-			? Object.entries(charterMarkers)
-				.map(([key, value]) => `${key}=${shellQuote(value)}`)
-				.join(" ")
-			: "";
-		const prefix = [
-			"FM_ROOT_OVERRIDE=",
-			"FM_STATE_OVERRIDE=",
-			"FM_DATA_OVERRIDE=",
-			"FM_PROJECTS_OVERRIDE=",
-			"FM_CONFIG_OVERRIDE=",
-			...(charterEnv ? [charterEnv] : []),
-			`FM_HOME=${sqHome}`,
-		].join(" ");
-		launchCmd = `${prefix} ${launchCmd}`;
+		launchCmd = `FM_HOME=${sqHome} ${sqHome}/sbin/fm start`;
+	} else {
+		const pm = spawnSync(join(fmRoot, "sbin", "fm"), ["project-mode", basename(projAbs)], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+		const parts = (pm.stdout ?? "").trim().split(/\s+/);
+		mode = parts[0] ?? "trunk";
+		yolo = parts[1] ?? "off";
+		const sqBrief = shellQuote(brief);
+		launchCmd = launch.split("__BRIEF__").join(sqBrief);
+		if (launchFromTemplate && harness === "omp") {
+			if (!parseOmpLaunchCommand(launchCmd)) {
+				process.stderr.write(`error: cannot inject OMP system context into launch command for ${id}\n`);
+				return 1;
+			}
+			const contract = crewRoleContract({
+				home: projAbs,
+				mainHome: fmHome,
+				crewId: id,
+				launchingSupervisor: supervisorName(config),
+			});
+			const beforeInject = launchCmd;
+			launchCmd = injectOmpAppendSystemPrompts(launchCmd, [contract]);
+			if (launchCmd === beforeInject || !launchCmd.includes("--append-system-prompt=")) {
+				process.stderr.write(`error: OMP system-context injection failed for ${id}\n`);
+				return 1;
+			}
+		}
 	}
 	const paneCmd = `${launchCmd}; exec "\${SHELL:-/bin/zsh}" -l`;
 
@@ -947,7 +1053,9 @@ async function run(argv: string[]): Promise<number> {
 
 	const recovered = recoverMissingRegisteredSecondmateWorkspace({ kind, workspace, id, dataDir: data, state, projAbs, label });
 	if (recovered === null) return 1;
-	workspace = recovered;
+	workspace = recovered.workspace;
+	let createdWorkspace = recovered.createdWorkspace;
+	const previousWorkspace = recovered.previousWorkspace;
 
 	let createdTab = false;
 	let tabId = tab;
@@ -955,6 +1063,13 @@ async function run(argv: string[]): Promise<number> {
 	function cleanupFailedSpawn(): void {
 		if (createdTab && tabId) {
 			spawnSync("herdr", ["tab", "close", tabId], { stdio: "ignore" });
+		}
+		if (createdWorkspace) {
+			const replacementWorkspace = createdWorkspace;
+			if (rollbackRecoveredWorkspace(data, state, id, replacementWorkspace, previousWorkspace)) {
+				closeCreatedSecondmateWorkspace(replacementWorkspace, id);
+				createdWorkspace = "";
+			}
 		}
 		if (kind !== "secondmate" && existsSync(wt)) {
 			const removed = spawnSync("git", ["-C", projAbs, "worktree", "remove", "--force", wt], { stdio: "ignore" }).status === 0;
@@ -995,18 +1110,21 @@ async function run(argv: string[]): Promise<number> {
 		}
 		createdTab = true;
 	}
-
 	if (!(await herdrReapHuskSlot(agentSlot))) {
 		cleanupFailedSpawn();
 		return 1;
 	}
+	if (kind === "secondmate" && workspace && !closeRecordedSecondmateShellTab(workspace, wt, tabId, recordedSecondmateTab, registeredSecondmateWorkspace)) {
+		cleanupFailedSpawn();
+		return 1;
+	}
 
-	// PYTHONDONTWRITEBYTECODE keeps any Python tooling a crewmate/secondmate
-	// runs from littering its worktree or home with __pycache__/*.pyc, the same
-	// way herdr itself injects HERDR_SOCKET_PATH and friends into every pane it starts.
+	// Keep Python tooling from littering homes/worktrees. FM_AGENT_SLOT tells
+	// fm-identity that Herdr already owns the canonical routing name, avoiding
+	// a redundant agent.rename that would reset native status to unknown.
 	const startRes = spawnSync(
 		"herdr",
-		["agent", "start", agentSlot, "--cwd", wt, "--tab", tabId, "--env", "PYTHONDONTWRITEBYTECODE=1", "--no-focus", "--", "sh", "-c", paneCmd],
+		["agent", "start", agentSlot, "--cwd", wt, "--tab", tabId, "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", `FM_AGENT_SLOT=${agentSlot}`, "--no-focus", "--", "sh", "-c", paneCmd],
 		{ encoding: "utf8" },
 	);
 	if (startRes.status !== 0) {
@@ -1028,28 +1146,34 @@ async function run(argv: string[]): Promise<number> {
 	}
 	spawnSync("herdr", ["pane", "rename", pane, label], { stdio: "ignore" });
 
-	mkdirSync(state, { recursive: true });
-	const metaLines: string[] = [
-		`pane=${pane}`,
-		`worktree=${wt}`,
-		`project=${projAbs}`,
-		`harness=${harness}`,
-		`kind=${kind}`,
-		`mode=${mode}`,
-		`yolo=${yolo}`,
-		`tab=${tabId}`,
-		`worker=${label}`,
-		`supervisor=${supervisorName(config)}`,
-		`agent_slot=${agentSlot}`,
-		`agent_identity=${agentIdentity}`,
-	];
-	if (kind !== "secondmate" && crewModel) metaLines.push(`crew_model=${crewModel}`);
-	if (kind === "secondmate") {
-		metaLines.push(`home=${projAbs}`);
-		metaLines.push(`projects=${secondmateProjects}`);
-		if (workspace) metaLines.push(`workspace=${workspace}`);
+	try {
+		mkdirSync(state, { recursive: true });
+		const metaLines: string[] = [
+			`pane=${pane}`,
+			`worktree=${wt}`,
+			`project=${projAbs}`,
+			`harness=${harness}`,
+			`kind=${kind}`,
+			`mode=${mode}`,
+			`yolo=${yolo}`,
+			`tab=${tabId}`,
+			`worker=${label}`,
+			`supervisor=${supervisorName(config)}`,
+			`agent_slot=${agentSlot}`,
+			`agent_identity=${agentIdentity}`,
+		];
+		if (kind !== "secondmate" && crewModel) metaLines.push(`crew_model=${crewModel}`);
+		if (kind === "secondmate") {
+			metaLines.push(`home=${projAbs}`);
+			metaLines.push(`projects=${secondmateProjects}`);
+			if (workspace) metaLines.push(`workspace=${workspace}`);
+		}
+		writeFileSync(`${state}/${id}.meta`, metaLines.map(l => `${l}\n`).join(""));
+	} catch {
+		cleanupFailedSpawn();
+		process.stderr.write(`error: could not write spawn metadata for ${id}\n`);
+		return 1;
 	}
-	writeFileSync(`${state}/${id}.meta`, metaLines.map(l => `${l}\n`).join(""));
 
 	if (kind !== "secondmate") {
 		try {
@@ -1070,8 +1194,8 @@ export default {
 	help: {
 		usage:
 			"fm spawn <task-id> <project-dir> [harness|launch-command] [--scout] [--workspace=<id>] [--tab=<id>] [--crew-model=<model>]\n" +
-			"fm spawn <task-id> [<firstmate-home>] [harness|launch-command] --secondmate [--workspace=<id>] [--tab=<id>]",
-		description: "Spawn a crewmate in a git worktree, or a secondmate in its isolated firstmate home.",
+			"fm spawn <task-id> [<firstmate-home>] --secondmate [--workspace=<id>] [--tab=<id>]",
+			description: "Spawn a crewmate in a git worktree, or a secondmate in its isolated firstmate home.",
 		commands: [
 			{
 				command: "spawn <task-id> <project-dir> …",

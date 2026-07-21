@@ -103,11 +103,12 @@ export function readAgentSlot(target: string): AgentSlotRead {
 	const stderr = typeof res.stderr === "string" ? res.stderr : "";
 	const errorText = stdout + stderr;
 	if (res.error || (res.status ?? 1) !== 0) {
-		if (isExplicitNotFound(errorText)) return { presence: "absent" };
+		if (isStructuredErrorCode(errorText, "agent_not_found")) return { presence: "absent" };
 		return { presence: "error", reason: res.error?.message || `herdr agent get rc=${res.status ?? 1}` };
 	}
+	if (stderr.trim()) return { presence: "error", reason: "herdr agent get wrote to stderr" };
 	if (stdout.includes('"error"')) {
-		if (isExplicitNotFound(stdout)) return { presence: "absent" };
+		if (isStructuredErrorCode(stdout, "agent_not_found")) return { presence: "absent" };
 		return { presence: "error", reason: jsonGet(stdout, "error", "message") || "herdr agent get error" };
 	}
 	const paneId = stdout.match(/"pane_id":"([^"]*)"/)?.[1] ?? "";
@@ -142,21 +143,15 @@ export interface PaneSnapshot {
 	errorMessage?: string;
 }
 
-function isExplicitNotFound(text: string): boolean {
-	if (!text.includes('"error"') && !/not found/i.test(text)) return false;
+function isStructuredErrorCode(text: string, expectedCode: string): boolean {
 	try {
-		const parsed = JSON.parse(text) as { error?: string | { code?: string; message?: string } };
-		if (typeof parsed.error === "string") return /not found/i.test(parsed.error);
-		const code = String(parsed.error?.code ?? "").toLowerCase();
-		const message = String(parsed.error?.message ?? "").toLowerCase();
-		return (
-			code.includes("not_found") ||
-			code.includes("pane_not_found") ||
-			code.includes("agent_not_found") ||
-			message.includes("not found")
-		);
+		const parsed: unknown = JSON.parse(text.trim());
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+		const error = (parsed as Record<string, unknown>).error;
+		if (!error || typeof error !== "object" || Array.isArray(error)) return false;
+		return (error as Record<string, unknown>).code === expectedCode;
 	} catch {
-		return /pane_not_found|not found/i.test(text);
+		return false;
 	}
 }
 
@@ -164,8 +159,9 @@ function isExplicitNotFound(text: string): boolean {
 export function readPaneSnapshot(pane: string): PaneSnapshot {
 	const res = spawnSync("herdr", ["pane", "get", pane], { encoding: "utf8" });
 	const text = res.stdout ?? "";
+	const stderr = typeof res.stderr === "string" ? res.stderr : "";
 	if (res.error || (res.status ?? 1) !== 0) {
-		if (isExplicitNotFound(text)) {
+		if (isStructuredErrorCode(text, "pane_not_found")) {
 			return { paneId: pane, agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "absent", present: false };
 		}
 		return {
@@ -179,11 +175,14 @@ export function readPaneSnapshot(pane: string): PaneSnapshot {
 			errorMessage: res.error?.message || `herdr pane get rc=${res.status ?? 1}`,
 		};
 	}
+	if (stderr.trim()) {
+		return { paneId: pane, agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "error", present: false, errorMessage: "herdr pane get wrote to stderr" };
+	}
 	if (!text) {
 		return { paneId: pane, agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "error", present: false, errorMessage: "empty pane get" };
 	}
 	if (text.includes('"error"')) {
-		if (isExplicitNotFound(text)) {
+		if (isStructuredErrorCode(text, "pane_not_found")) {
 			return { paneId: pane, agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "absent", present: false };
 		}
 		return {
@@ -198,8 +197,26 @@ export function readPaneSnapshot(pane: string): PaneSnapshot {
 			errorMessage: jsonGet(text, "error", "message") || "herdr pane get error",
 		};
 	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return { paneId: "", agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "error", present: false, errorMessage: "malformed pane get response" };
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { paneId: "", agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "error", present: false, errorMessage: "malformed pane get response" };
+	}
+	const result = (parsed as Record<string, unknown>).result;
+	const resultPane = result && typeof result === "object" && !Array.isArray(result) ? (result as Record<string, unknown>).pane : undefined;
+	if (!resultPane || typeof resultPane !== "object" || Array.isArray(resultPane)) {
+		return { paneId: "", agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "error", present: false, errorMessage: "malformed pane get response" };
+	}
+	const paneId = jsonGet(text, "result", "pane", "pane_id");
+	if (!paneId) {
+		return { paneId: "", agentStatus: "", sessionId: "", sessionAgent: "", revision: "", presence: "error", present: false, errorMessage: "pane get succeeded without pane_id" };
+	}
 	return {
-		paneId: jsonGet(text, "result", "pane", "pane_id") || pane,
+		paneId,
 		agentStatus: jsonGet(text, "result", "pane", "agent_status"),
 		sessionId: jsonGet(text, "result", "pane", "agent_session", "value"),
 		sessionAgent: jsonGet(text, "result", "pane", "agent_session", "agent"),
@@ -218,12 +235,14 @@ export type AgentStatusRead =
 export function readHerdrAgentStatus(target: string): AgentStatusRead {
 	const res = spawnSync("herdr", ["agent", "get", target], { encoding: "utf8" });
 	const text = res.stdout ?? "";
+	const stderr = typeof res.stderr === "string" ? res.stderr : "";
+	const errorText = text + stderr;
 	if (res.error || (res.status ?? 1) !== 0) {
-		if (isExplicitNotFound(text)) return { presence: "absent" };
+		if (isStructuredErrorCode(errorText, "agent_not_found")) return { presence: "absent" };
 		return { presence: "error", reason: res.error?.message || `herdr agent get rc=${res.status ?? 1}` };
 	}
 	if (text.includes('"error"')) {
-		if (isExplicitNotFound(text)) return { presence: "absent" };
+		if (isStructuredErrorCode(errorText, "agent_not_found")) return { presence: "absent" };
 		return { presence: "error", reason: jsonGet(text, "error", "message") || "herdr agent get error" };
 	}
 	const m = text.match(/"agent_status":"([^"]*)"/);
@@ -434,7 +453,40 @@ export type ProcessVerdict = "agent" | "shell" | "err";
 
 // herdrPaneAgentProcessVerdict(pane): determine whether a pane contains a
 // live coding harness when native status is still unknown. "shell" proves an
-// agent-less restored shell; "agent" and "err" must fail closed.
+// agent-less restored shell, but only when every foreground process is a
+// recognized interactive shell; "agent" and "err" must fail closed.
+const KNOWN_HARNESS_PROCESS_RE = /\b(omp|claude|codex|opencode|pi|node|bun|deno)\b/;
+const INTERACTIVE_SHELL_NAMES: Record<string, true> = {
+	ash: true,
+	bash: true,
+	csh: true,
+	dash: true,
+	fish: true,
+	ksh: true,
+	mksh: true,
+	rbash: true,
+	sh: true,
+	tcsh: true,
+	zsh: true,
+};
+
+function processFieldText(process: Record<string, unknown>, key: string): string {
+	const value = process[key];
+	return typeof value === "string" ? value : "";
+}
+
+function shellProcessField(value: string): boolean {
+	const executable = value.trim().split(/\s+/, 1)[0] ?? "";
+	const basename = executable.replace(/^.*\//, "").replace(/^-/, "");
+	return INTERACTIVE_SHELL_NAMES[basename] === true;
+}
+
+function isRecognizedInteractiveShell(process: unknown): boolean {
+	if (!process || typeof process !== "object" || Array.isArray(process)) return false;
+	const record = process as Record<string, unknown>;
+	return ["argv0", "name", "cmdline"].some(key => shellProcessField(processFieldText(record, key)));
+}
+
 export function herdrPaneAgentProcessVerdict(pane: string): ProcessVerdict {
 	const res = spawnSync("herdr", ["pane", "process-info", "--pane", pane], { encoding: "utf8" });
 	const processInfo = !res.error && res.status === 0 ? (res.stdout ?? "") : "";
@@ -446,70 +498,228 @@ export function herdrPaneAgentProcessVerdict(pane: string): ProcessVerdict {
 	} catch {
 		return "err";
 	}
-	if (!Array.isArray(processes)) return "err";
-	const harness = /\b(omp|claude|codex|opencode|pi|node|bun|deno)\b/;
+	if (!Array.isArray(processes) || processes.length === 0) return "err";
+	let harnessSeen = false;
+	let shellSeen = false;
 	for (const proc of processes) {
-		const p = proc as Record<string, unknown>;
-		const text = ["argv0", "name", "cmdline"].map(key => String(p?.[key] ?? "")).join(" ");
-		if (harness.test(text)) return "agent";
+		if (!proc || typeof proc !== "object" || Array.isArray(proc)) return "err";
+		const record = proc as Record<string, unknown>;
+		const text = ["argv0", "name", "cmdline"].map(key => processFieldText(record, key)).join(" ");
+		if (KNOWN_HARNESS_PROCESS_RE.test(text)) {
+			harnessSeen = true;
+		} else if (isRecognizedInteractiveShell(proc)) {
+			shellSeen = true;
+		} else {
+			return "err";
+		}
 	}
-	return "shell";
+	if (harnessSeen && shellSeen) return "err";
+	return harnessSeen ? "agent" : "shell";
 }
 
 export type SlotVerdict = "free" | "husk" | "live" | "unknown";
+
+interface SlotObservation {
+	verdict: SlotVerdict;
+	pane: string;
+	tab: string;
+	workspace: string;
+	confirmedHusk: boolean;
+}
+
+function emptySlotObservation(verdict: SlotVerdict): SlotObservation {
+	return { verdict, pane: "", tab: "", workspace: "", confirmedHusk: false };
+}
+
+function hasErrorField(value: unknown): boolean {
+	if (!value || typeof value !== "object") return false;
+	if (Array.isArray(value)) return value.some(hasErrorField);
+	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+		if (key === "error") return true;
+		if (hasErrorField(child)) return true;
+	}
+	return false;
+}
+
+function explicitAgentNotFoundValue(value: unknown): boolean {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	return record.code === "agent_not_found";
+}
+
+function explicitAgentNotFound(text: string, parsed?: unknown): boolean {
+	if (parsed === undefined) {
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			return false;
+		}
+	}
+	const errors: unknown[] = [];
+	const collect = (value: unknown): void => {
+		if (!value || typeof value !== "object") return;
+		if (Array.isArray(value)) {
+			for (const child of value) collect(child);
+			return;
+		}
+		for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+			if (key === "error") errors.push(child);
+			collect(child);
+		}
+	};
+	collect(parsed);
+	return errors.length > 0 && errors.every(explicitAgentNotFoundValue);
+}
+
+function parseAgentGetSuccess(text: string): { pane: string; tab: string; workspace: string } | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return null;
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || hasErrorField(parsed)) return null;
+	const pane = jsonGet(text, "result", "agent", "pane_id");
+	if (!pane) return null;
+	return {
+		pane,
+		tab: jsonGet(text, "result", "agent", "tab_id"),
+		workspace: jsonGet(text, "result", "agent", "workspace_id"),
+	};
+}
+
+function readSlotObservation(slot: string): SlotObservation {
+	const agentRes = spawnSync("herdr", ["agent", "get", slot], { encoding: "utf8" });
+	const stdout = typeof agentRes.stdout === "string" ? agentRes.stdout : "";
+	const stderr = typeof agentRes.stderr === "string" ? agentRes.stderr : "";
+	if (agentRes.error || agentRes.status === null) return emptySlotObservation("unknown");
+	if (agentRes.status !== 0) {
+		const outputs = [stdout.trim(), stderr.trim()].filter(Boolean);
+		if (outputs.length > 0 && outputs.every(output => explicitAgentNotFound(output))) {
+			return emptySlotObservation("free");
+		}
+		return emptySlotObservation("unknown");
+	}
+	if (stderr.trim()) return emptySlotObservation("unknown");
+
+	const info = stdout.trim();
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(info);
+	} catch {
+		return emptySlotObservation("unknown");
+	}
+	if (hasErrorField(parsed)) {
+		if (explicitAgentNotFound(info, parsed)) return emptySlotObservation("free");
+		return emptySlotObservation("unknown");
+	}
+	const agent = parseAgentGetSuccess(info);
+	if (!agent) return emptySlotObservation("unknown");
+	const { pane, tab, workspace } = agent;
+	const paneSnapshot = readPaneSnapshot(pane);
+	if (paneSnapshot.presence === "absent") {
+		return { verdict: "husk", pane, tab, workspace, confirmedHusk: false };
+	}
+	if (paneSnapshot.presence !== "present" || paneSnapshot.paneId !== pane) {
+		return { verdict: "unknown", pane, tab, workspace, confirmedHusk: false };
+	}
+	const status = paneSnapshot.agentStatus;
+	if (herdrPaneAgentProcessVerdict(pane) === "shell") {
+		return { verdict: "husk", pane, tab, workspace, confirmedHusk: true };
+	}
+	if (status === "working" || status === "idle" || status === "blocked" || status === "done") {
+		return { verdict: "live", pane, tab, workspace, confirmedHusk: false };
+	}
+	return { verdict: "unknown", pane, tab, workspace, confirmedHusk: false };
+}
 
 // herdrClassifySlot(slot): decide whether a persisted agent registration may
 // be safely reused after herdr restores a session layout. Only a confirmed
 // agent-less husk is reusable. A bound or booting agent remains protected.
 export function herdrClassifySlot(slot: string): SlotVerdict {
-	const agentRes = spawnSync("herdr", ["agent", "get", slot], { encoding: "utf8" });
-	if (agentRes.error || agentRes.status !== 0) return "free";
-	const info = agentRes.stdout ?? "";
-	if (info.includes('"error"')) return "free";
-	const pane = jsonGet(info, "result", "agent", "pane_id");
-	if (!pane) return "free";
-	const paneRes = spawnSync("herdr", ["pane", "get", pane], { encoding: "utf8" });
-	const paneInfo = !paneRes.error && paneRes.status === 0 ? (paneRes.stdout ?? "") : "";
-	if (!paneInfo || paneInfo.includes('"error"')) return "husk";
-	const status = jsonGet(paneInfo, "result", "pane", "agent_status");
-	if (status === "working" || status === "idle" || status === "blocked" || status === "done") return "live";
-	return herdrPaneAgentProcessVerdict(pane) === "shell" ? "husk" : "unknown";
+	return readSlotObservation(slot).verdict;
 }
 
-async function sleepSeconds(seconds: number): Promise<void> {
-	await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+function sameSlotTopology(actual: SlotObservation, expected: SlotObservation): boolean {
+	return (
+		actual.verdict === "husk" &&
+		actual.confirmedHusk &&
+		actual.pane === expected.pane &&
+		actual.tab === expected.tab &&
+		actual.workspace === expected.workspace
+	);
+}
+
+// Re-read the slot and its pane as one correlated proof immediately before a
+// topology close. A missing or rebound slot, changed topology, or any process
+// verdict other than shell fails closed.
+function confirmHuskBinding(slot: string, expected: SlotObservation): boolean {
+	const actual = readSlotObservation(slot);
+	return sameSlotTopology(actual, expected);
 }
 
 // herdrReapHuskSlot(slot): remove only a confirmed session-restore husk.
-// Callers must create the replacement tab before this resolves so closing the
-// restored tab cannot leave its workspace empty. Returns true (rc 0) on
-// success (including the free no-op case) or false (rc 1) after writing an
-// explanatory error to stderr, mirroring the bash function's return codes.
+// Callers create replacement topology before this resolves. Close only the
+// exact tab/pane/workspace captured with the husk proof, then verify the durable
+// slot is actually free.
 export async function herdrReapHuskSlot(slot: string): Promise<boolean> {
-	const verdict = herdrClassifySlot(slot);
-	if (verdict === "free") return true;
-	if (verdict === "husk") {
-		const agentRes = spawnSync("herdr", ["agent", "get", slot], { encoding: "utf8" });
-		const info = !agentRes.error && agentRes.status === 0 ? (agentRes.stdout ?? "") : "";
-		const tab = jsonGet(info, "result", "agent", "tab_id");
-		const pane = jsonGet(info, "result", "agent", "pane_id");
-		if (tab) {
-			spawnSync("herdr", ["tab", "close", tab]);
-		} else if (pane) {
-			spawnSync("herdr", ["pane", "close", pane]);
+	const observed = readSlotObservation(slot);
+	if (observed.verdict === "free") return true;
+	if (observed.verdict === "husk") {
+		if (!observed.pane || (!observed.tab && !observed.workspace)) {
+			process.stderr.write(`error: husk agent slot '${slot}' has incomplete topology\n`);
+			return false;
 		}
-		const settle = Number(process.env.FM_HUSK_REAP_SETTLE ?? "0.3");
-		await sleepSeconds(settle);
-		process.stderr.write(`info: reaped husk agent slot '${slot}' before respawn\n`);
-		return true;
+		if (!confirmHuskBinding(slot, observed)) {
+			process.stderr.write(`error: husk agent slot '${slot}' changed before close - refusing to replace\n`);
+			return false;
+		}
+		let closeRes = observed.tab
+			? spawnSync("herdr", ["tab", "close", observed.tab], { encoding: "utf8" })
+			: spawnSync("herdr", ["pane", "close", observed.pane], { encoding: "utf8" });
+		if (closeRes.error || closeRes.status !== 0) {
+			const detail = `${closeRes.stdout ?? ""}${closeRes.stderr ?? ""}`;
+			if (
+				observed.tab &&
+				observed.workspace &&
+				jsonGet(detail, "error", "code") === "tab_close_failed" &&
+				detail.includes("last tab")
+			) {
+				if (!confirmHuskBinding(slot, observed)) {
+					process.stderr.write(`error: husk agent slot '${slot}' changed before workspace close - refusing to replace\n`);
+					return false;
+				}
+				closeRes = spawnSync("herdr", ["workspace", "close", observed.workspace], { encoding: "utf8" });
+			}
+		}
+		if (closeRes.error || closeRes.status !== 0) {
+			const detail = `${closeRes.stdout ?? ""}${closeRes.stderr ?? ""}`.trim();
+			process.stderr.write(`error: failed to close husk agent slot '${slot}': ${detail || "close failed"}\n`);
+			return false;
+		}
+		const intervalMs = Math.max(10, Number(process.env.FM_HUSK_REAP_SETTLE ?? "0.3") * 1000);
+		const timeoutMs = Math.max(intervalMs, Number(process.env.FM_HUSK_REAP_TIMEOUT_MS ?? "3000"));
+		const deadline = Date.now() + timeoutMs;
+		do {
+			const { promise, resolve } = Promise.withResolvers<void>();
+			setTimeout(resolve, intervalMs);
+			await promise;
+			if (herdrClassifySlot(slot) === "free") {
+				process.stderr.write(`info: reaped husk agent slot '${slot}' before respawn\n`);
+				return true;
+			}
+		} while (Date.now() < deadline);
+		process.stderr.write(`error: husk agent slot '${slot}' remained registered after close\n`);
+		return false;
 	}
-	if (verdict === "live") {
+	if (observed.verdict === "live") {
 		process.stderr.write(`error: agent slot '${slot}' is held by a live agent - refusing to replace\n`);
 		return false;
 	}
 	process.stderr.write(`error: agent slot '${slot}' is occupied and not confidently a husk - refusing to replace\n`);
 	return false;
 }
+
 
 // Composer observation: pending draft vs clear vs observation error.
 // Observation errors must not masquerade as composer-blocked.

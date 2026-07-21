@@ -6,7 +6,8 @@
 // `config/identity` + `.fm-secondmate-home` files, decide whether this omp
 // session is a named firstmate mate and, if so, produce the herdr socket
 // requests that attach its identity at launch:
-//   - agent.rename       -> durable, addressable routing handle (the mate id)
+//   - agent.rename       -> durable routing handle when the launcher did not
+//                           already claim the mate's canonical slot
 //   - pane.report_metadata -> display-only identity (name + role), which does
 //                              NOT take lifecycle authority from the active
 //                              herdr<->omp state reporter.
@@ -17,6 +18,7 @@ export const CURRENT_SCHEMA_VERSION = "1";
 export type IdentityEnv = {
 	FM_HOME?: string;
 	cwd: string;
+	FM_AGENT_SLOT?: string;
 	HERDR_ENV?: string;
 	HERDR_SOCKET_PATH?: string;
 	HERDR_PANE_ID?: string;
@@ -132,9 +134,13 @@ export function planPropagation(env: IdentityEnv, files: IdentityFiles): Propaga
 	const identity = resolveIdentity(resolveHome(env), files);
 	if (!identity) return null;
 
+	const requests = [buildMetadataRequest(paneId, identity)];
+	if ((env.FM_AGENT_SLOT ?? "").trim() !== identity.id) {
+		requests.unshift(buildRenameRequest(paneId, identity.id));
+	}
 	return {
 		identity,
 		label: identity.name,
-		requests: [buildRenameRequest(paneId, identity.id), buildMetadataRequest(paneId, identity)],
+		requests,
 	};
 }

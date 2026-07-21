@@ -379,6 +379,87 @@ test_current_layout_broken_extension_link_fails() {
   pass "current per-extension broken link fails home-link check"
 }
 
+test_current_layout_removes_obsolete_managed_extension_link_only() {
+  require_slice_scripts
+  local code="$TMP_ROOT/current-obsolete-code" home="$TMP_ROOT/current-obsolete-home"
+  local external="$TMP_ROOT/user-owned-extension.ts" out before regular_file regular_dir
+  make_code_root "$code"
+  printf 'handoff\n' > "$code/.omp/extensions/dependency-handoff.ts"
+  printf 'canonical same-name file\n' > "$code/.omp/extensions/same-name-file.ts"
+  mkdir "$code/.omp/extensions/same-name-dir"
+  make_current_home "$code" "$home" currentobsolete
+  code=$(canonical "$code")
+  before=$(readlink "$home/.omp/extensions/dependency-handoff.ts")
+  regular_file="$home/.omp/extensions/same-name-file.ts"
+  unlink "$regular_file"
+  printf 'user-owned same-name file\n' > "$regular_file"
+  regular_dir="$home/.omp/extensions/same-name-dir"
+  unlink "$regular_dir"
+  mkdir "$regular_dir"
+  printf 'keep\n' > "$regular_dir/owned"
+  rm "$code/.omp/extensions/dependency-handoff.ts"
+  rm "$code/.omp/extensions/same-name-file.ts"
+  rm -rf "$code/.omp/extensions/same-name-dir"
+  printf 'user-owned\n' > "$external"
+  ln -s "$external" "$home/.omp/extensions/user-owned.ts"
+
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --check 2>&1); then
+    fail "current-layout check accepted an obsolete managed extension link"
+  fi
+  assert_contains "$out" "link..omp.extensions.dependency-handoff.ts=blocked:obsolete-link" \
+    "check did not report the obsolete managed extension link"
+  [ -L "$home/.omp/extensions/dependency-handoff.ts" ] \
+    || fail "check mode removed the obsolete managed extension link"
+  [ "$(readlink "$home/.omp/extensions/dependency-handoff.ts")" = "$before" ] \
+    || fail "check mode changed the obsolete managed extension link"
+  [ -L "$home/.omp/extensions/user-owned.ts" ] \
+    || fail "check mode removed the external-target user link"
+
+  out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair 2>&1) \
+    || fail "current-layout repair failed to remove obsolete managed extension link: $out"
+  assert_contains "$out" "link..omp.extensions.dependency-handoff.ts=repaired" \
+    "repair did not report the obsolete managed extension link"
+  [ ! -e "$home/.omp/extensions/dependency-handoff.ts" ] \
+    && [ ! -L "$home/.omp/extensions/dependency-handoff.ts" ] \
+    || fail "repair left the obsolete managed extension link"
+  [ -L "$home/.omp/extensions/user-owned.ts" ] \
+    || fail "repair removed the external-target user link"
+  [ "$(readlink "$home/.omp/extensions/user-owned.ts")" = "$external" ] \
+    || fail "repair changed the external-target user link"
+  [ -L "$home/.omp/extensions/test-ext.ts" ] \
+    || fail "repair removed a canonical extension link"
+  [ -f "$regular_file" ] || fail "repair removed the same-name user-owned regular file"
+  [ "$(cat "$regular_file")" = 'user-owned same-name file' ] \
+    || fail "repair changed the same-name user-owned regular file"
+  [ -d "$regular_dir" ] || fail "repair removed the same-name user-owned directory"
+  [ "$(cat "$regular_dir/owned")" = keep ] \
+    || fail "repair changed the same-name user-owned directory"
+  pass "home-link removes only obsolete managed extension links"
+}
+
+test_current_layout_canonical_extensions_failure_fails_closed() {
+  require_slice_scripts
+  local code="$TMP_ROOT/current-canonical-failure-code" home="$TMP_ROOT/current-canonical-failure-home"
+  local before out
+  make_code_root "$code"
+  make_current_home "$code" "$home" currentcanonicalfailure
+  code=$(canonical "$code")
+  before=$(readlink "$home/.omp/extensions/test-ext.ts")
+  rm -rf "$code/.omp/extensions"
+  printf 'not a directory\n' > "$code/.omp/extensions"
+
+  if out=$(FM_CODE_ROOT_OVERRIDE="$code" FM_ROOT_OVERRIDE="$code" "$HOME_LINK" home-link "$home" --repair 2>&1); then
+    fail "repair accepted a non-directory canonical extensions path"
+  fi
+  assert_contains "$out" "result=blocked" \
+    "canonical extensions read failure did not block repair"
+  [ -L "$home/.omp/extensions/test-ext.ts" ] \
+    || fail "canonical extensions read failure removed a managed extension link"
+  [ "$(readlink "$home/.omp/extensions/test-ext.ts")" = "$before" ] \
+    || fail "canonical extensions read failure changed a managed extension link"
+  pass "home-link fails closed when canonical extensions cannot be read"
+}
+
 test_current_layout_repairs_extension_link() {
   require_slice_scripts
   local code="$TMP_ROOT/current-repair-code" home="$TMP_ROOT/current-repair-home"
@@ -608,6 +689,8 @@ test_home_link_preserves_non_symlink_claude_objects
 test_current_layout_home_link_check_passes
 test_home_link_pre_hook_surface
 test_current_layout_broken_extension_link_fails
+test_current_layout_removes_obsolete_managed_extension_link_only
+test_current_layout_canonical_extensions_failure_fails_closed
 test_current_layout_repairs_extension_link
 test_current_layout_repair_discovers_shared_skills
 test_legacy_whole_omp_link_still_passes

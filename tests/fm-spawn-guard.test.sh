@@ -68,6 +68,12 @@ make_herdr() {
     cat > "$BIN_DIR/herdr" << SH
 #!/usr/bin/env bash
 case "\${1:-}" in
+  "agent")
+    if [ "\${2:-}" = get ]; then
+      printf '{"error":{"code":"agent_not_found"}}\n'
+      exit 1
+    fi
+    ;;
   pane)
     case "\${2:-}" in
       list)
@@ -83,10 +89,79 @@ case "\${1:-}" in
 esac
 exit 1
 SH
+  elif [ "$kind" = empty-process ] || [ "$kind" = unrelated-process ]; then
+    cat > "$BIN_DIR/herdr" << SH
+#!/usr/bin/env bash
+case "\${1:-}" in
+  "agent")
+    if [ "\${2:-}" = get ]; then
+      printf '{"error":{"code":"agent_not_found"}}\n'
+      exit 1
+    fi
+    ;;
+  pane)
+    case "\${2:-}" in
+      list)
+        printf '{"id":"cli:pane:list","result":{"panes":['
+        if [ -n "$cwd_fixture" ]; then
+          printf '{"pane_id":"wT:p1","cwd":"%s","agent_status":"unknown","agent_session":{"agent":"omp"}}' "$cwd_fixture"
+        fi
+        printf ']}}\n'
+        exit 0
+        ;;
+      process-info)
+        if [ "$kind" = empty-process ]; then
+          printf '{"id":"cli:pane:process_info","result":{"process_info":{"foreground_processes":[]}}}\n'
+        else
+          printf '{"id":"cli:pane:process_info","result":{"process_info":{"foreground_processes":[{"argv0":"python","name":"python","cmdline":"python worker.py"}]}}}\n'
+        fi
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+exit 1
+SH
+    chmod +x "$BIN_DIR/herdr"
+  elif [ "$kind" = stale-shell ]; then
+    cat > "$BIN_DIR/herdr" << SH
+#!/usr/bin/env bash
+case "\${1:-}" in
+  "agent")
+    if [ "\${2:-}" = get ]; then
+      printf '{"error":{"code":"agent_not_found"}}\n'
+      exit 1
+    fi
+    ;;
+  pane)
+    case "\${2:-}" in
+      list)
+        printf '{"id":"cli:pane:list","result":{"panes":['
+        if [ -n "$cwd_fixture" ]; then
+          printf '{"pane_id":"wT:p1","cwd":"%s","agent_status":"unknown","agent_session":{"agent":"omp","value":"stale"}}' "$cwd_fixture"
+        fi
+        printf ']}}\n'
+        exit 0
+        ;;
+      process-info)
+        printf '{"id":"cli:pane:process_info","result":{"process_info":{"foreground_processes":[{"argv0":"zsh","name":"zsh","cmdline":"/bin/zsh -l"}]}}}\n'
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+exit 1
+SH
   else
     cat > "$BIN_DIR/herdr" << SH
 #!/usr/bin/env bash
 case "\${1:-}" in
+  "agent")
+    if [ "\${2:-}" = get ]; then
+      printf '{"error":{"code":"agent_not_found"}}\n'
+      exit 1
+    fi
+    ;;
   pane)
     case "\${2:-}" in
       list)
@@ -186,10 +261,104 @@ test_guard_ignores_matching_shell_pane() {
   pass "T5 guard ignores matching shell panes"
 }
 
+# --- T6: stale session metadata does not turn a shell into a duplicate --------
+test_guard_ignores_stale_session_on_shell_pane() {
+  local home out
+  home=$(make_sm_home grd-t6)
+  make_herdr "$home" stale-shell
+
+  out=$(run_spawn grd-t6 "$home")
+  printf '%s\n' "$out" | grep -q 'already has a live pane' \
+    && fail "guard treated stale shell metadata as a duplicate mate: $out"
+  pass "T6 guard ignores stale session metadata on shell panes"
+}
+
+# --- T7/T8: unknown foreground process lists do not unblock the guard ---------
+test_guard_refuses_empty_foreground_processes() {
+  local home out
+  home=$(make_sm_home grd-t7)
+  make_herdr "$home" empty-process
+
+  out=$(run_spawn grd-t7 "$home")
+  printf '%s\n' "$out" | grep -q 'already has a live pane' \
+    || fail "guard allowed an empty foreground process list: $out"
+  pass "T7 guard refuses empty foreground process lists"
+}
+
+test_guard_refuses_unrelated_foreground_processes() {
+  local home out
+  home=$(make_sm_home grd-t8)
+  make_herdr "$home" unrelated-process
+
+  out=$(run_spawn grd-t8 "$home")
+  printf '%s\n' "$out" | grep -q 'already has a live pane' \
+    || fail "guard allowed an unrelated foreground process list: $out"
+  pass "T8 guard refuses unrelated foreground process lists"
+}
+
+# --- T9: slot rebound between husk proof and close is never closed ------------
+test_husk_reap_refuses_rebound_slot() {
+  local fakebin="$TMP_ROOT/rebound-bin" log="$TMP_ROOT/rebound.log" counter="$TMP_ROOT/rebound.count"
+  mkdir -p "$fakebin"
+  : > "$counter"
+  cat > "$fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+[ -n "${FM_HERDR_LOG:-}" ] && printf '%s\n' "$*" >> "$FM_HERDR_LOG"
+case "${1:-} ${2:-}" in
+  "agent get")
+    count=0
+    [ -s "${FM_HERDR_COUNTER:-}" ] && count=$(cat "$FM_HERDR_COUNTER")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$FM_HERDR_COUNTER"
+    if [ "$count" -eq 1 ]; then
+      printf '{"result":{"agent":{"pane_id":"w1:p-old","tab_id":"w1:t-old","workspace_id":"w1"}}}\n'
+    else
+      printf '{"result":{"agent":{"pane_id":"w1:p-new","tab_id":"w1:t-new","workspace_id":"w1"}}}\n'
+    fi
+    exit 0
+    ;;
+  "pane get")
+    printf '{"result":{"pane":{"agent_status":"unknown"}}}\n'
+    exit 0
+    ;;
+  "pane process-info")
+    if [ "${4:-}" = "w1:p-old" ]; then
+      printf '{"result":{"process_info":{"foreground_processes":[{"argv0":"zsh","name":"zsh","cmdline":"/bin/zsh -l"}]}}}\n'
+    else
+      printf '{"result":{"process_info":{"foreground_processes":[{"argv0":"omp","name":"omp","cmdline":"omp"}]}}}\n'
+    fi
+    exit 0
+    ;;
+  "tab close"|"pane close"|"workspace close")
+    exit 0
+    ;;
+esac
+exit 1
+SH
+  chmod +x "$fakebin/herdr"
+  if PATH="$fakebin:$BASE_PATH" FM_HERDR_COUNTER="$counter" FM_HERDR_LOG="$log" \
+    bun -e '
+      import { herdrReapHuskSlot } from "'"$ROOT"'/.omp/extensions/cli/lib/herdr.ts";
+      process.exit((await herdrReapHuskSlot("slot")) ? 0 : 1);
+    '; then
+    fail "husk reap succeeded after the slot rebound"
+  fi
+  if grep -Eq '^(tab|pane|workspace) close ' "$log"; then
+    fail "husk reap closed topology after the slot rebound: $(cat "$log")"
+  fi
+  pass "T9 husk reap refuses a rebound slot without closing topology"
+}
+
+test_husk_reap_refuses_rebound_slot
+test_guard_refuses_empty_foreground_processes
+test_guard_refuses_unrelated_foreground_processes
+
 test_guard_refuses_matching_pane
 test_guard_passes_no_match
 test_guard_bypassed_with_force
 test_guard_passes_empty_pane_list
 test_guard_ignores_matching_shell_pane
+test_guard_ignores_stale_session_on_shell_pane
 
 echo "# all fm-spawn-guard tests passed"

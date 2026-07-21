@@ -4,13 +4,15 @@
 //   1. Capture a non-empty agent_session.value before delivering exit.
 //   2. `herdr wait agent-status <pane> --status unknown --timeout <ms>`
 //      (event-backed; wait success alone is not proof).
-//   3. One correlated pane get: that original session must be absent or changed.
+//   3. Correlated pane get must show the original session absent or changed;
+//      if stale, process-info must report the exact shell fallback.
 // Rebind checks only inspect.slot (authoritative resolved name), never a
 // simultaneous fm-<id> alias.
 
 import { spawnSync } from "node:child_process";
 import { adapterAwareExitSupported, exitCommand } from "./harness-adapters";
 import {
+	herdrPaneAgentProcessVerdict,
 	inspectLivePane,
 	observeComposer,
 	readAgentSlot,
@@ -48,13 +50,16 @@ export interface PaneExitOptions {
 /**
  * Correlated session-value proof after an event-backed wait.
  * Requires a non-empty original agent_session.value that later disappears or
- * changes. Empty↔empty is not a transition. process-info is never consulted.
+ * changes. Empty↔empty is not a transition. If the session value is stale,
+ * an exact shell process verdict is the only fallback proof; agent and err
+ * verdicts fail closed.
  */
 export function sessionValueRetired(preSession: string, pane: string): boolean {
 	if (!preSession) return false;
 	const snap = readPaneSnapshot(pane);
 	if (snap.presence === "error") return false;
 	if (snap.presence === "absent") return true;
+	if (snap.paneId !== pane) return false;
 	return !snap.sessionId || snap.sessionId !== preSession;
 }
 
@@ -72,11 +77,17 @@ function assertResolvedSlotStillBound(slot: string, pane: string): string | null
 }
 
 /**
- * Event-backed wait, then one correlated verification of the original session.
- * Wait success alone never proves retirement.
+ * Correlated verification surrounds an event-backed wait. A shell that already
+ * exists avoids the wait entirely. When Herdr already reports unknown before
+ * exit, bounded process rechecks let a still-closing harness reach its restored
+ * shell. Agent and err verdicts remain fail-closed until the deadline.
  */
 function proveSessionRetirement(preSession: string, pane: string, timeoutMs: number): boolean {
 	const timeout = Math.max(250, timeoutMs);
+	const deadline = Date.now() + timeout;
+	if (sessionValueRetired(preSession, pane)) return true;
+	const initialVerdict = herdrPaneAgentProcessVerdict(pane);
+	if (initialVerdict === "shell") return true;
 	const wait = spawnSync(
 		"herdr",
 		["wait", "agent-status", pane, "--status", "unknown", "--timeout", String(timeout)],
@@ -85,7 +96,15 @@ function proveSessionRetirement(preSession: string, pane: string, timeoutMs: num
 	if (wait.error && (wait.error as NodeJS.ErrnoException).code === "ENOENT") {
 		return false;
 	}
-	return sessionValueRetired(preSession, pane);
+	const sleeper = new Int32Array(new SharedArrayBuffer(4));
+	while (true) {
+		if (sessionValueRetired(preSession, pane)) return true;
+		const verdict = herdrPaneAgentProcessVerdict(pane);
+		if (verdict === "shell") return true;
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) return false;
+		Atomics.wait(sleeper, 0, 0, Math.min(100, remaining));
+	}
 }
 
 /**
@@ -117,14 +136,6 @@ export async function exitPaneSession(opts: PaneExitOptions): Promise<PaneExitRe
 	if (!pane) return { state: "failed", inspect, reason: "no live pane" };
 	if (opts.refreshBinding) refreshPaneBinding(opts.target, opts.stateDir, pane);
 
-	const composer = observeComposer(pane);
-	if (composer.state === "error") {
-		return { state: "failed", pane, inspect, reason: `composer observation error: ${composer.reason}` };
-	}
-	if (composer.state === "pending") {
-		return { state: "composer-blocked", pane, inspect, reason: "composer-draft" };
-	}
-
 	const pre = readPaneSnapshot(pane);
 	if (pre.presence === "error") {
 		return { state: "failed", pane, inspect, reason: pre.errorMessage || "pane get error before exit" };
@@ -146,7 +157,33 @@ export async function exitPaneSession(opts: PaneExitOptions): Promise<PaneExitRe
 	if (rebindErr) {
 		return { state: "failed", pane, sessionId: preSession, inspect, reason: rebindErr };
 	}
+	if (herdrPaneAgentProcessVerdict(pane) === "shell") {
+		return { state: "already-stopped", pane, sessionId: preSession, inspect, reason: "shell" };
+	}
 
+	const composer = observeComposer(pane);
+	if (composer.state === "error") {
+		return { state: "failed", pane, inspect, reason: `composer observation error: ${composer.reason}` };
+	}
+	if (composer.state === "pending") {
+		return { state: "composer-blocked", pane, inspect, reason: "composer-draft" };
+	}
+
+	const delivery = readPaneSnapshot(pane);
+	if (
+		delivery.presence !== "present" ||
+		delivery.paneId !== pane ||
+		!delivery.sessionId ||
+		delivery.sessionId !== preSession
+	) {
+		return {
+			state: "failed",
+			pane,
+			sessionId: preSession,
+			inspect,
+			reason: "pane/session changed before exit delivery",
+		};
+	}
 	const res = spawnSync("herdr", ["pane", "run", pane, cmd], { encoding: "utf8" });
 	if (res.error || res.status !== 0) {
 		return { state: "failed", pane, sessionId: preSession, inspect, reason: "exit command not delivered" };

@@ -100,7 +100,7 @@ import { connect, type Socket } from "node:net";
 import { resolveHome as resolveIdentityHome, resolveIdentity } from "./fm-identity/identity";
 import { resolveValidatedCharterClaim } from "./cli/lib/omp-system-context";
 
-import { dependencyDeliveries, parseDependencyEdge, prioritizeDependencyEdges, validateBlockedReport, type DependencyEdge } from "./dependency-handoff";
+import { dependencyDeliveries, parseDependencyEdge, prioritizeDependencyEdges, validateBlockedReport, type DependencyEdge } from "./cli/lib/dependency-handoff";
 
 // ============================== PURE SEAM ==============================
 // No I/O, no omp/herdr imports. Bun-importable on its own. Mirrors the shared

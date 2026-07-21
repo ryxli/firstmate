@@ -19,11 +19,11 @@ import {
 	rmdirSync,
 	symlinkSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isTrackedPreHooks } from "../lib/ship-ext";
 import { ensureMateMiseToml } from "../lib/mise-home";
 import { checkMateHomeLayout, repairMateHomeLayout } from "../lib/mate-home-layout";
+import { isTrackedPreHooks } from "../lib/ship-ext";
 import {
 	existsFollow,
 	isDirectoryFollow,
@@ -31,6 +31,7 @@ import {
 	isSymlink,
 	linkPointsTo,
 	normalizeExistingDir,
+	rawLinkTarget,
 } from "../lib/path-links";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -303,14 +304,36 @@ function checkCurrentOmp(ctx: Ctx): void {
 		}
 	}
 	if (!isDirectoryFollow(extSrc)) {
-		ctx.status = "ok";
+		setBlock(ctx, "missing-target");
 		return;
 	}
-	let entries: string[] = [];
+	let entries: string[];
 	try {
 		entries = readdirSync(extSrc);
 	} catch {
-		entries = [];
+		setBlock(ctx, "missing-target");
+		return;
+	}
+	const canonicalEntries = new Set(entries);
+	let currentEntries: string[] = [];
+	try {
+		currentEntries = readdirSync(extDst);
+	} catch {
+		currentEntries = [];
+	}
+	for (const name of currentEntries) {
+		if (canonicalEntries.has(name)) continue;
+		const link = join(extDst, name);
+		if (!isSymlink(link)) continue;
+		const target = rawLinkTarget(link);
+		if (target === null || dirname(target) !== extSrc) continue;
+		if (ctx.mode === "check") {
+			setBlock(ctx, "obsolete-link");
+		} else {
+			rmSync(link, { force: true });
+			ctx.status = "repaired";
+		}
+		statusLine(ctx, `link..omp.extensions.${name}`);
 	}
 	for (const name of entries) {
 		if (!existsSync(join(extSrc, name))) continue;

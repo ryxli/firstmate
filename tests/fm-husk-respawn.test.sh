@@ -34,24 +34,62 @@ make_fake_herdr() {
 set -u
 [ -n "${FM_HERDR_LOG:-}" ] && printf '%s\n' "$*" >> "$FM_HERDR_LOG"
 kind=${FM_HERDR_KIND:-free}
+if [ -n "${FM_HERDR_RELEASE_FILE:-}" ] && [ -f "$FM_HERDR_RELEASE_FILE" ]; then
+  kind=free
+fi
 case "${1:-} ${2:-}" in
   "agent get")
+    if [ "$kind" = generic-failure ]; then
+      printf '{"error":{"code":"transport_error","message":"herdr unavailable"}}\n'
+      exit 1
+    fi
+    if [ "$kind" = embedded-error ]; then
+      printf '{"error":{"code":"agent_not_found","details":{"error":{"code":"permission_denied"}}}}\n'
+      exit 1
+    fi
+    if [ "$kind" = unstructured-agent-not-found ]; then
+      printf 'agent not found\n'
+      exit 1
+    fi
+    if [ "$kind" = message-only-agent-not-found ]; then
+      printf '{"error":{"message":"agent not found"}}\n'
+      exit 1
+    fi
+    if [ "$kind" = generic-not-found ]; then
+      printf '{"error":"not found"}\n'
+      exit 1
+    fi
+    if [ "$kind" = malformed-success ]; then
+      printf '{"result":{"agent":'
+      exit 0
+    fi
+    if [ "$kind" = missing-pane ]; then
+      printf '{"result":{"agent":{"tab_id":"w1:t-old","workspace_id":"w1"}}}\n'
+      exit 0
+    fi
     if [ "$kind" = free ]; then
       printf '{"error":{"code":"agent_not_found"}}\n'
       exit 1
     fi
-    printf '{"result":{"agent":{"pane_id":"w1:p-old","tab_id":"w1:t-old"}}}\n'
+    printf '{"result":{"agent":{"pane_id":"w1:p-old","tab_id":"w1:t-old","workspace_id":"w1"}}}\n'
+    ;;
+  "pane list")
+    printf '{"result":{"panes":[]}}\n'
     ;;
   "pane get")
     if [ "$kind" = dead ]; then
       printf '{"error":{"code":"pane_not_found"}}\n'
       exit 1
     fi
-    case "$kind" in live) status=working ;; *) status=unknown ;; esac
-    printf '{"result":{"pane":{"agent_status":"%s"}}}\n' "$status"
+    case "$kind" in live) status=working ;; stale-idle-shell) status=idle ;; *) status=unknown ;; esac
+    if [ "$kind" = malformed-pane-success ]; then
+      printf '{"result":{"pane":{"agent_status":"%s"}}}\n' "$status"
+    else
+      printf '{"result":{"pane":{"pane_id":"w1:p-old","agent_status":"%s"}}}\n' "$status"
+    fi
     ;;
   "pane process-info")
-    case "$kind" in booting) process='bun /opt/omp/scripts/omp.ts' ;; *) process='-zsh' ;; esac
+    case "$kind" in booting|live) process='bun /opt/omp/scripts/omp.ts' ;; *) process='-zsh' ;; esac
     printf '{"result":{"process_info":{"foreground_processes":[{"argv0":"%s","name":"%s","cmdline":"%s"}]}}}\n' "$process" "$process" "$process"
     ;;
   "pane current")
@@ -63,7 +101,17 @@ case "${1:-} ${2:-}" in
   "agent start")
     printf '{"result":{"agent":{"pane_id":"w1:p-new"}}}\n'
     ;;
-  "tab close"|"pane close"|"pane rename") exit 0 ;;
+  "tab close")
+    if [ "$kind" = last-tab ]; then
+      printf '{"error":{"code":"tab_close_failed","message":"cannot close the last tab in a workspace"}}\n'
+      exit 1
+    fi
+    [ -n "${FM_HERDR_RELEASE_FILE:-}" ] && : > "$FM_HERDR_RELEASE_FILE"
+    exit 0 ;;
+  "pane close"|"workspace close")
+    [ -n "${FM_HERDR_RELEASE_FILE:-}" ] && : > "$FM_HERDR_RELEASE_FILE"
+    exit 0 ;;
+  "pane rename") exit 0 ;;
 esac
 SH
   chmod +x "$fakebin/herdr"
@@ -95,31 +143,55 @@ classify() {
 }
 
 reap() {
-  local kind fakebin log
+  local kind fakebin log rc
   kind=$1
   fakebin="$TMP_ROOT/reap-$kind/bin"
   log="$TMP_ROOT/reap-$kind/log"
   make_fake_herdr "$fakebin"
-  PATH="$fakebin:$PATH" FM_HERDR_KIND="$kind" FM_HERDR_LOG="$log" FM_HUSK_REAP_SETTLE=0 \
+  PATH="$fakebin:$PATH" FM_HERDR_KIND="$kind" FM_HERDR_LOG="$log" \
+    FM_HERDR_RELEASE_FILE="$TMP_ROOT/reap-$kind/released" FM_HUSK_REAP_SETTLE=0 \
     ts_reap_husk_slot slot >/dev/null 2>&1
+  rc=$?
   printf '%s\n' "$log"
+  return "$rc"
 }
 
 [ "$(classify free)" = free ] || fail "unregistered slot must be free"
 [ "$(classify dead)" = husk ] || fail "dead restored pane must be a husk"
 [ "$(classify shell)" = husk ] || fail "agent-less shell must be a husk"
+[ "$(classify stale-idle-shell)" = husk ] || fail "stale idle status must not conceal an agent-less shell"
+[ "$(classify generic-failure)" = unknown ] || fail "generic agent get failure must remain unknown"
+[ "$(classify malformed-success)" = unknown ] || fail "malformed successful agent get must remain unknown"
+[ "$(classify embedded-error)" = unknown ] || fail "embedded non-not-found agent error must remain unknown"
+[ "$(classify missing-pane)" = unknown ] || fail "agent get without pane_id must remain unknown"
+[ "$(classify malformed-pane-success)" = unknown ] || fail "pane get without pane_id must remain unknown"
 [ "$(classify live)" = live ] || fail "bound agent must remain live"
 [ "$(classify booting)" = unknown ] || fail "booting harness must fail closed"
 pass "slot classification distinguishes reusable husks from live and booting agents"
 
+[ "$(classify unstructured-agent-not-found)" = unknown ] || fail "unstructured agent not found must remain unknown"
+[ "$(classify message-only-agent-not-found)" = unknown ] || fail "message-only agent not found must remain unknown"
+[ "$(classify generic-not-found)" = unknown ] || fail "generic not found must remain unknown"
 log=$(reap shell) || fail "confirmed husk must be reaped"
 grep -qF 'tab close w1:t-old' "$log" || fail "husk reap must close the restored tab"
+[ "$(grep -cF 'agent get slot' "$log")" -ge 3 ] \
+  || fail "husk reap must verify the slot became free after close"
+last_tab_log=$(reap last-tab) || fail "last-tab husk workspace must be reaped"
+grep -qF 'tab close w1:t-old' "$last_tab_log" || fail "last-tab reap must try the restored tab first"
+grep -qF 'workspace close w1' "$last_tab_log" || fail "last-tab reap must close the obsolete workspace"
 live_bin="$TMP_ROOT/live-reap/bin"
 make_fake_herdr "$live_bin"
 if PATH="$live_bin:$PATH" FM_HERDR_KIND=live FM_HUSK_REAP_SETTLE=0 \
   ts_reap_husk_slot slot >/dev/null 2>&1; then
   fail "live agent slot must not be reaped"
 fi
+for uncertain in generic-failure malformed-success embedded-error missing-pane malformed-pane-success unstructured-agent-not-found message-only-agent-not-found generic-not-found; do
+  uncertain_log=$(reap "$uncertain") \
+    && fail "$uncertain slot observation must not be reaped"
+  if grep -Eq '^(tab|pane|workspace) close |^agent start ' "$uncertain_log"; then
+    fail "$uncertain slot observation triggered close/start: $(cat "$uncertain_log")"
+  fi
+done
 pass "reap closes only confirmed husks"
 
 spawn_home="$TMP_ROOT/spawn-home"
@@ -205,15 +277,13 @@ resume_out=$(PATH="$resume_bin:$PATH" FM_HERDR_KIND=free FM_HERDR_LOG="$resume_l
   FM_HOME="$spawn_home" FM_ROOT_OVERRIDE="$ROOT" FM_SPAWN_NO_GUARD=1 \
   "$ROOT/sbin/fm" spawn anchor omp --secondmate 2>&1) \
   || fail "secondmate OMP recovery spawn should succeed: $resume_out"
-grep -qF 'omp --append-system-prompt=' "$resume_log" || fail "OMP respawn did not inject the runtime role contract"
-grep -qF -- '--auto-approve -c' "$resume_log" || fail "OMP respawn did not continue the saved session"
-grep -qF 'charter prompt refreshed on resume' "$resume_log" \
-  || fail "OMP respawn did not refresh charter into append-system-prompt"
-grep -qF 'FM_INJECTED_CHARTER_SHA256=' "$resume_log" || fail "OMP respawn omitted charter injection marker"
-# shellcheck disable=SC2016 # literal cat prompt must not appear on OMP secondmate resume
-if grep -qF '$(cat ' "$resume_log"; then
-  fail "OMP respawn used positional charter prompt instead of system append"
-fi
+grep -qF "FM_HOME='$secondmate_home_real' '$secondmate_home_real'/sbin/fm start" "$resume_log" \
+  || fail "secondmate respawn did not use the canonical home-local fm start"
+for forbidden in 'omp --auto-approve' '--auto-approve -c' '--config' '--append-system-prompt'; do
+  if grep -qF -- "$forbidden" "$resume_log"; then
+    fail "secondmate respawn retained direct OMP launch fragment: $forbidden"
+  fi
+done
 grep -qF "home=$secondmate_home_real" "$spawn_home/state/anchor.meta" || fail "recovery metadata did not preserve the durable home"
 grep -qF 'tab create --workspace w-anchor --label Plum' "$resume_log" || fail "secondmate tab did not use the registered display name"
 grep -qF 'pane rename w1:p-new Plum' "$resume_log" || fail "secondmate pane did not use the registered display name"

@@ -201,6 +201,12 @@ describe("planPropagation", () => {
 		expect(plan!.requests[0].method).toBe("agent.rename");
 		expect(plan!.requests[1].method).toBe("pane.report_metadata");
 	});
+
+	it("skips the status-resetting rename when the launcher already owns the canonical slot", () => {
+		const plan = planPropagation({ ...herdrEnv, FM_AGENT_SLOT: "riggs" }, herdrFiles);
+		expect(plan).not.toBeNull();
+		expect(plan!.requests).toEqual([buildMetadataRequest("w2:p1", plan!.identity)]);
+	});
 });
 
 describe("isVersioned", () => {

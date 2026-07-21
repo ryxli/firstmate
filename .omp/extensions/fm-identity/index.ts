@@ -83,6 +83,7 @@ export default function (pi: ExtensionAPI) {
 
 		const env = {
 			FM_HOME: process.env.FM_HOME,
+			FM_AGENT_SLOT: process.env.FM_AGENT_SLOT,
 			cwd: process.cwd(),
 			HERDR_ENV: process.env.HERDR_ENV,
 			HERDR_SOCKET_PATH: process.env.HERDR_SOCKET_PATH,

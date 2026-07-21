@@ -36,15 +36,11 @@ case "${1:-}" in
     case "${2:-}" in
       get)
         if [ -n "${FM_FAKE_NO_SLOT:-}" ]; then
-          if [ -n "${FM_FAKE_NOT_FOUND_STDERR:-}" ]; then
-            printf '{"error":{"code":"agent_not_found","message":"agent not found"}}\n' >&2
-          else
-            printf '{"error":"not found"}\n'
-          fi
+          printf '{"error":{"code":"agent_not_found","message":"agent not found"}}\n' >&2
           exit 1
         fi
         # After agent.rename, only the renamed slot binds; fm-<id> is absent.
-        if [ -n "${FM_FAKE_ONLY_SLOT:-}" ] && [ "${3:-}" != "${FM_FAKE_ONLY_SLOT}" ]; then
+        if [ -n "${FM_FAKE_ONLY_SLOT:-}" ] && [[ "${3:-}" != *:* ]] && [ "${3:-}" != "${FM_FAKE_ONLY_SLOT}" ]; then
           printf '{"error":"not found"}\n'
           exit 1
         fi
@@ -61,6 +57,10 @@ case "${1:-}" in
           printf '{"error":{"code":"pane_not_found","message":"pane not found"}}\n'
           exit 1
         fi
+        if [ -n "${FM_FAKE_MALFORMED_PANE:-}" ]; then
+          printf '{"result":{"pane":{"agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n'
+          exit 0
+        fi
         if [ -f "${FM_FAKE_SESSION_FILE:-}" ]; then
           cat "${FM_FAKE_SESSION_FILE}"
           exit 0
@@ -69,6 +69,10 @@ case "${1:-}" in
           "${FM_FAKE_AGENT_STATUS:-idle}" "${FM_FAKE_REVISION:-1}" "${FM_FAKE_SESSION:-sess-1}"
         exit 0 ;;
       read)
+        if [ -n "${FM_FAKE_ON_READ:-}" ]; then
+          # shellcheck disable=SC1090
+          . "${FM_FAKE_ON_READ}"
+        fi
         printf '%s\n' "${FM_FAKE_PANE_LINES:-}"
         exit 0 ;;
       run)
@@ -81,7 +85,11 @@ case "${1:-}" in
         exit 0 ;;
       process-info)
         proc="${FM_FAKE_PROCESS:-agent}"
-        if [ -f "${FM_FAKE_PROCESS_FILE:-}" ]; then
+        if [ -f "${FM_FAKE_PROCESS_SEQUENCE_FILE:-}" ]; then
+          sequence=$(cat "${FM_FAKE_PROCESS_SEQUENCE_FILE}")
+          proc=${sequence%%,*}
+          if [ "$sequence" != "$proc" ]; then printf '%s' "${sequence#*,}" > "${FM_FAKE_PROCESS_SEQUENCE_FILE}"; fi
+        elif [ -f "${FM_FAKE_PROCESS_FILE:-}" ]; then
           proc=$(cat "${FM_FAKE_PROCESS_FILE}")
         fi
         if [ "$proc" = "err" ]; then
@@ -257,6 +265,59 @@ test_stop_already_stopped() {
   pass "stop classifies unbound mate as already-stopped"
 }
 
+test_exit_rejects_pre_delivery_malformed_snapshot() {
+  local dir home fb rc sess
+  dir="$TMP_ROOT/exit-pre-delivery-malformed-snapshot"
+  home="$dir/home"
+  mkdir -p "$home/state" "$dir"
+  cat > "$home/state/task.meta" <<'EOF'
+pane=w1:p1
+harness=omp
+agent_slot=task
+EOF
+  sess="$dir/session.json"
+  printf '{"result":{"pane":{"agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_SESSION_FILE="$sess" FM_FAKE_MALFORMED_PANE=1 \
+    "$ROOT/sbin/fm" send fm-task --exit >"$dir/out" 2>"$dir/err" || rc=$?
+  [ "$rc" != "0" ] || fail "malformed pre-delivery pane snapshot must fail"
+  grep -q 'state=failed' "$dir/out" || fail "expected failed state for malformed pre-delivery snapshot: $(cat "$dir/out" "$dir/err")"
+  if grep -q '^herdr pane run' "$dir/herdr.log" 2>/dev/null; then
+    fail "must not deliver exit after malformed pre-delivery pane snapshot"
+  fi
+  pass "exit rejects malformed pre-delivery pane snapshot without delivery"
+}
+
+test_exit_rejects_post_delivery_malformed_snapshot() {
+  local dir home fb rc sess
+  dir="$TMP_ROOT/exit-post-delivery-malformed-snapshot"
+  home="$dir/home"
+  mkdir -p "$home/state" "$dir"
+  cat > "$home/state/task.meta" <<'EOF'
+pane=w1:p1
+harness=omp
+agent_slot=task
+EOF
+  sess="$dir/session.json"
+  printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+  cat > "$dir/on-run.sh" <<'EOF'
+printf '{"result":{"pane":{"agent_status":"unknown","revision":2,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$FM_FAKE_SESSION_FILE"
+EOF
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_SESSION_FILE="$sess" FM_FAKE_ON_RUN="$dir/on-run.sh" \
+    FM_EXIT_RETIRE_TIMEOUT_MS=500 "$ROOT/sbin/fm" send fm-task --exit >"$dir/out" 2>"$dir/err" || rc=$?
+  [ "$rc" != "0" ] || fail "malformed post-delivery pane snapshot must fail"
+  grep -q 'state=failed' "$dir/out" || fail "expected failed state for malformed post-delivery snapshot: $(cat "$dir/out" "$dir/err")"
+  if grep -q 'state=consumed' "$dir/out"; then
+    fail "must not consume malformed post-delivery pane snapshot"
+  fi
+  pass "exit rejects malformed post-delivery pane snapshot without consumption"
+}
+
 test_exit_consumed_on_session_retirement() {
   local dir home fb rc sess
   dir="$TMP_ROOT/exit-retire"
@@ -284,6 +345,178 @@ EOF
   [ "$rc" = "0" ] || fail "exit should consume on session retirement rc=$rc $(cat "$dir/out" "$dir/err")"
   grep -q 'state=consumed' "$dir/out" || fail "expected state=consumed: $(cat "$dir/out")"
   pass "exit consumed when targeted session retires"
+}
+test_exit_consumed_on_shell_after_stale_session() {
+  local dir home fb rc sess procf
+  dir="$TMP_ROOT/exit-shell-stale-session"
+  home="$dir/home"
+  mkdir -p "$home/state" "$dir"
+  cat > "$home/state/task.meta" <<'EOF'
+pane=w1:p1
+harness=omp
+agent_slot=task
+EOF
+  sess="$dir/session.json"
+  procf="$dir/process"
+  printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+  printf 'agent\n' > "$procf"
+  cat > "$dir/on-run.sh" <<EOF
+printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"unknown","revision":2,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+(sleep 0.1; printf 'shell\n' > "$procf") &
+EOF
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_SESSION_FILE="$sess" FM_FAKE_PROCESS_FILE="$procf" \
+    FM_FAKE_ON_RUN="$dir/on-run.sh" FM_EXIT_RETIRE_TIMEOUT_MS=2000 \
+    "$ROOT/sbin/fm" send fm-task --exit >"$dir/out" 2>"$dir/err" || rc=$?
+  [ "$rc" = "0" ] || fail "shell after quit should consume stale session rc=$rc $(cat "$dir/out" "$dir/err")"
+  grep -q 'state=consumed' "$dir/out" || fail "expected consumed for shell after quit: $(cat "$dir/out")"
+  pass "exit consumes when shell follows quit with stale session metadata"
+}
+
+test_exit_retries_transient_process_info_error() {
+  local dir home fb rc sess sequence
+  dir="$TMP_ROOT/exit-shell-transient-process-error"
+  home="$dir/home"
+  mkdir -p "$home/state" "$dir"
+  cat > "$home/state/task.meta" <<'EOF'
+pane=w1:p1
+harness=omp
+agent_slot=task
+EOF
+  sess="$dir/session.json"
+  sequence="$dir/process-sequence"
+  printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+  printf 'agent,agent,err,shell' > "$sequence"
+  cat > "$dir/on-run.sh" <<EOF
+printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"unknown","revision":2,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+EOF
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_SESSION_FILE="$sess" \
+    FM_FAKE_PROCESS_SEQUENCE_FILE="$sequence" FM_FAKE_ON_RUN="$dir/on-run.sh" FM_EXIT_RETIRE_TIMEOUT_MS=2000 \
+    "$ROOT/sbin/fm" send fm-task --exit >"$dir/out" 2>"$dir/err" || rc=$?
+  [ "$rc" = "0" ] || fail "transient process-info error should be retried rc=$rc $(cat "$dir/out" "$dir/err")"
+  grep -q 'state=consumed' "$dir/out" || fail "expected consumed after transient process-info error: $(cat "$dir/out")"
+  pass "exit retries transient process-info errors during shell handoff"
+}
+
+test_exit_consumed_on_preexisting_shell_with_stale_session() {
+  local dir home fb rc sess log
+  dir="$TMP_ROOT/exit-preexisting-shell-stale-session"
+  home="$dir/home"
+  mkdir -p "$home/state" "$dir"
+  cat > "$home/state/task.meta" <<'EOF'
+pane=w1:p1
+harness=omp
+agent_slot=task
+EOF
+  sess="$dir/session.json"
+  log="$dir/herdr.log"
+  printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_SESSION_FILE="$sess" FM_FAKE_PROCESS=shell \
+    FM_FAKE_HERDR_LOG="$log" FM_EXIT_RETIRE_TIMEOUT_MS=2000 \
+    "$ROOT/sbin/fm" send fm-task --exit >"$dir/out" 2>"$dir/err" || rc=$?
+  [ "$rc" = "0" ] || fail "preexisting shell should be already stopped rc=$rc $(cat "$dir/out" "$dir/err")"
+  grep -q 'state=already-stopped' "$dir/out" || fail "expected already-stopped for preexisting shell: $(cat "$dir/out")"
+  if grep -q '^herdr pane run' "$log"; then fail "preexisting shell must not receive an exit command"; fi
+  if grep -q '^herdr wait agent-status' "$log"; then fail "preexisting shell must not wait for stale agent status"; fi
+  pass "exit recognizes a preexisting shell without delivery or waiting"
+}
+
+test_exit_rejects_live_agent_with_stale_session() {
+  local dir home fb rc sess procf
+  dir="$TMP_ROOT/exit-agent-stale-session"
+  home="$dir/home"
+  mkdir -p "$home/state" "$dir"
+  cat > "$home/state/task.meta" <<'EOF'
+pane=w1:p1
+harness=omp
+agent_slot=task
+EOF
+  sess="$dir/session.json"
+  procf="$dir/process"
+  printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+  printf 'agent\n' > "$procf"
+  cat > "$dir/on-run.sh" <<EOF
+printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"unknown","revision":2,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+printf 'agent\n' > "$procf"
+EOF
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_SESSION_FILE="$sess" FM_FAKE_PROCESS_FILE="$procf" \
+    FM_FAKE_ON_RUN="$dir/on-run.sh" FM_EXIT_RETIRE_TIMEOUT_MS=500 \
+    "$ROOT/sbin/fm" send fm-task --exit >"$dir/out" 2>"$dir/err" || rc=$?
+  [ "$rc" != "0" ] || fail "live agent must not prove retirement"
+  grep -q 'state=failed' "$dir/out" || fail "expected state=failed: $(cat "$dir/out")"
+  if grep -q 'state=consumed' "$dir/out"; then fail "must not claim consumed for live agent"; fi
+  pass "exit rejects live agent when stale session metadata remains"
+}
+
+test_exit_rejects_retirement_on_different_pane() {
+  local dir home fb rc sess procf
+  dir="$TMP_ROOT/exit-different-pane"
+  home="$dir/home"
+  mkdir -p "$home/state" "$dir"
+  cat > "$home/state/task.meta" <<'EOF'
+pane=w1:p1
+harness=omp
+agent_slot=task
+EOF
+  sess="$dir/session.json"
+  procf="$dir/process"
+  printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+  printf 'agent\n' > "$procf"
+  cat > "$dir/on-run.sh" <<EOF
+printf '{"result":{"pane":{"pane_id":"w1:p2","agent_status":"unknown","revision":2,"agent_session":{"agent":"omp","value":"sess-2"}}}}\n' > "$sess"
+printf 'agent\n' > "$procf"
+EOF
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_SESSION_FILE="$sess" FM_FAKE_PROCESS_FILE="$procf" \
+    FM_FAKE_ON_RUN="$dir/on-run.sh" FM_EXIT_RETIRE_TIMEOUT_MS=500 \
+    "$ROOT/sbin/fm" send fm-task --exit >"$dir/out" 2>"$dir/err" || rc=$?
+  [ "$rc" != "0" ] || fail "different post-delivery pane must not prove retirement"
+  grep -q 'state=failed' "$dir/out" || fail "expected state=failed for different post-delivery pane: $(cat "$dir/out" "$dir/err")"
+  if grep -q 'state=consumed' "$dir/out"; then fail "must not claim consumed for different post-delivery pane"; fi
+  pass "exit rejects retirement from a different post-delivery pane"
+}
+
+test_exit_refuses_pre_delivery_session_rebind() {
+  local dir home fb rc sess log
+  dir="$TMP_ROOT/exit-pre-delivery-rebind"
+  home="$dir/home"
+  mkdir -p "$home/state" "$dir"
+  cat > "$home/state/task.meta" <<'EOF'
+pane=w1:p1
+harness=omp
+agent_slot=task
+EOF
+  sess="$dir/session.json"
+  log="$dir/herdr.log"
+  printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"idle","revision":1,"agent_session":{"agent":"omp","value":"sess-1"}}}}\n' > "$sess"
+  cat > "$dir/on-read.sh" <<EOF
+printf '{"result":{"pane":{"pane_id":"w1:p1","agent_status":"idle","revision":2,"agent_session":{"agent":"omp","value":"sess-2"}}}}\n' > "$sess"
+EOF
+  fb=$(make_fake_herdr "$dir")
+
+  rc=0
+  PATH="$fb:$PATH" FM_HOME="$home" FM_FAKE_SESSION_FILE="$sess" \
+    FM_FAKE_ON_READ="$dir/on-read.sh" FM_FAKE_HERDR_LOG="$log" FM_EXIT_RETIRE_TIMEOUT_MS=500 \
+    "$ROOT/sbin/fm" send fm-task --exit >"$dir/out" 2>"$dir/err" || rc=$?
+  [ "$rc" != "0" ] || fail "session rebind before delivery must fail"
+  grep -q 'state=failed' "$dir/out" || fail "expected state=failed for pre-delivery rebind: $(cat "$dir/out" "$dir/err")"
+  if grep -q '^herdr pane run' "$log"; then
+    fail "must not deliver exit after pre-delivery session rebind"
+  fi
+  pass "exit refuses session rebind immediately before delivery"
 }
 
 test_exit_renamed_slot_without_fm_alias() {
@@ -492,7 +725,15 @@ test_unmarked_home_not_controller
 test_clean_refuses_active_scope
 test_clean_refuses_unknown_subagents
 test_stop_already_stopped
+test_exit_rejects_pre_delivery_malformed_snapshot
+test_exit_rejects_post_delivery_malformed_snapshot
 test_exit_consumed_on_session_retirement
+test_exit_consumed_on_shell_after_stale_session
+test_exit_consumed_on_preexisting_shell_with_stale_session
+test_exit_retries_transient_process_info_error
+test_exit_rejects_live_agent_with_stale_session
+test_exit_rejects_retirement_on_different_pane
+test_exit_refuses_pre_delivery_session_rebind
 test_exit_renamed_slot_without_fm_alias
 test_exit_refuses_missing_session_identity
 test_exit_rejects_process_info_err_as_retirement
