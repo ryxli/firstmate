@@ -80,6 +80,25 @@ describe("bash Herdr supervision guards", () => {
 	});
 });
 
+describe("foreground sleep guards", () => {
+	it("blocks the sleep word in shell and eval-style execution", () => {
+		for (const call of [
+			{ toolName: "bash", input: { command: "sleep 60" } },
+			{ toolName: "bash", input: { command: "python -c 'import time; time.sleep(60)'" } },
+			{ toolName: "eval", input: { code: "await asyncio.sleep(60)" } },
+			{ toolName: "python", input: { code: "from time import sleep\nsleep(60)" } },
+		]) {
+			expectBlocked(call, WAIT_REASON);
+		}
+	});
+
+	it("allows token-boundary lookalikes and unrelated eval input", () => {
+		expectAllowed({ toolName: "bash", input: { command: "printf sleepy" } });
+		expectAllowed({ toolName: "eval", input: { code: "print('handoff complete')" } });
+		expectAllowed({ toolName: "eval", input: { language: "py" } });
+	});
+});
+
 describe("bash lifecycle and state guards", () => {
 	it("blocks rm and unlink of state metadata before shell separators", () => {
 		for (const command of [

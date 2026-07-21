@@ -8,6 +8,7 @@ const RAW_WRAPPER_REASON =
 	"fm-lifecycle-guard: OMP secondmates must use canonical fm spawn without a raw launch wrapper or positional prompt; the launcher injects role and charter context.";
 
 const HERDR_WAIT = /(?:^|[\s;&|()'"])['"]?(?:[^\s;&|()'"]*\/)?herdr['"]?\s+['"]?wait['"]?(?=$|[\s;&|()'"])/;
+const SLEEP_WORD = /\bsleep\b/i;
 const HERDR_PANE_CLOSE = /(?:^|[\s;&|()'"])['"]?(?:[^\s;&|()'"]*\/)?herdr['"]?\s+['"]?pane['"]?\s+['"]?close['"]?(?=$|[\s;&|()'"])/;
 const HERDR_SEND = /(?:^|[\s;&|()'"])['"]?(?:[^\s;&|()'"]*\/)?herdr['"]?\s+['"]?(?:send|type|paste)['"]?(?=$|[\s;&|()'"])/;
 const RM_OR_UNLINK = /(?:^|[\s"'(])['"]?(?:[^\s"';&|()]*\/)?(?:rm|unlink)['"]?(?=$|[\s"';&|()])/;
@@ -105,9 +106,14 @@ export function evaluateFleetToolCall(
 ): Block | undefined {
 	if (!input) return undefined;
 
+	if (toolName === "eval" || toolName === "python") {
+		const code = typeof input.code === "string" ? input.code : "";
+		return SLEEP_WORD.test(code) ? { block: true, reason: WAIT_REASON } : undefined;
+	}
+
 	if (toolName === "bash") {
 		const command = typeof input.command === "string" ? input.command : "";
-		if (HERDR_WAIT.test(command)) return { block: true, reason: WAIT_REASON };
+		if (HERDR_WAIT.test(command) || SLEEP_WORD.test(command)) return { block: true, reason: WAIT_REASON };
 		if (HERDR_PANE_CLOSE.test(command) || HERDR_SEND.test(command)) return { block: true, reason: LIFECYCLE_REASON };
 		if (containsStateDestruction(command)) return { block: true, reason: LIFECYCLE_REASON };
 		if (containsRawSecondmateWrapper(command)) return { block: true, reason: RAW_WRAPPER_REASON };
