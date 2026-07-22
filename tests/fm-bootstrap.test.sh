@@ -67,7 +67,7 @@ SH
   printf '%s\n' "$fakebin"
 }
 
-OMP_EXTENSIONS="fleet-bus textguard thinking-tag-guard agent-effectiveness capture"
+OMP_EXTENSIONS="fleet-bus thinking-tag-guard agent-effectiveness capture"
 
 make_ext_fixture() {
   local dir=$1 ext
@@ -190,10 +190,10 @@ test_bootstrap_reports_missing_omp_extension() {
   case_dir="$TMP_ROOT/ext-one-missing"
   mkdir -p "$case_dir/home"
   fakebin=$(make_fake_toolchain "$case_dir")
-  extdir=$(make_ext_fixture "$case_dir/ext" fleet-bus thinking-tag-guard agent-effectiveness capture)
+  extdir=$(make_ext_fixture "$case_dir/ext" fleet-bus thinking-tag-guard agent-effectiveness)
 
   out=$(run_bootstrap "$case_dir/home" "$fakebin" "$extdir")
-  expected='MISSING_EXT: textguard (provision: chezmoi apply - dotfiles repo is the canonical owner)
+  expected='MISSING_EXT: capture (provision: chezmoi apply - dotfiles repo is the canonical owner)
 TASKS: native'
   [ "$out" = "$expected" ] || fail "bootstrap did not report the one missing OMP extension exactly: $out"
   pass "bootstrap reports exactly one MISSING_EXT line for a missing OMP extension"

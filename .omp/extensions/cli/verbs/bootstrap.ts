@@ -41,7 +41,6 @@ const TOOLS = ["herdr", "node", "gh", "gh-axi", "chrome-devtools-axi", "lavish-a
 // Bootstrap declares a missing one; it never vendors or installs extensions.
 const OMP_EXTENSIONS = [
 	"fleet-bus",
-	"textguard",
 	"thinking-tag-guard",
 	"agent-effectiveness",
 	"capture",
