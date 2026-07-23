@@ -1,32 +1,14 @@
 ---
 name: fm-diagnose-startup-fault
-description: >-
-  Diagnoses structured fm start / preflight failures. Use only when startup
-  reports a flagged failure - never on healthy start.
+description: Diagnose startup faults.
 ---
 
 # fm-diagnose-startup-fault
 
-`fm start` already ran bootstrap, identity checks, home repair when needed, Lavish recovery, and one fleet snapshot before the model launched.
-Do not repeat successful preflight.
-
-## When this skill applies
-
-Only when startup prints a structured failure (JSON `fm start preflight failed: …` or an equivalent flagged step/reason).
-Healthy start → do nothing from this skill.
-
-## Procedure
-
-1. Consume the failure: note `step`, `command`, `status`, and `reason`.
-2. Run the one named diagnostic that matches that component (for example `fm bootstrap`, `fm identity-migrate check`, `fm home check --all`, `fm lavish-open --recover`, or `fm fleet snapshot --json --starting-main`).
-3. Repair only the flagged component (cap consent required for installs).
-4. Rerun `fm start`.
-5. Stop. Never sweep unrelated homes, panes, or registries after a clean start.
-
-## Result classes
-
-- Blocking tool/auth missing → list install commands, wait for cap consent, then `fm bootstrap install …`.
-- Identity UNRESOLVED → resolve via `fm identity-migrate` only for flagged homes.
-- Home link drift → `fm home repair` only for observed drift.
-- Lavish steward missing → `fm lavish-open --recover`.
-- Fleet snapshot JSON unparseable → fix the named exception, rerun `fm fleet snapshot --json --starting-main`, then refresh live state with `fm fleet`.
+Use only for structured startup failure, such as `fm start preflight failed` JSON or flagged step/reason.
+Healthy start already ran preflight; do not repeat it.
+Record `step`, `command`, `status`, and `reason`.
+Run the owning `fm` diagnostic, repair only the verified cause, and rerun `fm start`.
+Cap consent is required before installs or authority expansion.
+On clean start, stop and do not sweep unrelated homes, panes, or registries.
+If the same fault remains, escalate the verified cause and failing `fm` surface.

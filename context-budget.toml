@@ -10,5 +10,5 @@
 #
 # Local-layer files (data/cap.md, data/charter.md, data/*/brief.md) are
 # deliberately NOT budgeted: they vary per machine and fleet and never travel.
-always_on_max = 2292     # AGENTS.md - Python boundary with paid prose cut
-governance_max = 6400    # AGENTS.md + all .agents/skills/**/SKILL.md
+always_on_max = 2095     # AGENTS.md - generalized manager execution with paid prose cuts
+governance_max = 5475    # AGENTS.md + all .agents/skills/**/SKILL.md

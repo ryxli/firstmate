@@ -1,100 +1,34 @@
 ---
 name: fm-operate-crew-harness
-description: >-
-  Operates crewmate harness adapters through select, interrupt, exit, recover,
-  and relaunch. Use when a crew pane is wedged, needs interrupt/exit, or harness
-  choice/recovery.
+description: Select, control, and recover wedged visible crew harness panes.
 ---
 
 # fm-operate-crew-harness
 
-This skill controls visible pane-backed workers only.
+This skill controls visible pane workers only.
+Use Task/Hub for bounded work, peer bus for mates, whiteboard for durable state, `fm send` only for visible steering, and `fm fleet stop` for registered mate exit.
 
-Channel hierarchy:
-- OMP Task/Hub for bounded research/implementation/review
-- peer bus (`peer_send`) for firstmate ↔ secondmate and mate ↔ mate handoffs
-- whiteboard for durable lane state
-- `fm send` for visible-pane steering/control only (not mate communication)
-- `fm fleet stop` for persistent registered mate session exit
+## Select and control
 
-Routine firstmate and secondmate execution defaults to OMP subagents; persistent mate communication defaults to the peer bus.
+Crew harness mirrors firstmate unless gitignored `config/crew-harness` sets a value; absent or `default` mirrors; cap dispatch overrides once.
+Verify with `sbin/fm harness crew` or `sbin/fm harness inspect <name>`; `unknown` means ask cap and fall back; never dispatch unverified.
+Launch is `fm spawn`.
+Canonical control is `fm send <pane> --interrupt` or `fm send <pane> --exit`, reading pane `harness=`.
+Codex `--exit` stays withheld until slash-popup delay is encoded; `--key` is only for specified keys, never guesses.
 
-Crewmates default to the same harness as firstmate.
-Cap override: `config/crew-harness` (local, gitignored; absent or `default` = mirror own harness).
-Per-task cap instruction overrides for that dispatch only.
-Never dispatch on an unverified adapter; tell the cap and fall back.
+| Adapter | Exit | Interrupt | Notes |
+|---|---|---|---|
+| omp | `/quit` | Esc | `/skill:<name>`; `OMPCODE` before `CLAUDECODE`; peek about 20s. |
+| claude | `/exit` | Esc | `/<skill>`; first worktree trust may need Enter. |
+| codex | `/quit`, wait about 1s before Enter | Esc | `$<skill>`; trust may need Enter; resume `codex resume <session-id>`. |
+| opencode | `/exit` | double Esc | No trust; long-shell interrupt flaky, so exit and relaunch if needed. |
+| pi | `/quit` | Esc | Autonomous; brief one positional arg; trust `~/.pi/agent/trust.json`; env `PI_CODING_AGENT=true`. |
 
-Detect: `sbin/fm harness` (self), `sbin/fm harness crew` (effective crew), `sbin/fm harness inspect [name]` (typed registry).
-On `unknown`, ask the cap. Cap override always beats detection.
-Mechanics for launch live in `fm spawn`.
-Interrupt/exit: `fm send <pane> --interrupt` or `fm send <pane> --exit` (reads `harness=` from meta via the internal adapter registry).
-`fm send --exit` is withheld for Codex until slash-popup delay is encoded; use explicit exit there.
-`fm send <pane> --key <key>` bypasses adapter lookup and is only for an explicit key sequence; when adapter-aware exit is unsupported, use the documented manual or timed exit path rather than guessed keys.
+## Recovery and skills
 
-## Adapter facts
-
-### omp
-
-| Fact | Value |
-|---|---|
-| Exit | `/quit` |
-| Interrupt | single Escape |
-| Skills | `/skill:<name>` |
-
-Detection checks `OMPCODE` before `CLAUDECODE`. Launch: `omp --auto-approve "$(cat <brief>)"`. Peek within ~20s after spawn.
-
-### claude
-
-| Fact | Value |
-|---|---|
-| Exit | `/exit` |
-| Interrupt | single Escape |
-| Skills | `/<skill>` |
-
-Trust/bypass dialogs on first fresh worktree: `fm send <pane> --key Enter`. Spawn sets `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`.
-
-### codex
-
-| Fact | Value |
-|---|---|
-| Exit | `/quit` (slash popup needs about 1s between text and Enter; `fm send --exit` is unsupported) |
-| Interrupt | single Escape |
-| Skills | `$<skill>` (not `/<skill>`) |
-
-Directory trust on first run per repo root: Enter. Resume: `codex resume <session-id>`.
-
-### opencode
-
-| Fact | Value |
-|---|---|
-| Exit | `/exit` |
-| Interrupt | double Escape (flaky during long shells - may need exit + relaunch) |
-
-No trust dialog.
-If OpenCode exits unexpectedly, relaunch with the current OpenCode launch template, then send the next instruction explicitly.
-
-### pi
-
-| Fact | Value |
-|---|---|
-| Exit | `/quit` |
-| Interrupt | single Escape |
-
-Always autonomous. Brief must be one positional arg. Project trust may appear once per path (`~/.pi/agent/trust.json`). Env marker: `PI_CODING_AGENT=true`.
-
-## Stuck-pane order
-
-1. Peek (~40 lines).
-2. If the brief already answers the blocker, send one corrective line with `fm send <pane> --steer <text>`.
-3. `fm send <pane> --interrupt`, then one corrective `--steer` line.
-4. Use `fm send <pane> --exit` when the adapter supports it; otherwise use its documented explicit exit path, then relaunch the same brief with a progress note.
-5. Send terminals: `delivered=0` (idle submit), `queued=76` (accepted while working), `composer-blocked=75`, `failed=1`. Text never claims model-level `consumed`.
-6. Never auto-retry `queued=76` or any send; retry can duplicate one logical instruction.
-7. Second relaunch fails → backlog `failed`, escalate with evidence.
-
-## includeSkills warning
-
-A home's `config/omp.yml` `includeSkills` **replaces** the discoverable skill registry wholesale.
-Do not use it to preload; it makes unlisted skills return Unknown skill.
-Audit inject cost with `sbin/fm-context-weight` only when a non-replacing preload mechanism exists.
-Inspect or repair specialist-home isolation with `fm home skills check|sync <id|path>` or `fm home skills reconcile <id|--all>`.
+Peek about 40 lines; if the brief answers the blocker, send one corrective `fm send <pane> --steer <text>`.
+Then interrupt and steer once; then supported `fm send <pane> --exit` or explicit exit path; relaunch the same brief with a progress note.
+Never auto-retry `queued=76` or any send because retry can duplicate an instruction.
+Second relaunch failure backlogs `failed` and escalates with evidence.
+`config/omp.yml` `includeSkills` replaces the discoverable registry; do not preload because unlisted skills become Unknown skill.
+Audit cost with `sbin/fm-context-weight` only after non-replacing preload exists.

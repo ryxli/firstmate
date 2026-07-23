@@ -1,47 +1,38 @@
 ---
 name: fm-supervise-lanes
-description: >-
-  Supervises OMP subagents, persistent mates, and visible FM workers. Use when
-  coordinating parallel lanes, whiteboards, peer bus, or review disposition.
+description: "Supervise lanes."
 ---
 
 # fm-supervise-lanes
 
-Judgment for OMP subagents, persistent secondmates, and visible FM workers.
-Demand-load from `skill://fm-manage-project-work` or when supervising parallel lanes.
-Authoritative live state is the fresh `fm fleet` view derived from Herdr inventory and durable task records.
+Use for OMP subagents, persistent mates, and visible FM workers.
+Start with fresh `fm fleet`; live state, task records, and named artifacts are authority.
 
-## Whiteboard opt-in
+## Rules
 
-A whiteboard is active only after the cap or operator explicitly invokes `/wb loop`, `/wb tick`, or `/wb tick!` in that session.
-Tool registration or tool presence is never enablement.
-When inactive, never call `whiteboard_read`, `whiteboard_write`, or `whiteboard_checkpoint`, and never maintain a board as a side effect of supervision.
+Lane shapes: tool/pipeline; warm recurring specialist; fresh independent specialist; disposable bounded worker; background wait/delegated worker.
+Choose the cheapest reliable shape.
+Warm context is cache; refresh owner, HEAD, live system, or artifact before conclusions.
+Spawn fresh when domain or decision role changes.
 
-When active, write only when lane state, evidence, disposition, decision, or wake condition changes.
-Duplicate completion and no-op notices do not justify a write.
-The board is a derived operator view, never the source of truth.
-
-## Communication channels
-
-Use OMP subagent return artifacts and `hub` only for bounded `task` workers.
-Use `peer_send`/`peer_pull` for an actionable handoff, blocking question, or safety escalation between persistent firstmate and secondmate roles.
-Use `fm send` only for explicit visible-pane steering or harness control, not routine mate-to-mate communication.
-Disposable FM workers report through their task status/report artifacts.
-No conversational acknowledgements or FYI progress; durable lifecycle artifacts and receipts remain required.
-
-## Ownership and dispatch
+Managers synthesize, accept, decide, and own helper contracts, adoption, and retirement.
+Adopt only with expected efficiency delta and evidence; judge accepted-result cost, corrections, overrides, defects, and reacquisition avoided.
+Helpers never grade themselves.
+Disposition is `keep`, `merge`, `compile`, or `drop`; compile stable residue into tools.
 
 Read active lanes before dispatch.
-Deconfliction needs confirmed stand-down.
-Serialize overlapping write surfaces; otherwise parallelize file-disjoint work.
-High-blast-radius steps get a named fresh-context reviewer; REJECT relays the minimum fix and re-reviews that finding only.
+Serialize overlapping write surfaces until confirmed stand-down; otherwise parallelize disjoint work.
+High-blast-radius steps need a named fresh-context reviewer; on REJECT, relay the minimum fix and re-review only that finding.
 
-## Terminal events
+Channels: OMP artifacts and `hub` for bounded `task` workers; `peer_send`/`peer_pull` for persistent mate handoff, blocker, or safety escalation; `fm send` only for visible-pane steering or harness control; FM task/report artifacts for disposable workers.
+FYI acknowledgements never replace durable artifacts or receipts.
 
-A terminal event (`done`, `blocked`, `needs-decision`, `failed`, material phase change) is a same-turn obligation: read the named artifact and take the lifecycle action; update a whiteboard only when that session explicitly enabled it.
-A claim with no named artifact is invalid.
+Whiteboard is active only after explicit `/wb loop`, `/wb tick`, or `/wb tick!`.
+When inactive, never call whiteboard tools.
+When active, write only changed lane state, evidence, disposition, decision, or wake condition.
+The board is derived, never authority.
 
-## Escalation
-
-Escalate only at the agreed bar: destructive, irreversible, security-sensitive, genuine equal tradeoff, or exhausted stuck-playbook with evidence.
-Idle with unblocked Working items is a failure; idle with an all-blocked list is legitimate.
+Terminal events require same-turn read of the named artifact and lifecycle action.
+Claims without named terminal artifacts are invalid.
+Escalate only for destructive, irreversible, security-sensitive, equal-tradeoff, or exhausted stuck-playbook cases with evidence.
+Idle with unblocked Working items is failure; all-blocked idle is legitimate.
