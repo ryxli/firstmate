@@ -498,7 +498,18 @@ interface Supervisor {
 	socketBuf: string;
 	crewByPane: Map<string, Crewmate>;
 	prevStatus: Map<string, HerdrStatus>;
+	subscriptionReady: boolean;
+	subscription?: { socket: Socket; generation: number; id: string; panes: Set<string> };
+	subscriptionSequence: number;
+	statusEpoch: Map<string, number>;
+	timerEpoch: Map<string, number>;
 	staleTimers: Map<string, Timer>;
+	confirmedAbsentPanes: Set<string>;
+	closedPanes: Set<string>;
+	recoveringAbsentPanes: Set<string>;
+	recoveryPendingStatus: Map<string, HerdrPush>;
+	recoveryTokens: Map<string, number>;
+	nextRecoveryToken: number;
 	lastBlockedWakeMs: Map<string, number>; // pane -> last blocked-wake ts (ship/scout debounce)
 	pendingEvents: FleetEvent[];
 	pendingStale: number;
@@ -513,6 +524,8 @@ interface Supervisor {
 	statusRefreshTimer?: Timer;
 	flushTimer?: Timer;
 	checkTimer?: Timer;
+	reconnectTimer?: Timer;
+	subscriptionAckTimer?: Timer;
 	lastStatusSeen: Map<string, string>; // task -> last processed status line
 	dependencyReceipts?: Map<string, string>;
 	internalLogWrites: number;
@@ -567,7 +580,17 @@ function createSupervisor(pi: ExtensionAPI, ctx: ExtensionContext): Supervisor {
 		socketBuf: "",
 		crewByPane: new Map(),
 		prevStatus: new Map(),
+		subscriptionReady: false,
+		subscriptionSequence: 0,
+		statusEpoch: new Map(),
+		timerEpoch: new Map(),
 		lastBlockedWakeMs: new Map(),
+		confirmedAbsentPanes: new Set(),
+		closedPanes: new Set(),
+		recoveringAbsentPanes: new Set(),
+		recoveryPendingStatus: new Map(),
+		recoveryTokens: new Map(),
+		nextRecoveryToken: 0,
 		staleTimers: new Map(),
 		pendingEvents: [],
 		pendingStale: 0,
@@ -601,9 +624,8 @@ function logWarn(sup: Supervisor, msg: string): void {
 
 async function startSupervision(sup: Supervisor): Promise<void> {
 	await refreshFleet(sup);
-	await seedStatuses(sup);
-	await reconcileDependencyArtifacts(sup);
 	openSocket(sup);
+	await reconcileDependencyArtifacts(sup);
 	await diagnoseOmpUnknown(sup);
 	startWatch(sup);
 	startCheckTimer(sup);
@@ -621,8 +643,22 @@ function stopSupervision(sup: Supervisor): void {
 	clearTimeout(sup.statusRefreshTimer);
 	clearTimeout(sup.flushTimer);
 	clearTimeout(sup.checkTimer);
+	clearTimeout(sup.reconnectTimer);
+	clearTimeout(sup.subscriptionAckTimer);
 	for (const t of sup.staleTimers.values()) clearTimeout(t);
 	sup.staleTimers.clear();
+	sup.statusEpoch.clear();
+	sup.timerEpoch.clear();
+	sup.lastBlockedWakeMs.clear();
+	sup.closedPanes.clear();
+	sup.prevStatus.clear();
+	sup.crewByPane.clear();
+	sup.confirmedAbsentPanes.clear();
+	sup.recoveringAbsentPanes.clear();
+	sup.recoveryPendingStatus.clear();
+	sup.recoveryTokens.clear();
+	sup.subscription = undefined;
+	sup.subscriptionReady = false;
 }
 
 // ---------------------------- fleet resolution ------------------------
@@ -636,6 +672,7 @@ async function refreshFleet(sup: Supervisor): Promise<void> {
 	}
 
 	const next = new Map<string, Crewmate>();
+	const seenMetaPanes = new Set<string>();
 	for (const f of files) {
 		const task = f.slice(0, -".meta".length);
 		// state/self.meta records this firstmate's own pane identity for recovery
@@ -645,25 +682,37 @@ async function refreshFleet(sup: Supervisor): Promise<void> {
 		const meta = await parseMeta(join(sup.stateDir, f));
 		if (!meta.pane) continue;
 		const pane = await resolveLivePane(sup, task, meta.pane);
+		seenMetaPanes.add(pane);
+		if (sup.confirmedAbsentPanes.has(pane)) continue;
 		next.set(pane, { ...meta, task, pane });
 	}
+	let tombstonesChanged = false;
+	for (const pane of sup.confirmedAbsentPanes) {
+		if (!seenMetaPanes.has(pane)) {
+			sup.confirmedAbsentPanes.delete(pane);
+			sup.closedPanes.delete(pane);
+			tombstonesChanged = true;
+		}
+	}
 
-	let changed = next.size !== sup.crewByPane.size;
+	let changed = tombstonesChanged || next.size !== sup.crewByPane.size;
 	for (const pane of next.keys()) if (!sup.crewByPane.has(pane)) changed = true;
 	for (const pane of sup.crewByPane.keys()) {
 		if (!next.has(pane)) {
 			changed = true;
 			clearStaleTimer(sup, pane);
+			sup.timerEpoch.set(pane, (sup.timerEpoch.get(pane) ?? 0) + 1);
+			sup.statusEpoch.set(pane, (sup.statusEpoch.get(pane) ?? 0) + 1);
 			sup.prevStatus.delete(pane);
 		}
 	}
 
 	sup.crewByPane = next;
 	if (changed && sup.socket && !sup.socket.destroyed) {
-		// Seed newly discovered panes before replacing the subscription set so
-		// reconnects and fleet refreshes cannot turn idle replays into edges.
-		await seedStatuses(sup);
+		// Invalidate the old generation before seeding. The replacement
+		// acknowledgement alone authorizes absence probes for its pane set.
 		subscribeAll(sup);
+		await seedStatuses(sup);
 	}
 }
 
@@ -724,47 +773,131 @@ function openSocket(sup: Supervisor): void {
 		scheduleReconnect(sup);
 		return;
 	}
+	sup.subscriptionReady = false;
+	sup.subscription = undefined;
+	for (const pane of sup.crewByPane.keys()) {
+		sup.statusEpoch.set(pane, (sup.statusEpoch.get(pane) ?? 0) + 1);
+	}
 	sup.socket = sock;
 	sup.socketBuf = "";
-	sock.on("connect", () => subscribeAll(sup));
-	sock.on("data", (chunk: Buffer) => onSocketData(sup, chunk));
-	sock.on("error", (err: Error) => logWarn(sup, `fm-supervisor: socket error: ${err.message}`));
+	sock.on("connect", () => {
+		if (sup.socket === sock) subscribeAll(sup);
+	});
+	sock.on("data", (chunk: Buffer) => {
+		if (sup.socket === sock) onSocketData(sup, sock, chunk);
+	});
+	sock.on("error", (err: Error) => {
+		if (sup.socket === sock) logWarn(sup, `fm-supervisor: socket error: ${err.message}`);
+	});
 	sock.on("close", () => {
-		if (sup.abort.signal.aborted) return;
+		if (sup.socket !== sock || sup.abort.signal.aborted) return;
+		sup.subscriptionReady = false;
+		sup.subscription = undefined;
+		clearTimeout(sup.subscriptionAckTimer);
+		sup.socket = undefined;
+		for (const pane of new Set([...sup.crewByPane.keys(), ...sup.confirmedAbsentPanes])) {
+			sup.statusEpoch.set(pane, (sup.statusEpoch.get(pane) ?? 0) + 1);
+		}
 		scheduleReconnect(sup);
 	});
 }
 
 function scheduleReconnect(sup: Supervisor): void {
-	if (sup.abort.signal.aborted) return;
-	setTimeout(() => {
+	if (sup.abort.signal.aborted || sup.reconnectTimer) return;
+	sup.reconnectTimer = setTimeout(() => {
+		sup.reconnectTimer = undefined;
 		if (!sup.abort.signal.aborted) openSocket(sup);
 	}, 2_000);
 }
 
 function subscribeAll(sup: Supervisor): void {
 	const sock = sup.socket;
-	if (!sock || sock.destroyed || sup.crewByPane.size === 0) return;
+	const panes = new Set([...sup.crewByPane.keys(), ...sup.confirmedAbsentPanes]);
+	if (!sock || sock.destroyed) return;
+	if (panes.size === 0) {
+		sup.subscriptionReady = false;
+		sup.subscription = undefined;
+		return;
+	}
 	const subscriptions: Array<{ type: string; pane_id: string }> = [];
-	for (const pane of sup.crewByPane.keys()) {
+	for (const pane of panes) {
 		subscriptions.push({ type: "pane.agent_status_changed", pane_id: pane });
 		subscriptions.push({ type: "pane.exited", pane_id: pane });
 		subscriptions.push({ type: "pane.closed", pane_id: pane });
 	}
+	const generation = ++sup.subscriptionSequence;
+	const id = `fm-sub-${generation}`;
+	sup.subscription = { socket: sock, generation, id, panes };
+	sup.subscriptionReady = false;
+	clearTimeout(sup.subscriptionAckTimer);
+	for (const pane of sup.crewByPane.keys()) {
+		sup.statusEpoch.set(pane, (sup.statusEpoch.get(pane) ?? 0) + 1);
+	}
 	try {
-		sock.write(`${JSON.stringify({ id: "fm-sub", method: "events.subscribe", params: { subscriptions } })}\n`);
+		sock.write(`${JSON.stringify({ id, method: "events.subscribe", params: { subscriptions } })}\n`);
+		sup.subscriptionAckTimer = setTimeout(() => {
+			if (sup.subscription?.socket === sock && sup.subscription.generation === generation) {
+				sock.destroy(new Error("fm-supervisor: subscription acknowledgement timed out"));
+			}
+		}, 5_000);
 	} catch (err) {
 		logWarn(sup, `fm-supervisor: subscribe write failed: ${String(err)}`);
+		sock.destroy();
 	}
 }
 
-function onSocketData(sup: Supervisor, chunk: Buffer): void {
+function onSocketData(sup: Supervisor, sock: Socket, chunk: Buffer): void {
 	sup.socketBuf += chunk.toString();
 	let nl = sup.socketBuf.indexOf("\n");
 	while (nl >= 0) {
 		const line = sup.socketBuf.slice(0, nl);
 		sup.socketBuf = sup.socketBuf.slice(nl + 1);
 		if (line.trim().length > 0) {
+			let acknowledgement: { generation: number; id: string } | undefined;
+			let subscriptionError = false;
+			try {
+				const root = asRecord(JSON.parse(line));
+				const result = asRecord(root?.result);
+				const subscription = sup.subscription;
+				if (
+					subscription?.socket === sock &&
+					sup.socket === sock &&
+					root?.id === subscription.id
+				) {
+					if (root?.error) subscriptionError = true;
+					else if (result?.type === "subscription_started") acknowledgement = subscription;
+				}
+			} catch {
+				// Not an acknowledgement.
+			}
+			if (subscriptionError) {
+				sock.destroy();
+				continue;
+			}
+			if (acknowledgement) {
+				sup.subscriptionReady = true;
+				clearTimeout(sup.subscriptionAckTimer);
+				for (const pane of sup.crewByPane.keys()) {
+					if (sup.recoveringAbsentPanes.has(pane)) continue;
+					const epoch = (sup.statusEpoch.get(pane) ?? 0) + 1;
+					sup.statusEpoch.set(pane, epoch);
+					void dropAbsentAgent(sup, pane, epoch, acknowledgement.generation, sock);
+				}
+				for (const pane of sup.confirmedAbsentPanes) {
+					if (sup.recoveringAbsentPanes.has(pane)) continue;
+					const epoch = (sup.statusEpoch.get(pane) ?? 0) + 1;
+					sup.statusEpoch.set(pane, epoch);
+					void reconcileRetainedAbsentPane(sup, pane, epoch, acknowledgement.generation, sock);
+				}
+				for (const [pane, pending] of sup.recoveryPendingStatus) {
+					if (sup.recoveringAbsentPanes.has(pane)) continue;
+					sup.recoveryPendingStatus.delete(pane);
+					if (sup.crewByPane.has(pane) && !sup.confirmedAbsentPanes.has(pane)) {
+						handleHerdrPush(sup, pending);
+					}
+				}
+				void seedStatuses(sup, acknowledgement);
+			}
 			const push = parseHerdrPush(line);
 			if (push) handleHerdrPush(sup, push);
 		}
@@ -813,11 +946,52 @@ function parseHerdrPush(line: string): HerdrPush | undefined {
 
 function handleHerdrPush(sup: Supervisor, push: HerdrPush): void {
 	if (push.kind === "gone") {
-		applyHerdrPush(sup, push);
+		sup.closedPanes.add(push.pane);
+		if (sup.recoveringAbsentPanes.has(push.pane)) {
+			dropPane(sup, push.pane, true);
+		} else if (sup.confirmedAbsentPanes.has(push.pane)) {
+			dropPane(sup, push.pane, true);
+		} else {
+			applyHerdrPush(sup, push);
+		}
 		return;
+	}
+	if (sup.closedPanes.has(push.pane)) return;
+	const epoch = (sup.statusEpoch.get(push.pane) ?? 0) + 1;
+	sup.statusEpoch.set(push.pane, epoch);
+	if (sup.recoveringAbsentPanes.has(push.pane)) {
+		sup.recoveryPendingStatus.set(push.pane, push);
+		return;
+	}
+	if (push.status !== "unknown" && sup.confirmedAbsentPanes.has(push.pane)) {
+		sup.confirmedAbsentPanes.delete(push.pane);
+		const token = ++sup.nextRecoveryToken;
+		sup.recoveringAbsentPanes.add(push.pane);
+		sup.recoveryTokens.set(push.pane, token);
+		sup.recoveryPendingStatus.set(push.pane, push);
+		void (async () => {
+			await refreshFleet(sup);
+			if (
+				sup.recoveryTokens.get(push.pane) !== token ||
+				!sup.recoveringAbsentPanes.has(push.pane)
+			) return;
+			const pending = sup.recoveryPendingStatus.get(push.pane);
+			sup.recoveryPendingStatus.delete(push.pane);
+			sup.recoveringAbsentPanes.delete(push.pane);
+			sup.recoveryTokens.delete(push.pane);
+			if (pending && sup.crewByPane.has(push.pane) && !sup.confirmedAbsentPanes.has(push.pane)) {
+				handleHerdrPush(sup, pending);
+			}
+		})();
+		return;
+	}
+	const subscription = sup.subscription;
+	if (push.status === "unknown" && sup.subscriptionReady && subscription) {
+		void dropAbsentAgent(sup, push.pane, epoch, subscription.generation, subscription.socket);
 	}
 	void (async () => {
 		const reconciled = await reconciledPaneStatus(sup, push.pane);
+		if (sup.statusEpoch.get(push.pane) !== epoch) return;
 		applyHerdrPush(sup, reconciled ? { ...push, status: reconciled } : push);
 	})();
 }
@@ -868,18 +1042,43 @@ function applyHerdrPush(sup: Supervisor, push: HerdrPush): void {
 		armStaleTimer(sup, crew);
 	}
 }
-
-function dropPane(sup: Supervisor, pane: string): void {
+function dropPane(sup: Supervisor, pane: string, confirmedAbsent = false): void {
 	sup.crewByPane.delete(pane);
 	sup.prevStatus.delete(pane);
+	sup.statusEpoch.set(pane, (sup.statusEpoch.get(pane) ?? 0) + 1);
+	sup.timerEpoch.set(pane, (sup.timerEpoch.get(pane) ?? 0) + 1);
 	sup.lastBlockedWakeMs.delete(pane);
+	sup.recoveringAbsentPanes.delete(pane);
+	sup.recoveryTokens.delete(pane);
+	sup.recoveryPendingStatus.delete(pane);
+	if (confirmedAbsent) sup.confirmedAbsentPanes.add(pane);
+	else sup.confirmedAbsentPanes.delete(pane);
 	clearStaleTimer(sup, pane);
 }
-
-async function seedStatuses(sup: Supervisor): Promise<void> {
+async function seedStatuses(
+	sup: Supervisor,
+	subscription = sup.subscription,
+): Promise<void> {
+	if (!subscription || !sup.subscriptionReady || subscription !== sup.subscription) return;
 	for (const pane of sup.crewByPane.keys()) {
-		if (sup.prevStatus.has(pane)) continue;
-		sup.prevStatus.set(pane, await herdrStatus(sup, pane));
+		if (sup.prevStatus.has(pane) || sup.recoveringAbsentPanes.has(pane)) continue;
+		const crew = sup.crewByPane.get(pane);
+		const seedEpoch = sup.statusEpoch.get(pane) ?? 0;
+		const status = await herdrStatus(sup, pane);
+		if (
+			sup.recoveringAbsentPanes.has(pane) ||
+			sup.crewByPane.get(pane) !== crew ||
+			sup.statusEpoch.get(pane) !== seedEpoch ||
+			!sup.subscriptionReady ||
+			subscription.socket !== sup.socket ||
+			subscription !== sup.subscription
+		) continue;
+		sup.prevStatus.set(pane, status);
+		if (status === "unknown") {
+			const epoch = seedEpoch + 1;
+			sup.statusEpoch.set(pane, epoch);
+			void dropAbsentAgent(sup, pane, epoch, subscription.generation, subscription.socket);
+		}
 	}
 }
 
@@ -900,6 +1099,81 @@ async function herdrStatus(sup: Supervisor, pane: string): Promise<HerdrStatus> 
 	return reconciled ?? herdr;
 }
 
+function isAgentNotFound(stdout: string): boolean {
+	try {
+		const root = asRecord(JSON.parse(stdout));
+		const error = asRecord(root?.error);
+		return error?.code === "agent_not_found";
+	} catch {
+		return false;
+	}
+}
+
+async function reconcileRetainedAbsentPane(
+	sup: Supervisor,
+	pane: string,
+	epoch: number,
+	generation: number,
+	socket: Socket,
+): Promise<void> {
+	const status = await herdrStatus(sup, pane);
+	const subscription = sup.subscription;
+	if (
+		sup.abort.signal.aborted ||
+		sup.socket !== socket ||
+		!sup.subscriptionReady ||
+		subscription?.socket !== socket ||
+		subscription.generation !== generation ||
+		sup.statusEpoch.get(pane) !== epoch ||
+		!sup.confirmedAbsentPanes.has(pane)
+	) return;
+	if (status !== "unknown") handleHerdrPush(sup, { kind: "status", pane, status });
+}
+
+async function dropAbsentAgent(
+	sup: Supervisor,
+	pane: string,
+	epoch: number,
+	generation: number,
+	socket: Socket,
+): Promise<boolean> {
+	const subscription = sup.subscription;
+	if (
+		!sup.crewByPane.has(pane) ||
+		sup.recoveringAbsentPanes.has(pane) ||
+		sup.abort.signal.aborted ||
+		!sup.subscriptionReady ||
+		subscription?.socket !== socket ||
+		subscription.generation !== generation ||
+		sup.socket !== socket ||
+		sup.statusEpoch.get(pane) !== epoch
+	) return false;
+	try {
+		const res = await sup.pi.exec("herdr", ["agent", "get", pane], {
+			timeout: sup.tunables.herdrGetTimeoutMs,
+			signal: sup.abort.signal,
+			cwd: sup.ctx.cwd,
+		});
+		const current = sup.subscription;
+		if (
+			!sup.crewByPane.has(pane) ||
+			sup.recoveringAbsentPanes.has(pane) ||
+			sup.abort.signal.aborted ||
+			!sup.subscriptionReady ||
+			current?.socket !== socket ||
+			current.generation !== generation ||
+			sup.socket !== socket ||
+			sup.statusEpoch.get(pane) !== epoch
+		) return false;
+		if (res.code === 1 && !res.killed && isAgentNotFound(res.stdout)) {
+			dropPane(sup, pane, true);
+			return true;
+		}
+	} catch {
+		// A transport failure is ambiguous and must retain supervision.
+	}
+	return false;
+}
 // The screen-based reconciler is the operational fallback for the known OMP
 // herdr status gap. Missing/unreadable screens return no override, preserving
 // herdr's state rather than inventing idle.
@@ -956,13 +1230,33 @@ async function paneReachable(sup: Supervisor, pane: string): Promise<boolean> {
 
 // ---------------------------- stale backstop --------------------------
 
+function timerEligible(
+	sup: Supervisor,
+	crew: Crewmate,
+	epoch: number,
+	statuses: readonly HerdrStatus[],
+): boolean {
+	const current = sup.crewByPane.get(crew.pane);
+	return (
+		!sup.abort.signal.aborted &&
+		(sup.timerEpoch.get(crew.pane) ?? 0) === epoch &&
+		current?.task === crew.task &&
+		current.kind === crew.kind &&
+		current.worker === crew.worker &&
+		statuses.includes(sup.prevStatus.get(crew.pane) ?? "unknown")
+	);
+}
+
 function armStaleTimer(sup: Supervisor, crew: Crewmate): void {
 	clearStaleTimer(sup, crew.pane);
 	if (crew.kind === "secondmate") return; // secondmates self-manage: no stale wake
+	const epoch = sup.timerEpoch.get(crew.pane) ?? 0;
 	const idleStart = Date.now();
-	const timer = setTimeout(() => {
+	let timer: Timer;
+	timer = setTimeout(() => {
+		if (sup.staleTimers.get(crew.pane) !== timer) return;
 		sup.staleTimers.delete(crew.pane);
-		void fireStale(sup, crew, idleStart);
+		void fireStale(sup, crew, epoch, idleStart);
 	}, sup.tunables.staleMs);
 	sup.staleTimers.set(crew.pane, timer);
 }
@@ -972,21 +1266,23 @@ function clearStaleTimer(sup: Supervisor, pane: string): void {
 	sup.staleTimers.delete(pane);
 }
 
-async function fireStale(sup: Supervisor, crew: Crewmate, _idleStart: number): Promise<void> {
-	if (sup.abort.signal.aborted) return;
-	const cur = sup.prevStatus.get(crew.pane);
-	if (cur !== "idle" && cur !== "unknown") return; // no longer idle
+async function fireStale(sup: Supervisor, crew: Crewmate, epoch: number, _idleStart: number): Promise<void> {
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown"])) return;
 	if (!(await paneReachable(sup, crew.pane))) {
-		dropPane(sup, crew.pane);
+		if (timerEligible(sup, crew, epoch, ["idle", "unknown"])) dropPane(sup, crew.pane);
 		return;
 	}
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown"])) return;
 	if (await paneShowsBusyBanner(sup, crew.pane)) {
-		armStaleTimer(sup, crew);
+		if (timerEligible(sup, crew, epoch, ["idle", "unknown"])) armStaleTimer(sup, crew);
 		return;
 	}
-	if (await isAwaitingMerge(sup, crew)) return; // parked on a green PR: by design
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown"])) return;
+	if (await isAwaitingMerge(sup, crew)) return;
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown"])) return;
 	const last = await lastStatusLine(sup, crew.task);
-	if (last && capRelevantStatusLine(last)) return; // already reported something cap-worthy
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown"])) return;
+	if (last && capRelevantStatusLine(last)) return;
 	enqueueStale(sup);
 }
 
@@ -994,8 +1290,6 @@ async function isAwaitingMerge(sup: Supervisor, crew: Crewmate): Promise<boolean
 	if (!crew.pr) return false;
 	const last = await lastStatusLine(sup, crew.task);
 	if (!last) return false;
-	// awaiting-merge rule (see benchmarks/model-lib.ts isParkedOnGreenPR):
-	// terminal "done:...<space>PR<space>" line, or a "PR ready" line.
 	return /^done:.*\bPR\b/i.test(last) || /PR ready/i.test(last);
 }
 
@@ -1003,26 +1297,30 @@ async function isAwaitingMerge(sup: Supervisor, crew: Crewmate): Promise<boolean
 
 function armCompletionTimer(sup: Supervisor, crew: Crewmate): void {
 	clearStaleTimer(sup, crew.pane);
-	const timer = setTimeout(() => {
+	const epoch = sup.timerEpoch.get(crew.pane) ?? 0;
+	let timer: Timer;
+	timer = setTimeout(() => {
+		if (sup.staleTimers.get(crew.pane) !== timer) return;
 		sup.staleTimers.delete(crew.pane);
-		void fireCompletion(sup, crew);
+		void fireCompletion(sup, crew, epoch);
 	}, sup.tunables.secondmateIdleMs);
 	sup.staleTimers.set(crew.pane, timer);
 }
 
-async function fireCompletion(sup: Supervisor, crew: Crewmate): Promise<void> {
-	if (sup.abort.signal.aborted) return;
-	const cur = sup.prevStatus.get(crew.pane);
-	if (cur !== "idle" && cur !== "unknown" && cur !== "done") return;
+async function fireCompletion(sup: Supervisor, crew: Crewmate, epoch: number): Promise<void> {
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown", "done"])) return;
 	if (!(await paneReachable(sup, crew.pane))) {
-		dropPane(sup, crew.pane);
+		if (timerEligible(sup, crew, epoch, ["idle", "unknown", "done"])) dropPane(sup, crew.pane);
 		return;
 	}
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown", "done"])) return;
 	if (await paneShowsBusyBanner(sup, crew.pane)) {
-		armCompletionTimer(sup, crew);
+		if (timerEligible(sup, crew, epoch, ["idle", "unknown", "done"])) armCompletionTimer(sup, crew);
 		return;
 	}
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown", "done"])) return;
 	const last = await lastStatusLine(sup, crew.task);
+	if (!timerEligible(sup, crew, epoch, ["idle", "unknown", "done"])) return;
 	if (last && capRelevantStatusLine(last)) return;
 	enqueueStale(sup);
 }

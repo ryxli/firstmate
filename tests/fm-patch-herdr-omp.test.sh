@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
-# Behavior tests for fm-patch-herdr-omp.sh's recovery-heartbeat invariant.
-#
-# ROOT CAUSE (fixed): the injected 15s recovery heartbeat used to call
-# restoreAgentActiveFromCtx() (re-sampling ctx.isIdle()) on every tick, even
-# once rootSession was already true and agent_start/agent_end already owned
-# agentActive. During an active whiteboard-driven turn ctx.isIdle() can read
-# true, so the heartbeat overwrote a correct Working state with false Idle -
-# a fleetwide false-idle regression despite healthy pane binding and socket.
-#
-# These tests pin the invariant: ctx.isIdle() is sampled ONLY while
-# recovering a newly reloaded runtime (rootSession still false); once
-# activated, the heartbeat force-publishes retained lifecycle state and
-# never re-derives it from ctx.
+# Focused contract tests for the atomic OMP-to-Herdr lifecycle fence.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,124 +11,101 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
-# A minimal but structurally faithful stand-in for herdr's unpatched
-# herdr-omp-agent-state.ts: it reproduces every anchor the patcher's `_old`
-# shapes match against (rootSession decl, activateRootSession's hasUI gate,
-# session_start/session_switch/agent_start, and the four tool hooks).
 write_pristine_fixture() {
-  # OMP's SessionShutdownEvent currently has only `type`; @ts-nocheck mirrors
-  # Herdr's vendor source, whose obsolete reason gate is still runtime-valid.
   cat >"$1" <<'TS'
+// HERDR_INTEGRATION_VERSION=6
 // @ts-nocheck
-interface SessionShutdownEvent {
-  type: "session_shutdown";
+let requestQueue = Promise.resolve();
+let reportSeq = globalThis.__reportSeq ?? 0;
+let currentAgentSessionId: string | undefined;
+let currentAgentSessionPath: string | undefined;
+function nextReportSeq() { return ++reportSeq; }
+function updateSessionRef(ctx: any) {
+  currentAgentSessionPath = ctx?.sessionManager?.getSessionFile?.();
+  currentAgentSessionId = ctx?.sessionManager?.getSessionId?.();
 }
-
-interface HeartbeatCtx {
-  hasUI?: boolean;
-  isIdle?: () => boolean;
+function currentSessionRef() {
+  return currentAgentSessionPath ? { agent_session_path: currentAgentSessionPath } : currentAgentSessionId ? { agent_session_id: currentAgentSessionId } : undefined;
 }
-
-interface PublishRecord {
-  force: boolean;
-  agentActive: boolean;
+async function sendRequestAttempt(request: any, _timeoutMs: number): Promise<boolean> {
+  if (globalThis.__holdRequest) await globalThis.__holdRequest;
+  globalThis.__calls.push(request);
+  return true;
 }
-
-interface TestBackchannel {
-  getAgentActive: () => boolean;
-  getLog: () => PublishRecord[];
-  getCalls: () => string[];
+async function sendRequestNow(request: any): Promise<void> {
+  if (await sendRequestAttempt(request, 500)) return;
+  await sendRequestAttempt(request, 1500);
 }
-
-interface PiHandle {
-  on: (event: string, handler: (event: unknown, ctx: HeartbeatCtx) => void) => void;
-  __test?: TestBackchannel;
+function sendRequest(request: any): Promise<void> {
+  requestQueue = requestQueue.then(() => sendRequestNow(request), () => sendRequestNow(request));
+  return requestQueue;
 }
-
-export default function register(pi: PiHandle): void {
-  let agentActive = false;
-  const publishLog: PublishRecord[] = [];
-  const calls: string[] = [];
-
-  // Mock lifecycle plumbing: the patched code below invokes each of these
-  // by the literal names herdr's real integration uses. They record the
-  // call instead of doing real session/timer work - a test seam for the
-  // heartbeat invariant, not a reimplementation of herdr.
-  function publishState(force = false): void {
-    publishLog.push({ force, agentActive });
-  }
-  function enabled(): boolean {
-    return true;
-  }
-  function updateSessionRef(_ctx: HeartbeatCtx): void {
-    calls.push("updateSessionRef");
-  }
-  function reportSession(reason?: string): Promise<void> {
-    calls.push(`reportSession:${reason ?? ""}`);
-    return Promise.resolve();
-  }
-  function resetSessionState(): void {
-    calls.push("resetSessionState");
-  }
-  function clearPendingTimers(): void {
-    calls.push("clearPendingTimers");
-  }
-  function clearFailureState(): void {
-    calls.push("clearFailureState");
-  }
-  function releaseHerdrLifecycleAuthority(): void {
-    calls.push("releaseHerdrLifecycleAuthority");
-  }
-
-  pi.__test = {
-    getAgentActive: () => agentActive,
-    getLog: () => publishLog,
-    getCalls: () => calls,
-  };
-
-  let rootSession = false;
-
-  // This is the v6 vendor helper. SessionShutdownEvent has no `reason`, so the
-  // old gate is unreachable even though AgentSession.dispose emits final teardown.
-  function shouldReleaseOnSessionShutdown(event: SessionShutdownEvent): boolean {
-    return event.reason === "quit";
-  }
-
-  // ctx: any (not HeartbeatCtx) is mandatory here: sbin/fm-patch-herdr-omp.sh
-  // matches this signature byte-exact against herdr's real, un-typed
-  // (`@ts-nocheck`) integration source. Narrowing it breaks the patcher's
-  // anchor match on the genuine target file.
-  function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {
-    if (ctx?.hasUI !== true) {
-      return false;
+type AgentState = "working" | "blocked" | "idle";
+type QueuedState = { state: AgentState; message?: string; seq: number };
+function reportSession(sessionStartSource = "startup"): Promise<void> {
+  return sendRequest({ id: `herdr:omp:session:${Date.now()}`, method: "pane.report_agent_session", params: { pane_id: "fixture", source: "herdr:omp", agent: "omp", seq: nextReportSeq(), session_start_source: sessionStartSource, ...currentSessionRef() } });
+}
+function sendState(state: AgentState, message?: string, seq = nextReportSeq()): Promise<void> {
+  return sendRequest({ id: `herdr:omp:${Date.now()}`, method: "pane.report_agent", params: { pane_id: "fixture", source: "herdr:omp", agent: "omp", state, message, seq, ...currentSessionRef() } });
+}
+function releaseAgent(): Promise<void> {
+  return sendRequest({ id: `herdr:omp:release:${Date.now()}`, method: "pane.release_agent", params: { pane_id: "fixture", source: "herdr:omp", agent: "omp", seq: nextReportSeq() } });
+}
+function shouldReleaseOnSessionShutdown(event: any): boolean {
+  return event.reason === "quit";
+}
+let sendInFlight = false;
+let queuedState: QueuedState | undefined;
+function queueState(state: AgentState, message?: string): void {
+  queuedState = { state, message, seq: nextReportSeq() };
+  if (!sendInFlight) void drainStateQueue();
+}
+async function drainStateQueue(): Promise<void> {
+  if (sendInFlight) return;
+  sendInFlight = true;
+  try {
+    while (queuedState) {
+      const next = queuedState;
+      queuedState = undefined;
+      await sendState(next.state, next.message, next.seq);
     }
+  } finally {
+    sendInFlight = false;
+    if (queuedState) void drainStateQueue();
+  }
+}
+export default function register(pi: any) {
+  let agentActive = false;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let rootSession = false;
+  function enabled() { return true; }
+  function clearPendingTimers() { if (idleTimer) clearTimeout(idleTimer); if (retryTimer) clearTimeout(retryTimer); idleTimer = undefined; retryTimer = undefined; }
+  function clearFailureState() {}
+  function publishState(force = false) {
+    queueState(agentActive ? "working" : "idle");
+  }
+  function resetSessionState() { clearPendingTimers(); agentActive = false; }
+  function activateRootSession(ctx: any, sessionStartSource = "startup"): boolean {
+    if (ctx?.hasUI !== true) return false;
     rootSession = true;
     updateSessionRef(ctx);
     void reportSession(sessionStartSource);
     return true;
   }
-
+  pi.__test = { queueLate: () => queueState("working"), calls: () => globalThis.__calls };
   pi.on("session_start", (_event, ctx) => {
-    if (!activateRootSession(ctx)) {
-      return;
-    }
-    // A reload can replace this extension mid-run without emitting another agent_start.
+    if (!activateRootSession(ctx)) return;
     agentActive = ctx?.isIdle?.() === false;
     publishState(true);
   });
-
   pi.on("session_switch", (event, ctx) => {
-    if (!activateRootSession(ctx, event?.reason || "resume")) {
-      return;
-    }
+    if (!activateRootSession(ctx, event?.reason || "resume")) return;
     resetSessionState();
     publishState(true);
   });
-
   pi.on("agent_start", (_event, ctx) => {
-    if (!rootSession && !activateRootSession(ctx)) {
-      return;
-    }
+    if (!rootSession && !activateRootSession(ctx)) return;
     updateSessionRef(ctx);
     void reportSession();
     clearPendingTimers();
@@ -148,1340 +113,652 @@ export default function register(pi: PiHandle): void {
     agentActive = true;
     publishState();
   });
-
-  pi.on("agent_end", (_event, ctx) => {
+  pi.on("agent_end", (event) => {
+    if (!rootSession) return;
     agentActive = false;
-    publishState();
+    idleTimer = setTimeout(() => publishState(), 1);
   });
-
-  pi.on("session_shutdown", (event, _ctx) => {
-    if (shouldReleaseOnSessionShutdown(event)) {
-      releaseHerdrLifecycleAuthority();
-    }
+  pi.on("session_shutdown", async (event) => {
+    if (shouldReleaseOnSessionShutdown(event)) await releaseAgent();
   });
-
   pi.on("tool_approval_requested", (event, ctx) => {
-    if (!rootSession && !activateRootSession(ctx)) {
-      return;
-    }
+    if (!rootSession && !activateRootSession(ctx)) return;
   });
-
   pi.on("tool_approval_resolved", (_event, ctx) => {
-    if (!rootSession && !activateRootSession(ctx)) {
-      return;
-    }
+    if (!rootSession && !activateRootSession(ctx)) return;
   });
-
   pi.on("tool_execution_start", (event, ctx) => {
-    if (event?.toolName !== "ask") {
-      return;
-    }
+    if (event?.toolName !== "ask") return;
   });
-
   pi.on("tool_execution_end", (event, ctx) => {
-    if (event?.toolName !== "ask") {
-      return;
-    }
+    if (event?.toolName !== "ask") return;
   });
 }
 TS
 }
 
-test_pristine_check_reports_unpatched() {
-  local f="$TMP_ROOT/pristine.ts"
-  write_pristine_fixture "$f"
-  "${PATCHER[@]}" --check --file "$f"
-  local rc=$?
-  [ "$rc" -eq 1 ] || fail "--check on a pristine file must exit 1, got $rc"
-  pass "--check exits 1 on a pristine (never-patched) file"
-}
-
-test_apply_enforces_invariant() {
-  local f="$TMP_ROOT/apply.ts"
-  write_pristine_fixture "$f"
-  "${PATCHER[@]}" --file "$f" || fail "apply on a pristine file must exit 0"
-  "${PATCHER[@]}" --check --file "$f" || fail "--check must report patched after a successful apply"
-
-  python3 - "$f" <<'PY' || fail "restoreAgentActiveFromCtx() must be scoped inside the rootSession recovery branch, closed before publishState(true)"
-import sys
-src = open(sys.argv[1], encoding="utf-8").read()
-sys.exit(0 if "restoreAgentActiveFromCtx();\n        }\n        publishState(true);" in src else 1)
-PY
-
-  python3 - "$f" <<'PY' && fail "restoreAgentActiveFromCtx() must never sit directly adjacent to publishState(true) (that re-samples ctx.isIdle() on every tick)"
-import sys
-src = open(sys.argv[1], encoding="utf-8").read()
-sys.exit(0 if "restoreAgentActiveFromCtx();\n        publishState(true);" in src else 1)
-PY
-
-  pass "applied heartbeat scopes ctx.isIdle() recovery to the rootSession-false branch only"
-}
-
-test_apply_is_idempotent() {
-  local f="$TMP_ROOT/idempotent.ts"
-  write_pristine_fixture "$f"
-  "${PATCHER[@]}" --file "$f" >/dev/null || fail "first apply failed"
-  local before
-  before=$(cat "$f")
-  local out
-  out=$("${PATCHER[@]}" --file "$f" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "second apply must exit 0, got $rc"
-  printf '%s' "$out" | grep -q "already patched" || fail "second apply must report already patched, got: $out"
-  [ "$(cat "$f")" = "$before" ] || fail "second apply must not modify an already-patched file"
-  pass "re-applying to an already-patched file is a no-op"
-}
-
-test_session_shutdown_releases_without_reason_and_upgrades_old_gate() {
-  command -v bun >/dev/null 2>&1 \
-    || fail "bun is required for the session_shutdown release regression"
-
-  local fixture="$TMP_ROOT/session-shutdown-release.ts"
-  local harness="$TMP_ROOT/session-shutdown-release-harness.mjs"
+test_apply_and_idempotence() {
+  local fixture="$TMP_ROOT/fixture.ts"
   write_pristine_fixture "$fixture"
-  "${PATCHER[@]}" --file "$fixture" >/dev/null \
-    || fail "initial session_shutdown release apply failed"
-  "${PATCHER[@]}" --check --file "$fixture" \
-    || fail "--check rejected the patched session_shutdown release helper"
-
-  cat >"$harness" <<'MJS'
-const fixturePath = process.argv[2];
-const handlers = new Map();
-const pi = { on(event, fn) { handlers.set(event, fn); return pi; } };
-const originalSetInterval = globalThis.setInterval;
-globalThis.setInterval = () => ({ unref() {} });
-const mod = await import(fixturePath);
-mod.default(pi);
-globalThis.setInterval = originalSetInterval;
-
-const shutdownEvent = { type: "session_shutdown" };
-if ("reason" in shutdownEvent) {
-  console.error("FAIL: test event unexpectedly contains a shutdown reason");
-  process.exit(1);
+  "${PATCHER[@]}" --check --file "$fixture"
+  [ "$?" -eq 1 ] || fail "--check accepted an unpatched integration"
+  "${PATCHER[@]}" --file "$fixture" || fail "patch apply failed"
+  "${PATCHER[@]}" --check --file "$fixture" || fail "--check rejected terminal-fenced integration"
+  grep -q 'fm-terminal-lifecycle-fence-v1' "$fixture" || fail "terminal fence marker missing"
+  ! grep -q 'fm-resync-heartbeat: injected' "$fixture" || fail "15-second heartbeat remained"
+  local before out
+  before=$(cat "$fixture")
+  out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+  [ "$?" -eq 0 ] || fail "repeat apply failed"
+  printf '%s' "$out" | grep -q 'already patched' || fail "repeat apply was not a no-op"
+  [ "$(cat "$fixture")" = "$before" ] || fail "repeat apply changed terminal-fenced integration"
+  pass "patch is idempotent and removes periodic state publication"
 }
-handlers.get("session_shutdown")?.(shutdownEvent, {});
-if (!pi.__test.getCalls().includes("releaseHerdrLifecycleAuthority")) {
-  console.error(`FAIL: reasonless session_shutdown did not release Herdr lifecycle authority: ${JSON.stringify(pi.__test.getCalls())}`);
-  process.exit(1);
-}
-console.log("PASS: a reasonless OMP session_shutdown releases Herdr lifecycle authority");
-MJS
 
-  local out
-  out=$(bun run "$harness" "$fixture" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "reasonless session_shutdown release regressed: $out"
-  printf '%s' "$out" | grep -q "^PASS" \
-    || fail "session_shutdown release harness did not report PASS: $out"
+test_unsupported_versions_and_shapes_fail_closed() {
+  local fixture before out version
+  for version in 5 4; do
+    fixture="$TMP_ROOT/v${version}.ts"
+    write_pristine_fixture "$fixture"
+    python3 - "$fixture" "$version" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+path.write_text(path.read_text().replace("HERDR_INTEGRATION_VERSION=6", f"HERDR_INTEGRATION_VERSION={sys.argv[2]}", 1))
+PY
+    before="$TMP_ROOT/v${version}.before"
+    cp "$fixture" "$before"
+    out=$("${PATCHER[@]}" --check --file "$fixture" 2>&1)
+    [ "$?" -eq 3 ] || fail "v${version} --check did not fail closed: $out"
+    printf '%s' "$out" | grep -q "unsupported Herdr OMP integration version: v${version}" || fail "v${version} --check did not name unsupported version: $out"
+    cmp -s "$fixture" "$before" || fail "v${version} --check mutated the integration"
+    out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+    [ "$?" -eq 3 ] || fail "v${version} apply did not fail closed: $out"
+    printf '%s' "$out" | grep -q "unsupported Herdr OMP integration version: v${version}" || fail "v${version} apply did not name unsupported version: $out"
+    cmp -s "$fixture" "$before" || fail "v${version} apply mutated the integration"
+  done
 
-  # Recreate the previously lifecycle-patched v6 helper with its unreachable
-  # reason gate. The new integrity check must reject it and apply must converge.
-  python3 - "$fixture" <<'PY' || fail "could not restore the old session_shutdown reason gate"
-import io, re, sys
+  fixture="$TMP_ROOT/duplicate-version.ts"
+  write_pristine_fixture "$fixture"
+  printf '// HERDR_INTEGRATION_VERSION=7\n' >>"$fixture"
+  before="$TMP_ROOT/duplicate-version.before"
+  cp "$fixture" "$before"
+  out=$("${PATCHER[@]}" --check --file "$fixture" 2>&1)
+  [ "$?" -eq 3 ] || fail "duplicate version --check did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'declaration must appear exactly once' || fail "duplicate version --check did not identify contradictory declarations: $out"
+  cmp -s "$fixture" "$before" || fail "duplicate version --check mutated the integration"
+  out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+  [ "$?" -eq 3 ] || fail "duplicate version apply did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'declaration must appear exactly once' || fail "duplicate version apply did not identify contradictory declarations: $out"
+  cmp -s "$fixture" "$before" || fail "duplicate version apply mutated the integration"
 
-path = sys.argv[1]
-src = io.open(path, encoding="utf-8").read()
-release_re = re.compile(
-    r'(?m)^(?P<indent>[ \t]*)// fm-session-shutdown-release-all: [^\n]*\n'
-    r'(?P=indent)return true;'
-)
-src, count = release_re.subn(
-    lambda match: f'{match.group("indent")}return event.reason === "quit";',
-    src,
+  fixture="$TMP_ROOT/missing-version.ts"
+  write_pristine_fixture "$fixture"
+  python3 - "$fixture" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+path.write_text(path.read_text().replace("// HERDR_INTEGRATION_VERSION=6\n", "", 1))
+PY
+  before="$TMP_ROOT/missing-version.before"
+  cp "$fixture" "$before"
+  out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+  [ "$?" -eq 3 ] || fail "missing version apply did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'unsupported Herdr OMP integration version: missing declaration' || fail "missing version did not report its unsupported shape: $out"
+  cmp -s "$fixture" "$before" || fail "missing version apply mutated the integration"
+  fixture="$TMP_ROOT/template-only-version.ts"
+  write_pristine_fixture "$fixture"
+  python3 - "$fixture" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+src = path.read_text().replace("// HERDR_INTEGRATION_VERSION=6\n", "", 1)
+path.write_text('const fakeVersion = `\\n// HERDR_INTEGRATION_VERSION=6\\n`;\\n' + src)
+PY
+  before="$TMP_ROOT/template-only-version.before"
+  cp "$fixture" "$before"
+  out=$("${PATCHER[@]}" --check --file "$fixture" 2>&1)
+  [ "$?" -eq 3 ] || fail "template-only version declaration passed --check: $out"
+  printf '%s' "$out" | grep -q 'missing declaration' || fail "template-only version declaration did not report missing declaration: $out"
+  cmp -s "$fixture" "$before" || fail "template-only version declaration --check mutated the integration"
+  out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+  [ "$?" -eq 3 ] || fail "template-only version declaration apply did not fail closed: $out"
+  cmp -s "$fixture" "$before" || fail "template-only version declaration apply mutated the integration"
+
+  fixture="$TMP_ROOT/malformed-v6.ts"
+  printf '// HERDR_INTEGRATION_VERSION=6\nexport default function register(pi: any) {}\n' >"$fixture"
+  before="$TMP_ROOT/malformed-v6.before"
+  cp "$fixture" "$before"
+  out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+  [ "$?" -eq 3 ] || fail "malformed v6 apply did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'integration shape changed' || fail "malformed v6 did not report its invalid shape: $out"
+  cmp -s "$fixture" "$before" || fail "malformed v6 apply mutated the integration"
+
+  fixture="$TMP_ROOT/v6-without-shutdown-helper.ts"
+  write_pristine_fixture "$fixture"
+  python3 - "$fixture" <<'PY'
+import pathlib, re, sys
+path = pathlib.Path(sys.argv[1])
+src, count = re.subn(
+    r'function shouldReleaseOnSessionShutdown\(event: any\): boolean \{\n  return event\.reason === "quit";\n\}\n',
+    '',
+    path.read_text(),
     count=1,
 )
 if count != 1:
-    raise SystemExit(f"expected one patched session_shutdown helper, found {count}")
-io.open(path, "w", encoding="utf-8").write(src)
+    raise SystemExit("could not remove v6 session shutdown helper")
+path.write_text(src)
 PY
-
-  "${PATCHER[@]}" --check --file "$fixture"
-  rc=$?
-  [ "$rc" -eq 1 ] || fail "--check accepted the old session_shutdown reason gate, got $rc"
-  "${PATCHER[@]}" --file "$fixture" >/dev/null \
-    || fail "apply did not remediate the old session_shutdown reason gate"
-  "${PATCHER[@]}" --check --file "$fixture" \
-    || fail "--check rejected the remediated session_shutdown release helper"
-
-  local before
-  before=$(cat "$fixture")
+  before="$TMP_ROOT/v6-without-shutdown-helper.before"
+  cp "$fixture" "$before"
   out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
-  rc=$?
-  [ "$rc" -eq 0 ] || fail "repeat apply after session_shutdown remediation failed, got $rc"
-  printf '%s' "$out" | grep -q "already patched" \
-    || fail "repeat apply after session_shutdown remediation was not a no-op: $out"
-  [ "$(cat "$fixture")" = "$before" ] \
-    || fail "repeat apply after session_shutdown remediation modified the file"
+  [ "$?" -eq 3 ] || fail "v6 without shutdown helper did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'shouldReleaseOnSessionShutdown helper not found exactly once' || fail "v6 without shutdown helper did not report its invalid shape: $out"
+  cmp -s "$fixture" "$before" || fail "v6 without shutdown helper was mutated"
 
-  out=$(bun run "$harness" "$fixture" 2>&1)
-  rc=$?
-  [ "$rc" -eq 0 ] || fail "remediated reasonless session_shutdown release regressed: $out"
-  printf '%s' "$out" | grep -q "^PASS" \
-    || fail "remediated session_shutdown release harness did not report PASS: $out"
-  pass "reasonless session_shutdown release is checked, remediated from the old gate, and idempotent"
-}
-test_patch_check_requires_publish_guard_at_publish_state() {
-  local fixture="$TMP_ROOT/missing-publish-guard.ts"
+  fixture="$TMP_ROOT/v6-duplicate-shutdown-helper.ts"
   write_pristine_fixture "$fixture"
-  "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "initial apply failed"
+  printf '\nfunction shouldReleaseOnSessionShutdown(\n' >>"$fixture"
+  before="$TMP_ROOT/v6-duplicate-shutdown-helper.before"
+  cp "$fixture" "$before"
+  out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+  [ "$?" -eq 3 ] || fail "v6 with duplicate shutdown helper signature did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'shouldReleaseOnSessionShutdown helper not found exactly once' || fail "v6 with duplicate shutdown helper did not report its invalid shape: $out"
+  cmp -s "$fixture" "$before" || fail "v6 with duplicate shutdown helper was mutated"
 
-  python3 - "$fixture" <<'PY' || fail "could not remove the real publishState guard"
-import io, re, sys
-
-path = sys.argv[1]
-src = io.open(path, encoding="utf-8").read()
-guard = "    if (!rootSession || !validateRootSession(undefined, latestCtx)) return;\n"
-publish_re = re.compile(
-    r'(  function publishState\(force = false\)(?:: [^{]+)? \{\n)'
-    + re.escape(guard),
-)
-src, count = publish_re.subn(r"\1", src, count=1)
-if count != 1:
-    raise SystemExit(f"expected one publishState guard, removed {count}")
-io.open(path, "w", encoding="utf-8").write(src)
-PY
-
-  "${PATCHER[@]}" --check --file "$fixture" \
-    && fail "--check accepted a partially patched file with its publishState guard removed"
-  "${PATCHER[@]}" --file "$fixture" >/dev/null \
-    || fail "apply did not restore a missing publishState guard"
-  "${PATCHER[@]}" --check --file "$fixture" \
-    || fail "--check rejected the repaired publishState guard"
-
-  python3 - "$fixture" <<'PY' || fail "publishState guard was not restored at its actual location"
-import io, re, sys
-
-src = io.open(sys.argv[1], encoding="utf-8").read()
-guard = "    if (!rootSession || !validateRootSession(undefined, latestCtx)) return;\n"
-publish_re = re.compile(
-    r'  function publishState\(force = false\)(?:: [^{]+)? \{\n'
-    + re.escape(guard),
-)
-if len(publish_re.findall(src)) != 1:
-    raise SystemExit("publishState is not immediately guarded")
-PY
-
-  pass "patch integrity check requires the publishState guard instead of heartbeat-only text"
-}
-
-
-test_upgrade_from_prior_buggy_heartbeat_converges() {
-  local fresh="$TMP_ROOT/fresh.ts"
-  local buggy="$TMP_ROOT/buggy.ts"
-  write_pristine_fixture "$fresh"
-  write_pristine_fixture "$buggy"
-  "${PATCHER[@]}" --file "$fresh" >/dev/null || fail "fresh apply failed"
-
-  # Rewrite $buggy into the shape the prior (buggy) patcher version produced:
-  # every hook migration identical, but the heartbeat block unconditionally
-  # re-samples ctx.isIdle() via restoreAgentActiveFromCtx() every tick.
-  "${PATCHER[@]}" --file "$buggy" >/dev/null || fail "buggy-precursor apply failed"
-  python3 - "$buggy" <<'PY'
-import io, re, sys
-path = sys.argv[1]
-src = io.open(path, encoding="utf-8").read()
-new_block_re = re.compile(
-    r'  // fm-resync-heartbeat-lifecycle-invariant:.*?\n  \} catch \(_e\) \{\}\n',
-    re.S,
-)
-old_block = '''  // fm-resync-heartbeat-ctx-resync: heartbeat also restores agentActive from the latest ctx.
-  // ROOT CAUSE this fixes: the reporter enables state reporting only after
-  // activateRootSession() sees ctx.hasUI === true. A long-lived omp session
-  // auto-compacts / reloads many times (observed hundreds of times per mate),
-  // and a reload replaces this extension runtime; the re-fired session event
-  // does not reliably carry hasUI, so rootSession stays false and the reporter
-  // goes permanently silent - herdr then falls back to idle for the rest of
-  // the session even while the agent is actively working. A fresh session
-  // works only because it has not compacted yet.
-  // Fix: enabled() already proves this is a real herdr-managed pane (HERDR_ENV
-  // + pane id + socket are all present), which is the same fact hasUI was a
-  // proxy for. The latest ctx lets reload/session_switch/heartbeat recover
-  // agentActive from ctx.isIdle(), not from stale local defaults.
-  try {
-    const __fmResyncMs = 15000;
-    const __fmResync = setInterval(() => {
-      try {
-        if (!enabled()) return;
-        if (!rootSession) {
-          // Reload dropped activation; re-establish it. Report the session
-          // ref so herdr rebinds this source, then resume publishing.
-          rootSession = true;
-          if (latestCtx) updateSessionRef(latestCtx);
-          void reportSession("fm-reload-resync");
-        }
-        restoreAgentActiveFromCtx();
-        publishState(true);
-      } catch (_e) {}
-    }, __fmResyncMs);
-    __fmResync.unref?.();
-  } catch (_e) {}
-'''
-assert new_block_re.search(src), "fresh-patched fixture missing expected heartbeat block"
-src = new_block_re.sub(old_block, src, count=1)
-io.open(path, "w", encoding="utf-8").write(src)
-PY
-
-  "${PATCHER[@]}" --check --file "$buggy"
-  local rc=$?
-  [ "$rc" -eq 1 ] || fail "--check on the prior buggy heartbeat shape must exit 1 (needs re-patch), got $rc"
-
-  "${PATCHER[@]}" --file "$buggy" || fail "upgrade apply over the prior buggy heartbeat must succeed"
-  "${PATCHER[@]}" --check --file "$buggy" || fail "--check must report patched after the upgrade apply"
-
-  diff -u "$fresh" "$buggy" \
-    || fail "upgrading a prior-buggy-patched file must converge to the same content as a fresh apply"
-
-  pass "a file carrying the prior buggy heartbeat is detected as unpatched and upgrades to the corrected shape"
-}
-
-test_upgrade_from_v3_resume_gate_converges() {
-  local fresh="$TMP_ROOT/v4-fresh.ts"
-  local prior="$TMP_ROOT/v3-resume-gate.ts"
-  write_pristine_fixture "$fresh"
-  write_pristine_fixture "$prior"
-  "${PATCHER[@]}" --file "$fresh" >/dev/null || fail "fresh v4 apply failed"
-  "${PATCHER[@]}" --file "$prior" >/dev/null || fail "prior v3 precursor apply failed"
-  python3 - "$prior" <<'PY'
-import io, sys
-path = sys.argv[1]
-src = io.open(path, encoding="utf-8").read()
-modern = '''    const claim = processRootSessionClaim();
-    const hasMatchingPreviousSessionFile =
-      typeof event?.previousSessionFile === "string" &&
-      event.previousSessionFile.length > 0 &&
-      event.previousSessionFile === tuple?.rootSessionFile;
-    // A same-file resume with an existing process claim is a stale reload.
-    // A fresh process may mint authority only for an explicit same-file resume.
-    const isFreshSameSessionResume =
-      effectiveSessionStartSource === "resume" &&
-      claim === undefined &&
-      hasMatchingPreviousSessionFile;
-    const isStaleSameSessionReload =
-      effectiveSessionStartSource === "reload" ||
-      (effectiveSessionStartSource === "resume" &&
-        hasMatchingPreviousSessionFile &&
-        claim !== undefined);
-    const lacksFreshResumeProof =
-      effectiveSessionStartSource === "resume" &&
-      claim === undefined &&
-      !isFreshSameSessionResume;
-'''
-prior = '''    const isSameSessionReload =
-      effectiveSessionStartSource === "reload" ||
-      (effectiveSessionStartSource === "resume" &&
-        event?.previousSessionFile === tuple?.rootSessionFile);
-'''
-assert modern in src, "fresh v4 activation gate missing"
-src = src.replace(modern, prior, 1)
-src = src.replace("// fm-exact-root-session-claim-v5:", "// fm-exact-root-session-claim-v3:", 1)
-src = src.replace("      lacksFreshResumeProof ||\n      isStaleSameSessionReload", "      isSameSessionReload", 1)
-io.open(path, "w", encoding="utf-8").write(src)
-PY
-  "${PATCHER[@]}" --check --file "$prior"
-  local rc=$?
-  [ "$rc" -eq 1 ] || fail "--check accepted the prior v3 resume gate"
-  "${PATCHER[@]}" --file "$prior" >/dev/null || fail "upgrade from prior v3 resume gate failed"
-  diff -u "$fresh" "$prior" \
-    || fail "upgrading the prior v3 resume gate must converge to a fresh v4 apply"
-  pass "a prior v3 resume gate is re-patched to the constrained fresh-process shape"
-}
-
-test_upgrade_from_actual_parent_7a20f3d() {
-  command -v bun >/dev/null 2>&1 \
-    || fail "bun is required for the parent patch upgrade regression"
-
-  local fixture="$TMP_ROOT/parent-7a20f3d.ts"
-  local harness="$TMP_ROOT/parent-7a20f3d-harness.mjs"
+  fixture="$TMP_ROOT/patched-v6-duplicate-shutdown-helper.ts"
   write_pristine_fixture "$fixture"
-  "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "current patch apply failed"
+  "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "baseline v6 patch failed before duplicate-helper check"
+  printf '\nfunction shouldReleaseOnSessionShutdown(\n' >>"$fixture"
+  before="$TMP_ROOT/patched-v6-duplicate-shutdown-helper.before"
+  cp "$fixture" "$before"
+  out=$("${PATCHER[@]}" --check --file "$fixture" 2>&1)
+  [ "$?" -eq 1 ] || fail "patched v6 with duplicate shutdown helper passed --check: $out"
+  cmp -s "$fixture" "$before" || fail "patched v6 duplicate helper --check mutated the integration"
+  out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+  [ "$?" -eq 3 ] || fail "patched v6 duplicate shutdown helper apply did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'shouldReleaseOnSessionShutdown helper not found exactly once' || fail "patched v6 duplicate helper did not report its invalid shape: $out"
+  cmp -s "$fixture" "$before" || fail "patched v6 duplicate helper apply mutated the integration"
+  local duplicate_style
+  for duplicate_style in spaces newlines no-space-comments; do
+    fixture="$TMP_ROOT/v6-duplicate-${duplicate_style}.ts"
+    write_pristine_fixture "$fixture"
+    python3 - "$fixture" "$duplicate_style" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+style = sys.argv[2]
+suffix = {
+    "spaces": "\nfunction  shouldReleaseOnSessionShutdown (event: any): boolean { return false; }\n",
+    "newlines": "\nfunction\nshouldReleaseOnSessionShutdown\n(\nevent: any\n): boolean { return false; }\n",
+    "no-space-comments": "\nfunction/**/shouldReleaseOnSessionShutdown/**/(event: any): boolean { return false; }\n",
+}[style]
+path.write_text(path.read_text() + suffix)
+PY
+    before="$TMP_ROOT/v6-duplicate-${duplicate_style}.before"
+    cp "$fixture" "$before"
+    out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+    [ "$?" -eq 3 ] || fail "unpatched v6 ${duplicate_style} duplicate helper did not fail closed: $out"
+    printf '%s' "$out" | grep -q 'shouldReleaseOnSessionShutdown helper not found exactly once' || fail "unpatched v6 ${duplicate_style} duplicate helper did not report its invalid shape: $out"
+    cmp -s "$fixture" "$before" || fail "unpatched v6 ${duplicate_style} duplicate helper was mutated"
 
-  # Replace the current helper with the exact helper emitted by parent
-  # commit 7a20f3d. This is the reviewed parent output, not a hand-trimmed
-  # approximation, and leaves the rest of the patched integration intact.
-  python3 - "$fixture" <<'PY' || fail "could not install the actual parent helper"
-import io, re, sys
+    fixture="$TMP_ROOT/patched-v6-duplicate-${duplicate_style}.ts"
+    write_pristine_fixture "$fixture"
+    "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "baseline v6 patch failed before ${duplicate_style} duplicate-helper check"
+    python3 - "$fixture" "$duplicate_style" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+style = sys.argv[2]
+suffix = {
+    "spaces": "\nfunction  shouldReleaseOnSessionShutdown (event: any): boolean { return false; }\n",
+    "newlines": "\nfunction\nshouldReleaseOnSessionShutdown\n(\nevent: any\n): boolean { return false; }\n",
+    "no-space-comments": "\nfunction/**/shouldReleaseOnSessionShutdown/**/(event: any): boolean { return false; }\n",
+}[style]
+path.write_text(path.read_text() + suffix)
+PY
+    before="$TMP_ROOT/patched-v6-duplicate-${duplicate_style}.before"
+    cp "$fixture" "$before"
+    out=$("${PATCHER[@]}" --check --file "$fixture" 2>&1)
+    [ "$?" -eq 1 ] || fail "patched v6 ${duplicate_style} duplicate helper passed --check: $out"
+    cmp -s "$fixture" "$before" || fail "patched v6 ${duplicate_style} duplicate helper --check mutated the integration"
+    out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+    [ "$?" -eq 3 ] || fail "patched v6 ${duplicate_style} duplicate helper apply did not fail closed: $out"
+    printf '%s' "$out" | grep -q 'shouldReleaseOnSessionShutdown helper not found exactly once' || fail "patched v6 ${duplicate_style} duplicate helper did not report its invalid shape: $out"
+    cmp -s "$fixture" "$before" || fail "patched v6 ${duplicate_style} duplicate helper apply mutated the integration"
+  done
+  for fixture_state in unpatched patched; do
+    fixture="$TMP_ROOT/${fixture_state}-v6-nested-template-duplicate.ts"
+    write_pristine_fixture "$fixture"
+    if [ "$fixture_state" = patched ]; then
+      "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "baseline v6 patch failed before nested-template duplicate check"
+    fi
+    python3 - "$fixture" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+canonical = '''function shouldReleaseOnSessionShutdown(event: any): boolean {
+  return event.reason === "quit";
+}
+'''
+suffix = '''const outer = `${`{`}`;
+function/**/shouldReleaseOnSessionShutdown/**/(event: any): boolean { return false; }
+'''
+src = path.read_text()
+path.write_text(src.replace(canonical, canonical + suffix, 1) if canonical in src else src + suffix)
+PY
+    before="$TMP_ROOT/${fixture_state}-v6-nested-template-duplicate.before"
+    cp "$fixture" "$before"
+    if [ "$fixture_state" = unpatched ]; then
+      out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+      [ "$?" -eq 3 ] || fail "unpatched nested-template duplicate helper did not fail closed: $out"
+      printf '%s' "$out" | grep -q 'shouldReleaseOnSessionShutdown helper not found exactly once' || fail "unpatched nested-template duplicate helper did not report its invalid shape: $out"
+      cmp -s "$fixture" "$before" || fail "unpatched nested-template duplicate helper was mutated"
+    else
+      out=$("${PATCHER[@]}" --check --file "$fixture" 2>&1)
+      [ "$?" -eq 1 ] || fail "patched nested-template duplicate helper passed --check: $out"
+      cmp -s "$fixture" "$before" || fail "patched nested-template duplicate helper --check mutated the integration"
+      out=$("${PATCHER[@]}" --file "$fixture" 2>&1)
+      [ "$?" -eq 3 ] || fail "patched nested-template duplicate helper apply did not fail closed: $out"
+      cmp -s "$fixture" "$before" || fail "patched nested-template duplicate helper apply mutated the integration"
+    fi
+  done
+  pass "v5 and older versions plus missing or malformed v6 shapes fail closed without mutation"
+}
 
-path = sys.argv[1]
-src = io.open(path, encoding="utf-8").read()
-parent_helper = '''// fm-exact-root-session-claim-v1: process-local exact root authority.
-type RootSessionClaim = {
-  rootSessionFile: string;
-  rootSessionId: string;
-};
+test_native_v7_is_healthy_noop() {
+  local incomplete="$TMP_ROOT/v7-incomplete.ts"
+  local v7="$TMP_ROOT/v7.ts"
+  write_pristine_fixture "$incomplete"
+  python3 - "$incomplete" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+path.write_text(path.read_text().replace("HERDR_INTEGRATION_VERSION=6", "HERDR_INTEGRATION_VERSION=7", 1))
+PY
+  local incomplete_before="$TMP_ROOT/v7-incomplete.before"
+  cp "$incomplete" "$incomplete_before"
+  local out
+  out=$("${PATCHER[@]}" --file "$incomplete" 2>&1)
+  [ "$?" -eq 3 ] || fail "v7 without native lifecycle shape did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'unsupported native terminal lifecycle shape' || fail "v7 without native shape did not identify the missing lifecycle: $out"
+  cmp -s "$incomplete" "$incomplete_before" || fail "v7 without native lifecycle shape was mutated"
 
-const rootSessionClaimKey = Symbol.for("herdr:omp:root-session-claim:v1");
-const rootSessionReporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
-const rootSessionModuleReload =
-  (globalThis as any)[rootSessionReporterLoadKey] === true;
-(globalThis as any)[rootSessionReporterLoadKey] = true;
-const allowedRootStartReasons = new Set(["startup", "new", "resume", "fork"]);
-
-function exactRootSessionTuple(ctx: any): RootSessionClaim | undefined {
-  try {
-    const rootSessionFile = ctx?.sessionManager?.getSessionFile?.();
-    const rootSessionId = ctx?.sessionManager?.getSessionId?.();
-    if (
-      typeof rootSessionFile !== "string" ||
-      rootSessionFile.length === 0 ||
-      typeof rootSessionId !== "string" ||
-      rootSessionId.length === 0
-    ) {
-      return undefined;
+  local near_shape="$TMP_ROOT/v7-near-shape.ts"
+  write_pristine_fixture "$near_shape"
+  python3 - "$near_shape" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+src = path.read_text().replace("HERDR_INTEGRATION_VERSION=6", "HERDR_INTEGRATION_VERSION=7", 1)
+old = '''  pi.on("session_shutdown", async (event) => {
+    if (shouldReleaseOnSessionShutdown(event)) await releaseAgent();
+  });'''
+near_shape = '''  let shutdownFenced = false;
+  function fenceShutdown(): Promise<void> {
+    // shutdownFenced = true; return releaseAgent();
+    const fakeNativeFenceText = "shutdownFenced = true; return releaseAgent();";
+    function fakeNestedFence(): Promise<void> {
+      shutdownFenced = true;
+      return releaseAgent();
     }
-    return { rootSessionFile, rootSessionId };
-  } catch {
-    return undefined;
+    if (shutdownFenced) return Promise.resolve();
+    return Promise.resolve();
   }
-}
-
-function hasRootChildMarker(event: any, ctx: any): boolean {
-  if (event?.agentKind === "sub" || ctx?.agentKind === "sub") {
-    return true;
-  }
-  try {
-    const branch = ctx?.sessionManager?.getBranch?.();
-    return !Array.isArray(branch) || branch.some((entry: any) => entry?.type === "session_init");
-  } catch {
-    return true;
-  }
-}
-
-function processRootSessionClaim(): RootSessionClaim | undefined {
-  const claim = (globalThis as any)[rootSessionClaimKey];
-  if (
-    typeof claim?.rootSessionFile !== "string" ||
-    typeof claim?.rootSessionId !== "string"
-  ) {
-    return undefined;
-  }
-  return claim;
-}
-
-function sameRootSessionClaim(
-  left: RootSessionClaim | undefined,
-  right: RootSessionClaim | undefined,
-): boolean {
-  return (
-    left !== undefined &&
-    right !== undefined &&
-    left.rootSessionFile === right.rootSessionFile &&
-    left.rootSessionId === right.rootSessionId
-  );
-}
-
-'''
-helper_re = re.compile(
-    r'// fm-exact-root-session-claim-v5: process-local exact root authority\.\n'
-    r'.*?(?=export default function)',
-    re.S,
-)
-src, count = helper_re.subn(parent_helper, src, count=1)
-if count != 1:
-    raise SystemExit(f"expected one current helper, replaced {count}")
-io.open(path, "w", encoding="utf-8").write(src)
+  pi.on("session_shutdown", async (event, ctx) => {
+    await fenceShutdown();
+  });'''
+if old not in src:
+    raise SystemExit("could not build near-shape native v7 fixture")
+path.write_text(src.replace(old, near_shape, 1))
 PY
+  local near_shape_before="$TMP_ROOT/v7-near-shape.before"
+  cp "$near_shape" "$near_shape_before"
+  out=$("${PATCHER[@]}" --file "$near_shape" 2>&1)
+  [ "$?" -eq 3 ] || fail "fake v7 fence did not fail closed: $out"
+  printf '%s' "$out" | grep -q 'unsupported native terminal lifecycle shape' || fail "fake v7 fence did not identify its invalid lifecycle: $out"
+  cmp -s "$near_shape" "$near_shape_before" || fail "fake v7 fence was mutated"
 
-  "${PATCHER[@]}" --check --file "$fixture" \
-    && fail "--check accepted actual parent 7a20f3d output as current"
-  "${PATCHER[@]}" --file "$fixture" >/dev/null \
-    || fail "upgrade from actual parent 7a20f3d output failed"
-  "${PATCHER[@]}" --check --file "$fixture" \
-    || fail "--check rejected the upgraded parent output"
-
-  grep -q "fm-exact-root-session-claim-v5" "$fixture" \
-    || fail "upgrade did not version the root helper marker"
-  grep -q "rootSessionFile?: string;" "$fixture" \
-    || fail "upgrade did not install the ID-only root helper"
-
-  cat >"$harness" <<'MJS'
-const fixturePath = process.argv[2];
-const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
-const reporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
-
-function assert(condition, message) {
-  if (!condition) {
-    console.error(`FAIL: ${message}`);
-    process.exit(1);
+  write_pristine_fixture "$v7"
+  python3 - "$v7" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+src = path.read_text().replace("HERDR_INTEGRATION_VERSION=6", "HERDR_INTEGRATION_VERSION=7", 1)
+old = '''  pi.on("session_shutdown", async (event) => {
+    if (shouldReleaseOnSessionShutdown(event)) await releaseAgent();
+  });'''
+native = '''  let shutdownFenced = false;
+  function fenceShutdown(): Promise<void> {
+    if (shutdownFenced) return Promise.resolve();
+    shutdownFenced = true;
+    return releaseAgent();
   }
+  pi.on("session_shutdown", async (event, ctx) => {
+    await fenceShutdown();
+  });'''
+if old not in src:
+    raise SystemExit("could not build native v7 lifecycle fixture")
+path.write_text(src.replace(old, native, 1))
+PY
+  python3 - "$v7" "$TMP_ROOT" <<'PY'
+import pathlib, sys
+healthy = pathlib.Path(sys.argv[1]).read_text()
+root = pathlib.Path(sys.argv[2])
+native = '''  let shutdownFenced = false;
+  function fenceShutdown(): Promise<void> {
+    if (shutdownFenced) return Promise.resolve();
+    shutdownFenced = true;
+    return releaseAgent();
+  }
+  pi.on("session_shutdown", async (event, ctx) => {
+    await fenceShutdown();
+  });'''
+unused = '''function unusedNativeTerminalLifecycle(pi: any) {
+  let shutdownFenced = false;
+  function fenceShutdown(): Promise<void> {
+    shutdownFenced = true;
+    return releaseAgent();
+  }
+  pi.on("session_shutdown", async (event, ctx) => {
+    await fenceShutdown();
+  });
+}'''
+template_only = '''  const nestedFake = `${`
+  function fenceShutdown(): Promise<void> {
+    shutdownFenced = true;
+    return releaseAgent();
+  }
+  pi.on("session_shutdown", async (event, ctx) => {
+    await fenceShutdown();
+  });
+`}`;'''
+variants = {
+    "module-unused-wrapper": healthy.replace(native, "  // native lifecycle exists only in the unused module wrapper", 1).replace("export default", unused + "\nexport default", 1),
+    "labeled-false-fence": healthy.replace("shutdownFenced = true;", "notReached: if (false) shutdownFenced = true;", 1),
+    "labeled-false-release": healthy.replace("return releaseAgent();", "notReached: if (false) return releaseAgent();", 1),
+    "labeled-false-handler": healthy.replace("await fenceShutdown();", "notReached: if (false) await fenceShutdown();", 1),
+    "unbraced-false-fence": healthy.replace("shutdownFenced = true;", "if (false) shutdownFenced = true;", 1),
+    "unbraced-false-release": healthy.replace("return releaseAgent();", "if (false) return releaseAgent();", 1),
+    "unbraced-false-handler": healthy.replace("await fenceShutdown();", "if (false) await fenceShutdown();", 1),
+    "nested-template-fake": healthy.replace(native, template_only, 1),
+}
+for name, source in variants.items():
+    (root / f"v7-{name}.ts").write_text(source)
+PY
+  local malformed_native before_variant
+  for malformed_native in \
+    module-unused-wrapper \
+    labeled-false-fence labeled-false-release labeled-false-handler \
+    unbraced-false-fence unbraced-false-release unbraced-false-handler \
+    nested-template-fake; do
+    before_variant="$TMP_ROOT/v7-${malformed_native}.before"
+    cp "$TMP_ROOT/v7-${malformed_native}.ts" "$before_variant"
+    out=$("${PATCHER[@]}" --file "$TMP_ROOT/v7-${malformed_native}.ts" 2>&1)
+    [ "$?" -eq 3 ] || fail "v7 ${malformed_native} lifecycle lookalike did not fail closed: $out"
+    printf '%s' "$out" | grep -q 'unsupported native terminal lifecycle shape' || fail "v7 ${malformed_native} did not identify the invalid lifecycle: $out"
+    cmp -s "$TMP_ROOT/v7-${malformed_native}.ts" "$before_variant" || fail "v7 ${malformed_native} lifecycle lookalike was mutated"
+  done
+  local before out
+  before="$TMP_ROOT/v7.before"
+  cp "$v7" "$before"
+  mkdir -p "$HOME/.omp/agent/capture"
+  printf '{"pid":"%s"}\n' "$$" >"$HOME/.omp/agent/capture/loaded.json"
+  "${PATCHER[@]}" --check --file "$v7" || fail "native v7 terminal lifecycle did not pass --check"
+  "${PATCHER[@]}" --file "$v7" || fail "native v7 lifecycle refused because a live marker existed"
+  cmp -s "$v7" "$before" || fail "patcher modified a native v7 lifecycle"
+  pass "native v7 terminal lifecycle is healthy without firstmate patching"
 }
 
-function ctx(file, id, hasUI = true) {
-  return {
-    hasUI,
-    agentKind: "main",
-    isIdle: () => false,
-    sessionManager: {
-      getSessionFile: () => file,
-      getSessionId: () => id,
-      getBranch: () => [],
-    },
-  };
-}
-
-let serial = 0;
-async function loadRuntime() {
-  const handlers = new Map();
-  const pi = {
-    on(event, fn) {
-      handlers.set(event, fn);
-      return pi;
-    },
-  };
-  const originalSetInterval = globalThis.setInterval;
-  globalThis.setInterval = () => ({ unref() {} });
-  const mod = await import(`${fixturePath}?parent-upgrade=${++serial}`);
-  mod.default(pi);
-  globalThis.setInterval = originalSetInterval;
-  return { handlers, pi };
-}
-
-const oldFile = "/sessions/parent-before-move.jsonl";
-const newFile = "/sessions/parent-after-move.jsonl";
-const stableId = "parent-stable-id";
-delete globalThis[claimKey];
-delete globalThis[reporterLoadKey];
-
-const root = await loadRuntime();
-root.handlers.get("session_start")?.({ reason: "startup" }, ctx(oldFile, stableId));
-const moved = await loadRuntime();
-moved.handlers.get("session_switch")?.(
-  { reason: "resume", previousSessionFile: oldFile },
-  ctx(newFile, stableId, false),
-);
-assert(moved.pi.__test.getLog().length > 0, "upgraded parent output lost moved-root publication");
-assert(
-  globalThis[claimKey]?.rootSessionFile === newFile &&
-    globalThis[claimKey]?.rootSessionId === stableId,
-  `upgraded parent output kept the wrong moved-root claim: ${JSON.stringify(globalThis[claimKey])}`,
-);
-
-delete globalThis[claimKey];
-delete globalThis[reporterLoadKey];
-const memory = await loadRuntime();
-const memoryId = "parent-memory-id";
-memory.handlers.get("session_start")?.({ reason: "startup" }, ctx(undefined, memoryId));
-assert(memory.pi.__test.getLog().length > 0, "upgraded parent output rejected an ID-only root");
-assert(
-  globalThis[claimKey]?.rootSessionId === memoryId &&
-    globalThis[claimKey]?.rootSessionFile === undefined,
-  `upgraded parent output did not retain an ID-only claim: ${JSON.stringify(globalThis[claimKey])}`,
-);
-
-console.log("PASS: actual 7a20f3d helper upgraded to stable-ID and ID-only root authority");
-MJS
-
-  local out
-  out=$(bun run "$harness" "$fixture" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "actual parent upgrade runtime regression: $out"
-  printf '%s' "$out" | grep -q "^PASS" || fail "actual parent upgrade harness did not report PASS: $out"
-  pass "actual 7a20f3d output is detected, upgraded, and runtime-safe"
-}
-
-test_missing_target_skips_cleanly() {
-  local f="$TMP_ROOT/does-not-exist.ts"
-  local out
-  out=$("${PATCHER[@]}" --file "$f" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "a missing integration file must not be an error (bootstrap-safe), got $rc"
-  printf '%s' "$out" | grep -q "SKIP" || fail "a missing integration file must report SKIP, got: $out"
-  pass "a missing integration file skips cleanly instead of failing bootstrap"
-}
-
-# Cap-reported live failure case: the agent is inside an active
-# whiteboard-driven turn, waiting on one background watcher job (a curl
-# poll loop) - agent_start has fired and agent_end has not, so the turn is
-# still open - while Herdr/omp's own ctx.isIdle() reads true because the
-# runtime is between explicit actions. This drives the patched heartbeat
-# through 2 ticks (>15s of simulated elapsed time) and asserts agentActive
-# (Working) survives, proving the invariant against the exact reported
-# regression rather than only against the source text shape.
-test_active_turn_survives_background_job_wait_across_heartbeat() {
-  command -v bun >/dev/null 2>&1 \
-    || fail "bun is required for the heartbeat runtime regression (CI installs it via oven-sh/setup-bun)"
-
-  local fixture="$TMP_ROOT/heartbeat-runtime.ts"
-  local harness="$TMP_ROOT/heartbeat-harness.mjs"
+test_terminal_fence_runtime() {
+  command -v bun >/dev/null 2>&1 || fail "bun is required"
+  local fixture="$TMP_ROOT/runtime.ts"
+  local harness="$TMP_ROOT/runtime.mjs"
   write_pristine_fixture "$fixture"
-  "${PATCHER[@]}" --file "$fixture" || fail "apply for the runtime regression fixture failed"
-
+  "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "runtime fixture patch failed"
   cat >"$harness" <<'MJS'
 const fixturePath = process.argv[2];
-
-const handlers = new Map();
-const mockPi = { on(event, fn) { handlers.set(event, fn); return mockPi; } };
-
-// Capture the heartbeat's setInterval(fn, 15000) without waiting real time.
-let heartbeatFn = null;
-const origSetInterval = globalThis.setInterval;
-globalThis.setInterval = (fn, ms) => {
-  if (ms === 15000) heartbeatFn = fn;
-  return { unref: () => {} };
+globalThis.__calls = [];
+const register = async (suffix) => {
+  const handlers = new Map();
+  const pi = { on(event, handler) { handlers.set(event, handler); return pi; } };
+  const mod = await import(`${fixturePath}?${suffix}`);
+  mod.default(pi);
+  return { pi, handlers };
 };
-
+let intervals = 0;
+const originalSetInterval = globalThis.setInterval;
+globalThis.setInterval = (...args) => { intervals += 1; return originalSetInterval(...args); };
+const owner = await register("owner");
+globalThis.setInterval = originalSetInterval;
+const ctx = (id, kind = "main", file = id) => ({
+  hasUI: true,
+  isIdle: () => false,
+  agentKind: kind,
+  sessionManager: {
+    getSessionFile: () => `/sessions/${file}.jsonl`,
+    getSessionId: () => id,
+    getBranch: () => kind === "sub" ? [{ type: "session_init" }] : [],
+  },
+});
+const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+let releaseHeld;
+globalThis.__holdRequest = new Promise((resolve) => { releaseHeld = resolve; });
+const terminal = ctx("terminal");
+owner.handlers.get("session_start")?.({ reason: "startup" }, terminal);
+owner.pi.__test.queueLate();
+await flush();
+const beforeHandoff = globalThis.__calls.length;
+const replacement = await register("replacement");
+replacement.handlers.get("before_agent_start")?.({ reason: "handoff" }, terminal);
+replacement.handlers.get("agent_start")?.({ reason: "handoff" }, terminal);
+const movedTerminal = ctx("terminal", "main", "terminal-moved");
+replacement.handlers.get("session_switch")?.({ reason: "resume" }, movedTerminal);
+await flush();
+await owner.handlers.get("session_shutdown")?.({ type: "session_shutdown" }, terminal);
+if (globalThis.__calls.some((call) => call.method === "pane.release_agent")) throw new Error(`stale owner released after handoff: ${JSON.stringify(globalThis.__calls)}`);
+const child = await register("child");
+child.handlers.get("session_start")?.({ reason: "startup", agentKind: "sub" }, ctx("event-child"));
+const branchChild = ctx("branch-child");
+branchChild.sessionManager.getBranch = () => [{ type: "session_init" }];
+child.handlers.get("session_start")?.({ reason: "startup" }, branchChild);
+await child.handlers.get("session_shutdown")?.({ type: "session_shutdown", agentKind: "sub" }, ctx("event-child"));
+if (globalThis.__calls.some((call) => call.method === "pane.release_agent")) throw new Error(`independent child marker released: ${JSON.stringify(globalThis.__calls)}`);
+const direct = await register("direct-shutdown-handoff");
+const terminalShutdown = direct.handlers.get("session_shutdown")?.({ type: "session_shutdown" }, movedTerminal);
+releaseHeld();
+globalThis.__holdRequest = undefined;
+await terminalShutdown;
+await flush();
+if (intervals !== 0) throw new Error(`periodic publication installed ${intervals} interval(s)`);
+const releases = globalThis.__calls.filter((call) => call.method === "pane.release_agent");
+if (releases.length !== 1 || globalThis.__calls.at(-1) !== releases[0]) throw new Error(`release was not final and unique: ${JSON.stringify(globalThis.__calls)}`);
+const dispatch = globalThis[Symbol.for("herdr:omp:root-session-dispatch:v1")];
+const maxSeq = Math.max(...globalThis.__calls.map((call) => call.seq ?? call.params?.seq));
+if (
+  releases[0].params.seq !== maxSeq ||
+  releases[0].params.seq !== dispatch.seq ||
+  globalThis.__calls.length <= beforeHandoff
+) throw new Error(`held queue did not end in the maximal terminal release: ${JSON.stringify(globalThis.__calls)}`);
+const afterRelease = globalThis.__calls.length;
+const postTerminal = await register("post-terminal");
+postTerminal.handlers.get("session_start")?.({ reason: "resume", previousSessionFile: "/sessions/terminal-moved.jsonl" }, movedTerminal);
+postTerminal.handlers.get("agent_start")?.({}, movedTerminal);
+postTerminal.pi.__test.queueLate();
+const thirdTerminal = ctx("terminal", "main", "terminal-third");
+postTerminal.handlers.get("session_switch")?.({ reason: "resume", previousSessionFile: "/sessions/terminal-moved.jsonl" }, thirdTerminal);
+postTerminal.handlers.get("agent_start")?.({}, thirdTerminal);
+await Bun.sleep(20);
+await flush();
+if (globalThis.__calls.length !== afterRelease) throw new Error(`fresh import or late hook resurrected registration: ${JSON.stringify(globalThis.__calls)}`);
+console.log(`PASS: held old queue, direct shutdown handoff, stable-ID path transition and third-path terminal rejection, child vetoes, unique maximal terminal release, zero late publication, zero periodic reports`);
+MJS
+  cat >"$TMP_ROOT/fresh-child.mjs" <<'MJS'
+const fixturePath = process.argv[2];
+globalThis.__reportSeq = 1_700_000_000_000_000;
+globalThis.__calls = [];
+const handlers = new Map();
+const pi = { on(event, handler) { handlers.set(event, handler); return pi; } };
 const mod = await import(fixturePath);
-const register = mod.default;
-register(mockPi);
-globalThis.setInterval = origSetInterval;
-
-if (!heartbeatFn) {
-  console.error("FAIL: heartbeat setInterval(ms=15000) was never registered");
-  process.exit(1);
-}
-
-let idle = false;
-const rootSessionFile = "/tmp/root-session.jsonl";
-const rootSessionId = "root-session-id";
+mod.default(pi);
 const ctx = {
   hasUI: true,
-  isIdle: () => idle,
-  sessionManager: {
-    getSessionFile: () => rootSessionFile,
-    getSessionId: () => rootSessionId,
-    getBranch: () => [],
-  },
+  isIdle: () => false,
+  agentKind: "main",
+  sessionManager: { getSessionFile: () => "/sessions/fresh.jsonl", getSessionId: () => "fresh", getBranch: () => [] },
 };
-
-// Establish a genuinely active turn: session_start then agent_start, ctx
-// currently NOT idle (actively processing).
-handlers.get("session_start")?.({}, ctx);
-handlers.get("agent_start")?.({}, ctx);
-
-if (mockPi.__test.getAgentActive() !== true) {
-  console.error("FAIL: agentActive must be true immediately after agent_start");
-  process.exit(1);
-}
-
-// The cap-reported case: the turn is still open (no agent_end fired)
-// but the agent is waiting on a background watcher job (curl loop);
-// ctx.isIdle() reads true while waiting even though the turn is active.
-idle = true;
-
-// Two heartbeat ticks: simulated >15s of elapsed wall time while waiting.
-for (let tick = 1; tick <= 2; tick++) {
-  heartbeatFn();
-  if (mockPi.__test.getAgentActive() !== true) {
-    console.error(`FAIL: agentActive flipped to false on heartbeat tick ${tick} while the turn was still open and waiting on a background job`);
-    process.exit(1);
-  }
-  const log = mockPi.__test.getLog();
-  const last = log[log.length - 1];
-  if (!last || last.force !== true || last.agentActive !== true) {
-    console.error(`FAIL: heartbeat tick ${tick} did not force-publish a Working state; got ${JSON.stringify(last)}`);
-    process.exit(1);
-  }
-}
-
-console.log("PASS: agentActive stayed true (Working) across 2 heartbeat ticks while ctx.isIdle() read true during an open turn's background-job wait");
-process.exit(0);
+handlers.get("session_start")?.({ reason: "startup" }, ctx);
+await Promise.resolve();
+await Promise.resolve();
+if (!globalThis.__calls.some((call) => call.method === "pane.report_agent_session" && call.params?.seq > 1_700_000_000_000_000)) throw new Error(`fresh child process did not register with a timestamp-scale seq: ${JSON.stringify(globalThis.__calls)}`);
+console.log("PASS: fresh Bun child process registers");
 MJS
-
+  cat >"$TMP_ROOT/owned-switches.mjs" <<'MJS'
+const fixturePath = process.argv[2];
+globalThis.__calls = [];
+const handlers = new Map();
+const pi = { on(event, handler) { handlers.set(event, handler); return pi; } };
+const mod = await import(fixturePath);
+mod.default(pi);
+const ctx = (id) => ({
+  hasUI: true,
+  isIdle: () => false,
+  agentKind: "main",
+  sessionManager: { getSessionFile: () => `/sessions/${id}.jsonl`, getSessionId: () => id, getBranch: () => [] },
+});
+handlers.get("session_start")?.({ reason: "startup" }, ctx("old"));
+await Bun.sleep(100);
+let previousId = "old";
+for (const reason of ["new", "fork", "handoff", "resume"]) {
+  const before = globalThis.__calls.length;
+  let releaseHeld;
+  globalThis.__holdRequest = new Promise((resolve) => { releaseHeld = resolve; });
+  pi.__test.queueLate();
+  await Promise.resolve();
+  handlers.get("agent_start")?.({ reason: "resume" }, ctx(previousId));
+  const nextId = `switch-${reason}`;
+  handlers.get("session_switch")?.({ reason }, ctx(nextId));
+  releaseHeld();
+  globalThis.__holdRequest = undefined;
+  await Bun.sleep(30);
+  const dispatched = globalThis.__calls.slice(before);
+  if (dispatched.filter((call) => call.method === "pane.report_agent_session" && call.params?.session_start_source === reason).length !== 1) {
+    throw new Error(`owned ${reason} switch did not emit exactly one session report: ${JSON.stringify(dispatched)}`);
+  }
+  const oldGeneration = dispatched.filter((call) => call.params?.agent_session_path === `/sessions/${previousId}.jsonl`);
+  if (oldGeneration.some((call) => call.method === "pane.report_agent_session" && call.params?.session_start_source === "startup")) {
+    throw new Error(`queued ${previousId} agent-start report dispatched after ${reason}: ${JSON.stringify(dispatched)}`);
+  }
+  previousId = nextId;
+}
+console.log("PASS: owned new/fork/handoff/resume switches supersede IDs and suppress old queued generation");
+MJS
+  cat >"$TMP_ROOT/eventless-reload-switches.mjs" <<'MJS'
+const fixturePath = process.argv[2];
+globalThis.__calls = [];
+const register = async (suffix) => {
+  const handlers = new Map();
+  const pi = { on(event, handler) { handlers.set(event, handler); return pi; } };
+  const mod = await import(`${fixturePath}?eventless-${suffix}`);
+  mod.default(pi);
+  return { handlers };
+};
+const ctx = (id) => ({
+  hasUI: true,
+  isIdle: () => false,
+  agentKind: "main",
+  sessionManager: { getSessionFile: () => `/sessions/${id}.jsonl`, getSessionId: () => id, getBranch: () => [] },
+});
+let previousId = "eventless-old";
+const owner = await register("owner");
+owner.handlers.get("session_start")?.({ reason: "startup" }, ctx(previousId));
+await Bun.sleep(30);
+for (const reason of ["new", "fork", "handoff", "resume"]) {
+  const replacement = await register(reason);
+  const nextId = `eventless-${reason}`;
+  const before = globalThis.__calls.length;
+  replacement.handlers.get("session_switch")?.(
+    { reason, previousSessionFile: `/sessions/${previousId}.jsonl` },
+    ctx(nextId),
+  );
+  await Bun.sleep(30);
+  const reports = globalThis.__calls.slice(before).filter(
+    (call) =>
+      call.method === "pane.report_agent_session" &&
+      call.params?.session_start_source === reason &&
+      call.params?.agent_session_path === `/sessions/${nextId}.jsonl`,
+  );
+  if (reports.length !== 1) {
+    throw new Error(`eventless reload ${reason} did not supersede ${previousId}: ${JSON.stringify(globalThis.__calls)}`);
+  }
+  previousId = nextId;
+}
+console.log("PASS: eventless reloads supersede lineage-proven new/fork/handoff/resume session switches");
+MJS
   local out
   out=$(bun run "$harness" "$fixture" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "active turn waiting on a background job across the 15s heartbeat regressed: $out"
-  printf '%s' "$out" | grep -q "^PASS" || fail "runtime harness did not report PASS: $out"
-  pass "an active turn waiting on a background job stays Working across 2 heartbeat ticks (>15s) even though ctx.isIdle() reads true"
+  [ "$?" -eq 0 ] || fail "terminal fence runtime failed: $out"
+  printf '%s' "$out" | grep -q '^PASS:' || fail "terminal fence runtime did not report PASS: $out"
+  out=$(bun run "$TMP_ROOT/fresh-child.mjs" "$fixture" 2>&1)
+  [ "$?" -eq 0 ] || fail "fresh Bun child runtime failed: $out"
+  printf '%s' "$out" | grep -q '^PASS: fresh Bun child process registers$' || fail "fresh Bun child did not report registration: $out"
+  out=$(bun run "$TMP_ROOT/owned-switches.mjs" "$fixture" 2>&1)
+  [ "$?" -eq 0 ] || fail "owned session switches runtime failed: $out"
+  printf '%s' "$out" | grep -q '^PASS: owned new/fork/handoff/resume switches supersede IDs and suppress old queued generation$' || fail "owned session switches runtime did not report PASS: $out"
+  out=$(bun run "$TMP_ROOT/eventless-reload-switches.mjs" "$fixture" 2>&1)
+  [ "$?" -eq 0 ] || fail "eventless reload session switches runtime failed: $out"
+  printf '%s' "$out" | grep -q '^PASS: eventless reloads supersede lineage-proven new/fork/handoff/resume session switches$' || fail "eventless reload session switches did not report PASS: $out"
+  pass "session shutdown fences terminal tuples and queued work while current owners can switch to new, fork, handoff, or resume identities"
 }
-
-test_exact_session_root_claim_lifecycle() {
-  command -v bun >/dev/null 2>&1 \
-    || fail "bun is required for the exact-session root-claim regression"
-
-  local fixture="$TMP_ROOT/root-claim-runtime.ts"
-  local harness="$TMP_ROOT/root-claim-harness.mjs"
+test_deployed_integration_copy() {
+  command -v bun >/dev/null 2>&1 || fail "bun is required"
+  local fixture="$TMP_ROOT/deployed-v6.ts"
+  local harness="$TMP_ROOT/deployed-v6.mjs"
   write_pristine_fixture "$fixture"
-  "${PATCHER[@]}" --file "$fixture" || fail "apply for the exact-session root-claim fixture failed"
-
-  cat >"$TMP_ROOT/root-claim-headless-only.mjs" <<'MJS'
-const fixturePath = process.argv[2];
+  "${PATCHER[@]}" --check --file "$fixture"
+  [ "$?" -eq 1 ] || fail "deployed v6 copy unexpectedly passed --check before patch"
+  "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "deployed v6 copy patch failed"
+  "${PATCHER[@]}" --check --file "$fixture" || fail "deployed v6 copy failed --check after patch"
+  local before
+  before=$(cat "$fixture")
+  "${PATCHER[@]}" --file "$fixture" >/dev/null || fail "deployed v6 copy repeat patch failed"
+  [ "$(cat "$fixture")" = "$before" ] || fail "deployed v6 copy repeat patch changed output"
+  cat >"$harness" <<'MJS'
+const fixture = process.argv[2];
+globalThis.__calls = [];
 const handlers = new Map();
-const pi = { on(event, fn) { handlers.set(event, fn); return pi; } };
-const originalSetInterval = globalThis.setInterval;
-globalThis.setInterval = () => ({ unref() {} });
-const mod = await import(`${fixturePath}?headless-only`);
+const pi = {
+  on(name, handler) { handlers.set(name, handler); return pi; },
+  events: { on() {} },
+};
+const mod = await import(`${fixture}?deployed-copy`);
 mod.default(pi);
-globalThis.setInterval = originalSetInterval;
 const ctx = {
-  hasUI: false,
-  agentKind: "main",
+  hasUI: true,
   isIdle: () => false,
+  agentKind: "main",
   sessionManager: {
-    getSessionFile: () => "/sessions/headless-only.jsonl",
-    getSessionId: () => "headless-only",
+    getSessionFile: () => "/sessions/deployed.jsonl",
+    getSessionId: () => "deployed",
     getBranch: () => [],
   },
 };
 handlers.get("session_start")?.({ reason: "startup" }, ctx);
-const claim = globalThis[Symbol.for("herdr:omp:root-session-claim:v1")];
-if (claim !== undefined || pi.__test.getLog().length !== 0) {
-  console.error(`FAIL: fresh headless process claimed or published root state: ${JSON.stringify(claim)}`);
-  process.exit(1);
+await Bun.sleep(25);
+await handlers.get("session_shutdown")?.({ type: "session_shutdown" }, ctx);
+await Bun.sleep(25);
+const requests = globalThis.__calls;
+const methods = requests.map((request) => request.method);
+if (!methods.includes("pane.report_agent_session") || !methods.includes("pane.report_agent") || !methods.includes("pane.release_agent")) {
+  throw new Error(`compact deployed v6 fixture did not send real lifecycle methods: ${JSON.stringify(requests)}`);
 }
-console.log("PASS: fresh top-level headless process cannot claim root authority");
+const seqs = requests.map((request) => request.params?.seq);
+if (!seqs.every(Number.isSafeInteger) || !seqs.every((seq, index) => index === 0 || seq > seqs[index - 1])) {
+  throw new Error(`compact deployed v6 fixture did not send monotonic params.seq: ${JSON.stringify(requests)}`);
+}
+console.log("PASS: compact deployed v6 fixture imports and sends real monotonic lifecycle methods");
 MJS
-  local headless_out
-  headless_out=$(bun run "$TMP_ROOT/root-claim-headless-only.mjs" "$fixture" 2>&1)
-  local headless_rc=$?
-  [ "$headless_rc" -eq 0 ] || fail "fresh headless root-claim veto regressed: $headless_out"
-  printf '%s' "$headless_out" | grep -q "^PASS" || fail "fresh headless harness did not report PASS: $headless_out"
-
-  cat >"$harness" <<'MJS'
-const fixturePath = process.argv[2];
-const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
-
-function exactClaim() {
-  return globalThis[claimKey];
-}
-
-function assert(condition, message) {
-  if (!condition) {
-    console.error(`FAIL: ${message}`);
-    process.exit(1);
-  }
-}
-
-function ctx(file, id, { hasUI = true, agentKind = "main", sessionInit = false, idle = false } = {}) {
-  return {
-    hasUI,
-    agentKind,
-    isIdle: () => idle,
-    sessionManager: {
-      getSessionFile: () => file,
-      getSessionId: () => id,
-      getBranch: () => sessionInit ? [{ type: "session_init" }] : [],
-    },
-  };
-}
-
-let runtimeSerial = 0;
-async function loadRuntime() {
-  const handlers = new Map();
-  let heartbeat = null;
-  const pi = {
-    on(event, fn) {
-      handlers.set(event, fn);
-      return pi;
-    },
-  };
-  const originalSetInterval = globalThis.setInterval;
-  globalThis.setInterval = (fn, ms) => {
-    if (ms === 15000) heartbeat = fn;
-    return { unref() {} };
-  };
-  const mod = await import(`${fixturePath}?runtime=${++runtimeSerial}`);
-  mod.default(pi);
-  globalThis.setInterval = originalSetInterval;
-  return { handlers, pi, heartbeat };
-}
-
-delete globalThis[claimKey];
-
-// A fresh interactive root establishes the exact file+id tuple.
-const root = await loadRuntime();
-const rootCtx = ctx("/sessions/root.jsonl", "root-id");
-root.handlers.get("session_start")?.({ reason: "startup" }, rootCtx);
-assert(
-  JSON.stringify(exactClaim()) === JSON.stringify({
-    rootSessionFile: "/sessions/root.jsonl",
-    rootSessionId: "root-id",
-  }),
-  `fresh interactive root did not claim the exact tuple: ${JSON.stringify(exactClaim())}`,
-);
-assert(root.pi.__test.getLog().length > 0, "fresh interactive root did not publish");
-
-// A top-level but headless session has no exact authority to claim the pane.
-const headless = await loadRuntime();
-headless.handlers.get("session_start")?.(
-  { reason: "startup" },
-  ctx("/sessions/headless.jsonl", "headless", { hasUI: false }),
-);
-assert(exactClaim().rootSessionId === "root-id", "headless session overwrote the root claim");
-assert(headless.pi.__test.getLog().length === 0, "headless session published without an exact claim");
-
-// Reloaded extension modules share only the process-global exact claim. Missing
-// or explicitly false hasUI must not matter when the live tuple still matches.
-let reloadIndex = 0;
-for (const hasUI of [undefined, false, undefined, false]) {
-  const reloaded = await loadRuntime();
-  const reloadCtx = ctx("/sessions/root.jsonl", "root-id", { hasUI });
-  if (reloadIndex < 2) {
-    reloaded.handlers.get("session_start")?.({ reason: "reload" }, reloadCtx);
-  } else {
-    reloaded.handlers.get("session_switch")?.(
-      { reason: "resume", previousSessionFile: "/sessions/root.jsonl" },
-      reloadCtx,
-    );
-  }
-  reloadIndex += 1;
-  assert(reloaded.pi.__test.getLog().length > 0, `same-session reload with hasUI=${hasUI} lost root publication`);
-  assert(exactClaim().rootSessionId === "root-id", "same-session reload mutated the claim");
-  reloaded.heartbeat?.();
-  assert(reloaded.pi.__test.getLog().length > 1, "reloaded heartbeat did not preserve publication");
-  if (reloadIndex === 1) {
-    const oldOwnerPublishCount = root.pi.__test.getLog().length;
-    root.heartbeat?.();
-    assert(
-      root.pi.__test.getLog().length === oldOwnerPublishCount,
-      "old reporter heartbeat published after reload ownership transfer",
-    );
-    assert(
-      exactClaim().rootSessionFile === "/sessions/root.jsonl" &&
-        exactClaim().rootSessionId === "root-id",
-      "old reporter heartbeat changed the claim after reload ownership transfer",
-    );
-  }
-}
-
-// An interactive replacement may move authority, but only for the approved
-// startup/new/resume/fork/handoff reasons and only to its exact tuple.
-let previousFile = "/sessions/root.jsonl";
-for (const reason of ["fork", "new", "resume"]) {
-  const replacement = await loadRuntime();
-  const replacementFile = `/sessions/${reason}.jsonl`;
-  const replacementId = `${reason}-id`;
-  replacement.handlers.get("session_start")?.(
-    { reason, previousSessionFile: previousFile },
-    ctx(replacementFile, replacementId),
-  );
-
-  assert(
-    exactClaim().rootSessionFile === replacementFile && exactClaim().rootSessionId === replacementId,
-    `interactive ${reason} did not replace the exact root claim`,
-  );
-  previousFile = replacementFile;
-}
-// OMP's current root handoff arrives as session_switch(reason=handoff) with a
-// new session ID. It must be an allowed lifecycle takeover.
-const handoff = await loadRuntime();
-const handoffFile = "/sessions/handoff.jsonl";
-const handoffId = "handoff-id";
-handoff.handlers.get("session_switch")?.(
-  { reason: "handoff", previousSessionFile: previousFile },
-  ctx(handoffFile, handoffId),
-);
-assert(
-  exactClaim().rootSessionFile === handoffFile &&
-    exactClaim().rootSessionId === handoffId,
-  `handoff did not replace the root claim: ${JSON.stringify(exactClaim())}`,
-);
-assert(handoff.pi.__test.getLog().length > 0, "handoff lifecycle did not publish");
-previousFile = handoffFile;
-
-const established = { ...exactClaim() };
-
-// Both child signals are independent hard vetoes. Neither an in-process task
-// session nor an ACP/subagent session may publish or overwrite pane authority.
-const sessionInitChild = await loadRuntime();
-sessionInitChild.handlers.get("session_start")?.(
-  { reason: "startup" },
-  ctx("/sessions/task-child.jsonl", "task-child", { sessionInit: true }),
-);
-assert(JSON.stringify(exactClaim()) === JSON.stringify(established), "session_init child overwrote the root claim");
-assert(sessionInitChild.pi.__test.getLog().length === 0, "session_init child published root state");
-
-const agentKindChild = await loadRuntime();
-agentKindChild.handlers.get("session_start")?.(
-  { reason: "startup", agentKind: "sub" },
-  ctx("/sessions/acp-child.jsonl", "acp-child", { agentKind: "sub" }),
-);
-assert(JSON.stringify(exactClaim()) === JSON.stringify(established), "agentKind=sub child overwrote the root claim");
-assert(agentKindChild.pi.__test.getLog().length === 0, "agentKind=sub child published root state");
-
-// A reload with a different tuple has no authority even when hasUI is true.
-const unclaimedReload = await loadRuntime();
-unclaimedReload.handlers.get("session_start")?.(
-  { reason: "reload" },
-  ctx("/sessions/unclaimed-reload.jsonl", "unclaimed-reload"),
-);
-assert(JSON.stringify(exactClaim()) === JSON.stringify(established), "reload minted a replacement claim");
-assert(unclaimedReload.pi.__test.getLog().length === 0, "unclaimed reload published root state");
-
-console.log("PASS: exact-session process-global root claim survived reloads, replaced only on approved interactive starts, and vetoed child/headless sessions");
-MJS
-
   local out
   out=$(bun run "$harness" "$fixture" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "exact-session root-claim lifecycle regressed: $out"
-  printf '%s' "$out" | grep -q "^PASS" || fail "exact-session runtime harness did not report PASS: $out"
-
-  cat >"$TMP_ROOT/root-claim-fresh-process.mjs" <<'MJS'
-const fixturePath = process.argv[2];
-const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
-function assert(condition, message) {
-  if (!condition) {
-    console.error(`FAIL: ${message}`);
-    process.exit(1);
-  }
-}
-
-assert(globalThis[claimKey] === undefined, "fresh process began with a stale root claim");
-process.env.HERDR_PANE_ID = "w1:p1";
-process.env.HERDR_SOCKET_PATH = "/tmp/herdr.sock";
-const handlers = new Map();
-const pi = { on(event, fn) { handlers.set(event, fn); return pi; } };
-const originalSetInterval = globalThis.setInterval;
-globalThis.setInterval = () => ({ unref() {} });
-// OMP's interactive --resume emits this event after an earlier extension
-// module load in the same fresh process.
-await import(`${fixturePath}?fresh-process-prime`);
-assert(globalThis[claimKey] === undefined, "module priming minted root authority");
-const mod = await import(`${fixturePath}?fresh-process-resume`);
-mod.default(pi);
-globalThis.setInterval = originalSetInterval;
-
-const rootSessionFile = "/sessions/fresh-resumed-root.jsonl";
-const rootSessionId = "fresh-resumed-root-id";
-function makeCtx(
-  file,
-  id,
-  { hasUI = true, agentKind = undefined, branch = [] } = {},
-) {
-  return {
-    hasUI,
-    ...(agentKind === undefined ? {} : { agentKind }),
-    isIdle: () => false,
-    sessionManager: {
-      getSessionFile: () => file,
-      getSessionId: () => id,
-      getBranch: () => branch,
-    },
-  };
+  [ "$?" -eq 0 ] || fail "compact deployed v6 runtime failed: $out"
+  printf '%s' "$out" | grep -q '^PASS: compact deployed v6 fixture imports and sends real monotonic lifecycle methods$' || fail "compact deployed v6 runtime did not report PASS: $out"
+  pass "compact deployed v6 fixture patches, checks, imports, and sends real methods"
 }
 
 
-const ctx = makeCtx(rootSessionFile, rootSessionId, {
-  branch: [{ type: "model_change" }],
-});
-handlers.get("session_start")?.({ type: "session_start" }, ctx);
-assert(
-  JSON.stringify(globalThis[claimKey]) === JSON.stringify({
-    rootSessionFile,
-    rootSessionId,
-  }),
-  `fresh-process root resume did not reacquire the exact claim: ${JSON.stringify(globalThis[claimKey])}`,
-);
-assert(pi.__test.getLog().length > 0, "fresh-process root resume did not publish");
-assert(
-  pi.__test.getCalls().includes("reportSession:startup"),
-  "fresh-process root startup did not register the resumed root session",
-);
-handlers.get("agent_start")?.({}, ctx);
-assert(
-  pi.__test.getAgentActive() === true,
-  "fresh-process root resume did not publish Working after agent_start",
-);
-console.log("PASS: fresh-process same-session root resume claimed and published");
-MJS
-  local fresh_out
-  fresh_out=$(bun run "$TMP_ROOT/root-claim-fresh-process.mjs" "$fixture" 2>&1)
-  local fresh_rc=$?
-  [ "$fresh_rc" -eq 0 ] || fail "fresh-process same-session resume regressed: $fresh_out"
-  printf '%s' "$fresh_out" | grep -q "^PASS" || fail "fresh-process resume harness did not report PASS: $fresh_out"
-  pass "exact-session root claim is process-global, reload-safe, replaceable, and child-safe"
-}
-
-test_root_move_and_id_only_claims() {
-  command -v bun >/dev/null 2>&1 \
-    || fail "bun is required for root move and in-memory session regressions"
-
-  local fixture="$TMP_ROOT/root-identity-runtime.ts"
-  local harness="$TMP_ROOT/root-identity-harness.mjs"
-  write_pristine_fixture "$fixture"
-  "${PATCHER[@]}" --file "$fixture" || fail "apply for root identity regression fixture failed"
-
-  cat >"$harness" <<'MJS'
-const fixturePath = process.argv[2];
-const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
-const reporterLoadKey = Symbol.for("herdr:omp:root-session-reporter-loaded:v1");
-
-function assert(condition, message) {
-  if (!condition) {
-    console.error(`FAIL: ${message}`);
-    process.exit(1);
-  }
-}
-
-function ctx(file, id, { hasUI = true, agentKind = "main", sessionInit = false } = {}) {
-  const getFile = typeof file === "function" ? file : () => file;
-  return {
-    hasUI,
-    agentKind,
-    isIdle: () => false,
-    sessionManager: {
-      getSessionFile: getFile,
-      getSessionId: () => id,
-      getBranch: () => sessionInit ? [{ type: "session_init" }] : [],
-    },
-  };
-}
-
-let serial = 0;
-async function loadRuntime() {
-  const handlers = new Map();
-  let heartbeat = null;
-  const pi = {
-    on(event, fn) {
-      handlers.set(event, fn);
-      return pi;
-    },
-  };
-  const originalSetInterval = globalThis.setInterval;
-  globalThis.setInterval = (fn, ms) => {
-    if (ms === 15000) heartbeat = fn;
-    return { unref() {} };
-  };
-  const mod = await import(`${fixturePath}?identity=${++serial}`);
-  mod.default(pi);
-  globalThis.setInterval = originalSetInterval;
-  return { handlers, pi, heartbeat };
-}
-
-delete globalThis[claimKey];
-delete globalThis[reporterLoadKey];
-
-// The root remains the same session when its persisted file moves. The
-// resumed context deliberately lacks hasUI, so only the retained session ID
-// can preserve authority.
-const root = await loadRuntime();
-const oldFile = "/sessions/root-before-move.jsonl";
-const stableId = "stable-root-id";
-const rootCtx = ctx(oldFile, stableId);
-root.handlers.get("session_start")?.({ reason: "startup" }, rootCtx);
-assert(root.pi.__test.getLog().length > 0, "root did not publish before its file moved");
-
-const moved = await loadRuntime();
-const newFile = "/sessions/root-after-move.jsonl";
-let movedFile = newFile;
-const movedCtx = ctx(() => movedFile, stableId, { hasUI: false });
-moved.handlers.get("session_switch")?.(
-  { reason: "resume", previousSessionFile: oldFile },
-  movedCtx,
-);
-assert(moved.pi.__test.getLog().length > 0, "moved root lost publication with stable session ID");
-assert(
-  globalThis[claimKey]?.rootSessionFile === newFile &&
-    globalThis[claimKey]?.rootSessionId === stableId,
-  `moved root did not refresh the claimed session file: ${JSON.stringify(globalThis[claimKey])}`,
-);
-
-// SessionManager.moveTo mutates the live session file without a lifecycle
-// event. The current module owns the process claim, so its heartbeat may
-// perform the stable-ID transition.
-const movedToFile = "/sessions/root-after-moveto.jsonl";
-movedFile = movedToFile;
-moved.heartbeat?.();
-assert(
-  globalThis[claimKey]?.rootSessionFile === movedToFile &&
-    globalThis[claimKey]?.rootSessionId === stableId,
-  `same-module moveTo did not update the claim: ${JSON.stringify(globalThis[claimKey])}`,
-);
-
-// The old module still owns an interval and its latest context points at the
-// old file. Stable-ID matching is forbidden here, so it cannot reclaim the
-// moved root or pass publishState's validation guard.
-const oldHeartbeatPublishCount = root.pi.__test.getLog().length;
-root.heartbeat?.();
-assert(
-  globalThis[claimKey]?.rootSessionFile === movedToFile &&
-    globalThis[claimKey]?.rootSessionId === stableId,
-  `stale old heartbeat reclaimed the moved root: ${JSON.stringify(globalThis[claimKey])}`,
-);
-assert(
-  root.pi.__test.getLog().length === oldHeartbeatPublishCount,
-  "stale old heartbeat published after the root file moved",
-);
-
-// `omp --no-session` is an interactive in-memory session with an ID but no
-// persisted file. It must establish authority and retain it across reload.
-delete globalThis[claimKey];
-delete globalThis[reporterLoadKey];
-const memory = await loadRuntime();
-const memoryId = "in-memory-root-id";
-const memoryCtx = ctx(undefined, memoryId);
-memory.handlers.get("session_start")?.({ reason: "startup" }, memoryCtx);
-assert(memory.pi.__test.getLog().length > 0, "id-only interactive session did not publish");
-assert(
-  globalThis[claimKey]?.rootSessionId === memoryId &&
-    globalThis[claimKey]?.rootSessionFile === undefined,
-  `id-only session did not establish an ID-only claim: ${JSON.stringify(globalThis[claimKey])}`,
-);
-
-const memoryReload = await loadRuntime();
-memoryReload.handlers.get("session_start")?.(
-  { reason: "resume" },
-  ctx(undefined, memoryId, { hasUI: false }),
-);
-assert(memoryReload.pi.__test.getLog().length > 0, "id-only root lost authority after reload");
-assert(
-  globalThis[claimKey]?.rootSessionId === memoryId &&
-    globalThis[claimKey]?.rootSessionFile === undefined,
-  `id-only claim changed during reload: ${JSON.stringify(globalThis[claimKey])}`,
-);
-
-console.log("PASS: stable-ID handoff and same-module moveTo survived, while the old interval was blocked and an id-only claim was retained");
-MJS
-
-  local out
-  out=$(bun run "$harness" "$fixture" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "root move or id-only session regression: $out"
-  printf '%s' "$out" | grep -q "^PASS" || fail "root identity harness did not report PASS: $out"
-  pass "stable-ID handoff and same-module moveTo survive, stale intervals are blocked, and --no-session claims are retained"
-}
-
-test_live_resumed_root_heartbeat_proof() {
-  command -v bun >/dev/null 2>&1 \
-    || fail "bun is required for the live resumed-root heartbeat proof"
-
-  local fixture="$TMP_ROOT/live-root-runtime.ts"
-  local harness="$TMP_ROOT/live-root-harness.mjs"
-  write_pristine_fixture "$fixture"
-  "${PATCHER[@]}" --file "$fixture" || fail "apply for the live resumed-root proof failed"
-
-  cat >"$harness" <<'MJS'
-const fixturePath = process.argv[2];
-const rootSessionFile = "/sessions/live-resumed-root.jsonl";
-const rootSessionId = "live-resumed-root-id";
-const reason = "resume";
-let idle = false;
-
-function assert(condition, message) {
-  if (!condition) {
-    console.error(`FAIL: ${message}`);
-    process.exit(1);
-  }
-}
-
-function makeRuntime(label) {
-  const handlers = new Map();
-  const pi = {
-    on(event, fn) {
-      handlers.set(event, fn);
-      return pi;
-    },
-  };
-  return import(`${fixturePath}?live=${label}`).then((mod) => {
-    mod.default(pi);
-    return { handlers, pi };
-  });
-}
-
-function makeCtx(hasUI) {
-  return {
-    hasUI,
-    agentKind: "main",
-    isIdle: () => idle,
-    sessionManager: {
-      getSessionFile: () => rootSessionFile,
-      getSessionId: () => rootSessionId,
-      getBranch: () => [],
-    },
-  };
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-const root = await makeRuntime("root");
-root.handlers.get("session_start")?.({ reason: "startup" }, makeCtx(true));
-
-// Fresh module instance, same OMP process: only the exact process-global claim
-// survives. The resumed session deliberately lacks hasUI authority.
-const resumed = await makeRuntime("resumed");
-const resumedCtx = makeCtx(false);
-resumed.handlers.get("session_start")?.({ reason }, resumedCtx);
-resumed.handlers.get("agent_start")?.({}, resumedCtx);
-resumed.handlers.get("tool_execution_start")?.({ toolName: "bash" }, resumedCtx);
-idle = true;
-
-const proof = [];
-function sample(label, elapsedSeconds) {
-  const log = resumed.pi.__test.getLog();
-  const latest = log[log.length - 1];
-  const claim = globalThis[Symbol.for("herdr:omp:root-session-claim:v1")];
-  const record = {
-    sample: label,
-    elapsed_seconds: elapsedSeconds,
-    "session_start.reason": reason,
-    rootSessionFile: claim?.rootSessionFile,
-    rootSessionId: claim?.rootSessionId,
-    agent_session: rootSessionFile,
-    agent_status: latest?.agentActive ? "working" : "idle",
-    focused: true,
-    publish_count: log.length,
-  };
-  assert(record.agent_status !== "idle", `${label} reported Idle during foreground tool execution`);
-  assert(record.rootSessionFile === rootSessionFile, `${label} lost the exact root session file`);
-  assert(record.rootSessionId === rootSessionId, `${label} lost the exact root session id`);
-  proof.push(record);
-}
-
-sample("within-one-heartbeat", 0);
-let previousPublishCount = resumed.pi.__test.getLog().length;
-for (let heartbeat = 1; heartbeat <= 3; heartbeat += 1) {
-  await sleep(15050);
-  sample(`heartbeat-${heartbeat}`, heartbeat * 15);
-  const publishCount = resumed.pi.__test.getLog().length;
-  assert(publishCount > previousPublishCount, `heartbeat-${heartbeat} did not force-publish`);
-  previousPublishCount = publishCount;
-}
-
-console.log(`LIVE_PROOF ${JSON.stringify(proof)}`);
-console.log("PASS: resumed root reached non-Idle within one heartbeat and remained non-Idle across three 15-second samples");
-MJS
-
-  local out
-  out=$(bun run "$harness" "$fixture" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "live resumed-root heartbeat proof failed: $out"
-  printf '%s\n' "$out"
-  printf '%s' "$out" | grep -q "^LIVE_PROOF " || fail "live proof did not capture the required root/status/focus fields"
-  printf '%s' "$out" | grep -q "^PASS" || fail "live resumed-root harness did not report PASS"
-  pass "live resumed root stays non-Idle through three real 15-second heartbeat samples"
-}
-
-# The live fleet failure this pins: fm-reload replaces the extension module
-# WITHOUT emitting any session lifecycle event. The v4 exact-claim model left
-# the fresh module permanently unable to own the claim (heartbeats have no
-# owner-transfer authority and the owner token died with the old module), so
-# the pane's herdr agent label went stale forever (agent=None/status=unknown)
-# while omp kept running. The v5 lease lets the exact same session tuple seize
-# a claim whose owner stopped refreshing its liveness lease - and nobody else.
-test_eventless_reload_recovers_via_expired_lease() {
-  command -v bun >/dev/null 2>&1 \
-    || fail "bun is required for the eventless-reload lease regression"
-
-  local fixture="$TMP_ROOT/lease-runtime.ts"
-  local harness="$TMP_ROOT/lease-harness.mjs"
-  write_pristine_fixture "$fixture"
-  "${PATCHER[@]}" --file "$fixture" || fail "apply for the eventless-reload lease fixture failed"
-
-  cat >"$harness" <<'MJS'
-const fixturePath = process.argv[2];
-const claimKey = Symbol.for("herdr:omp:root-session-claim:v1");
-const ownerKey = Symbol.for("herdr:omp:root-session-claim-owner:v1");
-const leaseKey = Symbol.for("herdr:omp:root-session-claim-lease:v1");
-const leaseTtlMs = 15000 * 3 + 1000;
-
-function assert(condition, message) {
-  if (!condition) {
-    console.error(`FAIL: ${message}`);
-    process.exit(1);
-  }
-}
-
-function ctx(file, id, { sessionInit = false, idle = false } = {}) {
-  return {
-    hasUI: true,
-    agentKind: "main",
-    isIdle: () => idle,
-    sessionManager: {
-      getSessionFile: () => file,
-      getSessionId: () => id,
-      getBranch: () => sessionInit ? [{ type: "session_init" }] : [],
-    },
-  };
-}
-
-let serial = 0;
-async function loadRuntime() {
-  const handlers = new Map();
-  let heartbeat = null;
-  const pi = {
-    on(event, fn) {
-      handlers.set(event, fn);
-      return pi;
-    },
-  };
-  const originalSetInterval = globalThis.setInterval;
-  globalThis.setInterval = (fn, ms) => {
-    if (ms === 15000) heartbeat = fn;
-    return { unref() {} };
-  };
-  const mod = await import(`${fixturePath}?lease=${++serial}`);
-  mod.default(pi);
-  globalThis.setInterval = originalSetInterval;
-  return { handlers, pi, heartbeat };
-}
-
-delete globalThis[claimKey];
-delete globalThis[ownerKey];
-delete globalThis[leaseKey];
-
-const rootFile = "/sessions/lease-root.jsonl";
-const rootId = "lease-root-id";
-
-// The interactive root claims normally and publishes.
-const root = await loadRuntime();
-root.handlers.get("session_start")?.({ reason: "startup" }, ctx(rootFile, rootId));
-assert(root.pi.__test.getLog().length > 0, "root did not publish at startup");
-
-// fm-reload: a fresh module replaces the old one with NO lifecycle event.
-// Only a tool hook stashes ctx into the new module.
-const reloaded = await loadRuntime();
-reloaded.handlers.get("tool_execution_start")?.({ toolName: "bash" }, ctx(rootFile, rootId));
-
-// While the old owner's lease is still live, the fresh module must stay out.
-reloaded.heartbeat?.();
-assert(reloaded.pi.__test.getLog().length === 0, "fresh module published while the owner lease was still live");
-assert(reloaded.pi.__test.getCalls().length === 0, "fresh module registered while the owner lease was still live");
-
-// The old module is dead: its lease expires with no refresh.
-globalThis[leaseKey] = Date.now() - leaseTtlMs - 1;
-
-// A child context sharing the pane must still never seize the expired claim.
-const child = await loadRuntime();
-child.handlers.get("tool_execution_start")?.({ toolName: "bash" }, ctx(rootFile, rootId, { sessionInit: true }));
-child.heartbeat?.();
-assert(child.pi.__test.getLog().length === 0, "child context seized an expired lease");
-
-// A different session tuple must not seize it either.
-const stranger = await loadRuntime();
-stranger.handlers.get("tool_execution_start")?.({ toolName: "bash" }, ctx("/sessions/other.jsonl", "other-id"));
-stranger.heartbeat?.();
-assert(stranger.pi.__test.getLog().length === 0, "a different session tuple seized an expired lease");
-
-// The exact-tuple successor recovers on its next heartbeat tick: it re-registers
-// the session and force-publishes, with no lifecycle event ever firing.
-reloaded.heartbeat?.();
-assert(
-  reloaded.pi.__test.getCalls().includes("reportSession:fm-reload-resync"),
-  `successor did not re-register the session: ${JSON.stringify(reloaded.pi.__test.getCalls())}`,
-);
-assert(reloaded.pi.__test.getLog().length > 0, "successor did not force-publish after seizing the expired lease");
-
-// Ownership transferred: the takeover re-stamped the lease, so the old module
-// (if some interval survived) is blocked again.
-assert(typeof globalThis[leaseKey] === "number" && Date.now() - globalThis[leaseKey] < leaseTtlMs, "takeover did not refresh the lease");
-const rootPublishCount = root.pi.__test.getLog().length;
-root.heartbeat?.();
-assert(root.pi.__test.getLog().length === rootPublishCount, "the usurped old module still published after the lease takeover");
-
-console.log("PASS: an eventless reload recovers publication via the expired lease, while live owners, children, and foreign tuples stay blocked");
-MJS
-
-  local out
-  out=$(bun run "$harness" "$fixture" 2>&1)
-  local rc=$?
-  [ "$rc" -eq 0 ] || fail "eventless-reload lease recovery regressed: $out"
-  printf '%s' "$out" | grep -q "^PASS" || fail "lease harness did not report PASS: $out"
-  pass "an eventless extension reload recovers herdr publication once the dead owner's lease expires"
-}
-
-test_pristine_check_reports_unpatched
-test_apply_enforces_invariant
-test_patch_check_requires_publish_guard_at_publish_state
-test_apply_is_idempotent
-test_session_shutdown_releases_without_reason_and_upgrades_old_gate
-test_upgrade_from_prior_buggy_heartbeat_converges
-test_upgrade_from_v3_resume_gate_converges
-test_upgrade_from_actual_parent_7a20f3d
-test_missing_target_skips_cleanly
-test_active_turn_survives_background_job_wait_across_heartbeat
-test_exact_session_root_claim_lifecycle
-test_live_resumed_root_heartbeat_proof
-test_root_move_and_id_only_claims
-test_eventless_reload_recovers_via_expired_lease
+test_apply_and_idempotence
+test_unsupported_versions_and_shapes_fail_closed
+test_terminal_fence_runtime
+test_deployed_integration_copy
+test_native_v7_is_healthy_noop
