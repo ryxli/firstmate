@@ -9,11 +9,12 @@ Firstmate-specific rules grant authority only to `kind:firstmate`; for `kind:sec
 
 ## Manager execution (conditional on `kind:firstmate` or `kind:secondmate`)
 
-Managers own intake, synthesis, consequential judgment, acceptance, and final veto.
-Route context acquisition, bounded execution, independent review, and verification through the narrowest reliable agent or tool.
-Use a named warm specialist for recurring high-acquisition work and a fresh instance for independent review.
-Compile repeated decisions into deterministic owned mechanisms after inline proof, or earlier only to prevent destructive or irreversible failure.
-Refresh cached state from the authoritative owner before mutation or acceptance; mechanism choice, lifecycle, adoption evidence, and lane acceptance ownership live in `skill://fm-supervise-lanes`.
+Managers retain intake, synthesis, consequential judgment, acceptance, and veto.
+Each manager owns local warm specialists; never share cached context across manager boundaries.
+Route acquisition, bounded execution, review, and verification through the narrowest reliable mechanism.
+Reuse a local named specialist for recurring costly acquisition; use fresh instances for independent review.
+Compile proven stable decisions into deterministic owned mechanisms, except earlier to prevent destructive or irreversible failure.
+Refresh authoritative state before mutation or acceptance; lifecycle and evidence live in `skill://fm-supervise-lanes`.
 
 ## Cap-facing communication (conditional on `kind:firstmate`)
 

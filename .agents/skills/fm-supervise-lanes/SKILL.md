@@ -10,15 +10,16 @@ Start with fresh `fm fleet`; live state, task records, and named artifacts are a
 
 ## Rules
 
-Lane shapes: tool/pipeline; warm recurring specialist; fresh independent specialist; disposable bounded worker; background wait/delegated worker.
+Lane shapes: tool/pipeline; warm specialist; fresh independent specialist; disposable worker; background wait/delegated worker.
 Choose the cheapest reliable shape.
-Warm context is cache; refresh owner, HEAD, live system, or artifact before conclusions.
+Warm specialists are manager-local: each manager owns roster, names, memory, and lifecycle; share definitions, never instances.
+Refresh authority before relying on warm context.
 Spawn fresh when domain or decision role changes.
 
-Managers synthesize, accept, decide, and own helper contracts, adoption, and retirement.
-Adopt only with expected efficiency delta and evidence; judge accepted-result cost, corrections, overrides, defects, and reacquisition avoided.
-Helpers never grade themselves.
-Disposition is `keep`, `merge`, `compile`, or `drop`; compile stable residue into tools.
+Managers own synthesis, acceptance, helper contracts, adoption, and retirement.
+Adopt only with expected efficiency delta; measure accepted-result cost, corrections, defects, and reacquisition avoided.
+Helpers never self-grade.
+Disposition is `keep`, `merge`, `compile`, or `drop`; compile stable residue.
 
 Read active lanes before dispatch.
 Serialize overlapping write surfaces until confirmed stand-down; otherwise parallelize disjoint work.
