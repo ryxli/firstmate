@@ -735,32 +735,64 @@ describe("fm start admission failures", () => {
 });
 
 describe("fm-start-static extension", () => {
-	it("emits one visible custom message without triggering a turn when static context is present", () => {
+	it("names an auto-titled Firstmate session and emits one visible startup message", async () => {
 		const sent: { message: { customType: string; content: string; display: boolean }; options: { triggerTurn: boolean } }[] = [];
-		const emitted = emitFmStartStatic({ sendMessage: (message, options) => sent.push({ message, options }) }, { FM_START_STATIC_CONTEXT: "STATIC-BYTES" });
+		const names: string[] = [];
+		const emitted = await emitFmStartStatic(
+			{
+				sendMessage: (message, options) => sent.push({ message, options }),
+				setSessionName: async name => {
+					names.push(name);
+				},
+			},
+			{ sessionManager: { getHeader: () => ({ titleSource: "auto" }) } },
+			{ FM_START_STATIC_CONTEXT: "STATIC-BYTES" },
+		);
 		expect(emitted).toBe(true);
+		expect(names).toEqual(["Firstmate"]);
 		expect(sent).toEqual([{ message: { customType: "fm-start-static", content: "STATIC-BYTES", display: true }, options: { triggerTurn: false } }]);
 	});
 
-	it("session_start emits absent static context as no-op", () => {
-		const handlers = new Map<string, () => void>();
+	it("preserves an explicitly named session", async () => {
+		const names: string[] = [];
+		const emitted = await emitFmStartStatic(
+			{
+				sendMessage() {},
+				setSessionName: async name => {
+					names.push(name);
+				},
+			},
+			{ sessionManager: { getHeader: () => ({ titleSource: "user" }) } },
+			{ FM_START_STATIC_CONTEXT: "STATIC-BYTES" },
+		);
+		expect(emitted).toBe(true);
+		expect(names).toEqual([]);
+	});
+
+	it("session_start leaves an absent static context as a no-op", async () => {
+		const handlers = new Map<string, () => Promise<void> | void>();
 		const sent: unknown[] = [];
+		const names: string[] = [];
 		const previous = process.env.FM_START_STATIC_CONTEXT;
 		delete process.env.FM_START_STATIC_CONTEXT;
 		try {
 			fmStartStatic({
 				on(event, handler) {
-					handlers.set(event, () => handler({}, {}));
+					handlers.set(event, () => handler({}, { sessionManager: { getHeader: () => undefined } }));
 				},
 				sendMessage(message, options) {
 					sent.push({ message, options });
 				},
+				async setSessionName(name) {
+					names.push(name);
+				},
 			});
-			handlers.get("session_start")?.();
+			await handlers.get("session_start")?.();
 		} finally {
 			if (previous === undefined) delete process.env.FM_START_STATIC_CONTEXT;
 			else process.env.FM_START_STATIC_CONTEXT = previous;
 		}
 		expect(sent).toEqual([]);
+		expect(names).toEqual([]);
 	});
 });
