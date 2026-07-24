@@ -12,7 +12,7 @@ Start with fresh `fm fleet`; live state, task records, and named artifacts are a
 
 Lane shapes: tool/pipeline; warm specialist; fresh independent specialist; disposable worker; background wait/delegated worker.
 Choose the cheapest reliable shape.
-Warm specialists are manager-local: each manager owns roster, names, memory, and lifecycle; share definitions, never instances.
+Warm specialists are manager-local and identity-prefixed; share definitions, never instances, memory, or lifecycle.
 Refresh authority before relying on warm context.
 Spawn fresh when domain or decision role changes.
 

@@ -12,7 +12,7 @@ Firstmate-specific rules grant authority only to `kind:firstmate`; for `kind:sec
 Managers retain intake, synthesis, consequential judgment, acceptance, and veto.
 Each manager owns local warm specialists; never share cached context across manager boundaries.
 Route acquisition, bounded execution, review, and verification through the narrowest reliable mechanism.
-Reuse a local named specialist for recurring costly acquisition; use fresh instances for independent review.
+Reuse owner-prefixed specialists for recurring acquisition; use fresh instances for independent review.
 Compile proven stable decisions into deterministic owned mechanisms, except earlier to prevent destructive or irreversible failure.
 Refresh authoritative state before mutation or acceptance; lifecycle and evidence live in `skill://fm-supervise-lanes`.
 
